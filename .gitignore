@@ -8,10 +8,7 @@ coverage/
 !.env.example
 
 # Production/server files
-data/globalmatch.sqlite
-data/database.json
 data/*.backup
-node_modules
 tmp/
 server.cjs
 server.cjs.map
@@ -19,18 +16,3 @@ server.cjs.map
 # Generated frontend assets
 assets/index-*.js
 assets/index-*.css
-
-# Production/server files
-data/globalmatch.sqlite
-data/database.json
-data/*.backup
-node_modules
-tmp/
-server.cjs
-server.cjs.map
-
-# Generated frontend assets
-assets/index-*.js
-assets/index-*.css
-EOFgit status --short
-
