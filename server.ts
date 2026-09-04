@@ -1961,21 +1961,19 @@ io.on('connection', (socket) => {
 });
 
 // -------------------------------------------------------------
-// Vite Middleware / Static Serve
+// Global Process Error Resilience
+// -------------------------------------------------------------
+process.on('uncaughtException', (err) => {
+  console.error('[Server uncaughtException]:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Server unhandledRejection]:', reason);
+});
+
+// -------------------------------------------------------------
+// Vite Middleware / Static Serve & Immediate Server Startup
 // -------------------------------------------------------------
 async function start() {
-  // Ensure SQL database is booted
-  await getSqlDb();
-
-  // Initialize and ensure all PostgreSQL tables exist
-  await initializePostgresTables().catch(err => console.warn('[Postgres Init Warning]:', err));
-
-  // Seed Cloud SQL / Neon PostgreSQL if empty
-  await seedPostgresIfEmpty().catch(err => console.warn('[Postgres Seed Warning]:', err));
-
-  // Ensure users and profiles from SQLite are synchronized to PostgreSQL
-  await syncSqliteWithPostgres().catch(err => console.warn('[Postgres Sync Warning]:', err));
-
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1992,6 +1990,19 @@ async function start() {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Global Match Dating Platform Server running on http://0.0.0.0:${PORT}`);
+
+    // Boot SQL databases and sync in background without blocking port 3000
+    (async () => {
+      try {
+        await getSqlDb();
+        await initializePostgresTables().catch(err => console.warn('[Postgres Init Warning]:', err));
+        await seedPostgresIfEmpty().catch(err => console.warn('[Postgres Seed Warning]:', err));
+        await syncSqliteWithPostgres().catch(err => console.warn('[Postgres Sync Warning]:', err));
+        console.log('[Server Startup] Database layers and sync initialized successfully.');
+      } catch (dbErr) {
+        console.warn('[Server Startup DB Warning]:', dbErr);
+      }
+    })();
   });
 }
 
