@@ -92,4 +92,12 @@ export const en: TranslationDict = {
   asia: 'Asia',
   americas: 'Americas',
   mideastAfrica: 'Middle East & Africa',
+  forgotPassword: 'Forgot Password?',
+  resetPassword: 'Reset Password',
+  sendResetCode: 'Send Reset Code',
+  enterResetCode: 'Enter 6-Digit Code',
+  newPassword: 'New Password',
+  confirmNewPassword: 'Confirm New Password',
+  backToLogin: 'Back to Log In',
+  resendCode: 'Resend Code',
 };

@@ -173,6 +173,16 @@ function initTables(db: Database) {
       expires_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      otp_code TEXT NOT NULL,
+      reset_token TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       match_id TEXT,

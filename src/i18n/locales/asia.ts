@@ -87,6 +87,14 @@ export const bn: TranslationDict = {
   activeUsers: 'সক্রিয় ব্যবহারকারী',
   syncNow: 'ফিড সিঙ্ক করুন',
   searchLanguage: 'ভাষা খুঁজুন...',
+  forgotPassword: 'পাসওয়ার্ড ভুলে গেছেন?',
+  resetPassword: 'পাসওয়ার্ড রিসেট করুন',
+  sendResetCode: 'রিসেট কোড পাঠান',
+  enterResetCode: '৬ সংখ্যার কোড দিন',
+  newPassword: 'নতুন পাসওয়ার্ড',
+  confirmNewPassword: 'নতুন পাসওয়ার্ড নিশ্চিত করুন',
+  backToLogin: 'লগইন-এ ফিরে যান',
+  resendCode: 'পুনরায় কোড পাঠান',
 };
 
 export const hi: TranslationDict = {

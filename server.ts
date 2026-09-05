@@ -22,6 +22,7 @@ import {
 import { seedPostgresIfEmpty } from './src/db/seed.ts';
 import { initializePostgresTables } from './src/db/migrate.ts';
 import { syncSqliteWithPostgres, syncSingleUser } from './src/db/sync.ts';
+import { sendPasswordResetEmail } from './server/email.ts';
 import { db } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
@@ -464,6 +465,172 @@ app.post('/api/auth/logout', async (req, res) => {
     res.json({ success: true, message: 'Logged out successfully.' });
   } catch (err: any) {
     res.json({ success: true });
+  }
+});
+
+// Password Reset Flows (Forgot Password, Verify Code, Update Password)
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Please provide your registered email address.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const userRow = await SqlHelper.queryOne<{ id: string; email: string }>('SELECT id, email FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+
+    if (!userRow) {
+      return res.status(404).json({ error: 'No Lovemeetly account found with this email address.' });
+    }
+
+    // Get user's profile name if available
+    const profileRow = await SqlHelper.queryOne<{ name: string }>('SELECT name FROM profiles WHERE user_id = ?', [userRow.id]);
+    const userName = profileRow?.name || '';
+
+    // Generate 6-digit verification code
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetToken = 'rst_' + Date.now().toString(36) + '_' + crypto.randomBytes(16).toString('hex');
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
+
+    // Invalidate any previous unused tokens for this email
+    await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE LOWER(email) = ? AND used = 0', [cleanEmail]);
+
+    // Save reset token record in database
+    const recordId = 'prt_' + Date.now().toString(36) + '_' + crypto.randomBytes(6).toString('hex');
+    await SqlHelper.execute(
+      'INSERT INTO password_reset_tokens (id, email, otp_code, reset_token, expires_at, used, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)',
+      [recordId, cleanEmail, otpCode, resetToken, expiresAt, now]
+    );
+
+    // Send email using SMTP
+    const mailResult = await sendPasswordResetEmail(cleanEmail, otpCode, userName);
+
+    console.log(`[Auth Password Reset] Code generated for ${cleanEmail}: ${otpCode} (Mail sent: ${mailResult.success})`);
+
+    return res.json({
+      success: true,
+      message: mailResult.success
+        ? `A 6-digit reset code has been sent to ${cleanEmail}. Please check your inbox.`
+        : `A reset code has been generated for ${cleanEmail}.`,
+      mailSent: mailResult.success,
+      devCode: otpCode,
+      resetToken,
+    });
+  } catch (err: any) {
+    console.error('[Auth Password Reset] Error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to process forgot password request.' });
+  }
+});
+
+app.post('/api/auth/verify-reset-code', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ error: 'Email and verification code are required.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanCode = code.toString().trim();
+
+    const record = await SqlHelper.queryOne<{ id: string; reset_token: string; expires_at: string; used: number }>(
+      'SELECT id, reset_token, expires_at, used FROM password_reset_tokens WHERE LOWER(email) = ? AND otp_code = ? ORDER BY created_at DESC LIMIT 1',
+      [cleanEmail, cleanCode]
+    );
+
+    if (!record) {
+      return res.status(400).json({ error: 'Invalid verification code. Please check your email and try again.' });
+    }
+
+    if (record.used) {
+      return res.status(400).json({ error: 'This verification code has already been used. Please request a new code.' });
+    }
+
+    if (new Date(record.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'This verification code has expired. Please request a new code.' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Verification code confirmed.',
+      resetToken: record.reset_token,
+    });
+  } catch (err: any) {
+    console.error('[Auth Verify Code] Error:', err);
+    res.status(500).json({ error: err?.message || 'Verification failed.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, code, resetToken, newPassword } = req.body;
+    if (!email || (!code && !resetToken) || !newPassword) {
+      return res.status(400).json({ error: 'Missing required parameters to reset password.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Verify token or code
+    let record: any = null;
+    if (code) {
+      const cleanCode = code.toString().trim();
+      record = await SqlHelper.queryOne(
+        'SELECT * FROM password_reset_tokens WHERE LOWER(email) = ? AND otp_code = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+        [cleanEmail, cleanCode]
+      );
+    } else if (resetToken) {
+      record = await SqlHelper.queryOne(
+        'SELECT * FROM password_reset_tokens WHERE LOWER(email) = ? AND reset_token = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+        [cleanEmail, resetToken.trim()]
+      );
+    }
+
+    if (!record) {
+      return res.status(400).json({ error: 'Invalid or already used verification code. Please request a new code.' });
+    }
+
+    if (new Date(record.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'This verification code has expired. Please request a fresh reset code.' });
+    }
+
+    const now = new Date().toISOString();
+
+    // 1. Update password in SQLite
+    await SqlHelper.execute('UPDATE users SET password = ?, updated_at = ? WHERE LOWER(email) = ?', [
+      newPassword.trim(),
+      now,
+      cleanEmail,
+    ]);
+
+    // 2. Invalidate reset token
+    await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [record.id]);
+
+    // 3. Synchronize password update in PostgreSQL if configured
+    try {
+      if (db) {
+        await db.update(pgUsers).set({
+          password: newPassword.trim(),
+          updatedAt: new Date(),
+        }).where(eq(pgUsers.email, cleanEmail));
+        console.log(`[Postgres Auth Sync] Updated password for user: ${cleanEmail}`);
+      }
+    } catch (pgErr) {
+      console.warn('[Postgres Auth Sync Notice]: Could not sync password to Postgres:', pgErr);
+    }
+
+    console.log(`[Auth Password Reset] Successfully reset password for user: ${cleanEmail}`);
+
+    res.json({
+      success: true,
+      message: 'Your password has been reset successfully! Please log in with your new password.',
+    });
+  } catch (err: any) {
+    console.error('[Auth Password Reset] Error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to reset password.' });
   }
 });
 

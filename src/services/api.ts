@@ -165,6 +165,45 @@ export const api = {
     return json;
   },
 
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string; mailSent?: boolean; devCode?: string; resetToken?: string }> {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to send password reset code.');
+    }
+    return data;
+  },
+
+  async verifyResetCode(email: string, code: string): Promise<{ success: boolean; resetToken: string }> {
+    const res = await fetch('/api/auth/verify-reset-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Invalid verification code.');
+    }
+    return data;
+  },
+
+  async resetPassword(params: { email: string; code?: string; resetToken?: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to update password.');
+    }
+    return data;
+  },
+
   async logout(): Promise<{ success: boolean }> {
     try {
       await authFetch('/api/auth/logout', { method: 'POST' });
