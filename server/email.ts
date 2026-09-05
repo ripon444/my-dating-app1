@@ -1,27 +1,28 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 
 // SMTP Configuration
-// Configured to support support@ovemeetly.com / support@lovemeetly.com
-const smtpHost = process.env.SMTP_HOST || 'mail.lovemeetly.com';
-const smtpPort = Number(process.env.SMTP_PORT) || 465;
-const smtpUser = process.env.SMTP_USER || 'support@ovemeetly.com';
-const smtpPass = process.env.SMTP_PASS || 'Tanvir@123456789';
-const smtpFrom = process.env.SMTP_FROM || `"Lovemeetly Support" <${smtpUser}>`;
+// Configured with smtp-prod.mailrcld.com / STARTTLS / port 587
+const smtpHost = process.env.SMTP_HOST || 'smtp-prod.mailrcld.com';
+const smtpPort = Number(process.env.SMTP_PORT) || 587;
+const smtpUser = process.env.SMTP_USER || 'tanvirahmadkst@gmail.com';
+const smtpPass = process.env.SMTP_PASS || '78c303f694908d72536674ff97a2ab95';
+const smtpFrom = process.env.SMTP_FROM || '"Lovemeetly Support" <support@lovemeetly.com>';
 
 let transporter: Transporter | null = null;
 
 export function getEmailTransporter(): Transporter {
   if (!transporter) {
+    const isPort465 = smtpPort === 465;
     transporter = nodemailer.createTransport({
       host: smtpHost,
       port: smtpPort,
-      secure: smtpPort === 465, // true for 465, false for other ports
+      secure: isPort465, // false for 587 / STARTTLS
+      requireTLS: !isPort465, // Enforces STARTTLS on port 587
       auth: {
         user: smtpUser,
         pass: smtpPass,
       },
       tls: {
-        // Allow self-signed or custom domain certificates if needed
         rejectUnauthorized: false,
       },
     });
