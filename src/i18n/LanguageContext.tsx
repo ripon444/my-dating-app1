@@ -40,7 +40,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return text;
   };
 
-  const isRTL = currentLanguage === 'ar';
+  const isRTL = Boolean(SUPPORTED_LANGUAGES.find((l) => l.code === currentLanguage)?.dir === 'rtl');
 
   return (
     <LanguageContext.Provider

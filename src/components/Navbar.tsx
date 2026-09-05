@@ -69,6 +69,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { currentLanguage, setLanguage, t } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const [langSearch, setLangSearch] = useState('');
+  const [selectedRegion, setSelectedRegion] = useState<'all' | 'asia' | 'europe' | 'americas' | 'mideast_africa'>('all');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifMenuOpen, setNotifMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -94,6 +96,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, []);
 
   const currentLangObj = SUPPORTED_LANGUAGES.find((l) => l.code === currentLanguage);
+
+  const filteredLanguages = SUPPORTED_LANGUAGES.filter((lang) => {
+    const matchesRegion = selectedRegion === 'all' || lang.region === selectedRegion;
+    const q = langSearch.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      lang.name.toLowerCase().includes(q) ||
+      lang.nativeName.toLowerCase().includes(q) ||
+      lang.code.toLowerCase().includes(q);
+    return matchesRegion && matchesSearch;
+  });
 
   return (
     <header className="sticky top-0 z-40 bg-stone-900/90 backdrop-blur-md border-b border-stone-800">
@@ -365,43 +378,118 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Language Switcher (10 Languages) */}
+          {/* Language Switcher (World Languages) */}
           <div className="relative" ref={langRef}>
             <button
-              onClick={() => setLangMenuOpen(!langMenuOpen)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs transition"
+              onClick={() => {
+                setLangMenuOpen(!langMenuOpen);
+                setLangSearch('');
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs transition shadow-sm"
               title="Change Language"
             >
+              <Globe className="w-3.5 h-3.5 text-rose-400" />
               <span className="text-sm">{currentLangObj?.flag}</span>
               <span className="font-semibold uppercase text-[11px] hidden sm:inline">{currentLangObj?.code}</span>
               <ChevronDown className="w-3 h-3 text-stone-400" />
             </button>
 
             {langMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-stone-900 rounded-xl shadow-2xl border border-stone-700 py-2 z-50 animate-in fade-in slide-in-from-top-2">
-                <div className="px-3 py-1 text-[11px] font-semibold text-stone-400 uppercase tracking-wider border-b border-stone-800 mb-1">
-                  Global Languages
+              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-stone-900 rounded-2xl shadow-2xl border border-stone-700 p-2.5 z-50 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-stone-800 px-1">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-stone-200">
+                    <Globe className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Global Languages</span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                    {SUPPORTED_LANGUAGES.length} Languages
+                  </span>
                 </div>
-                <div className="max-h-64 overflow-y-auto">
-                  {SUPPORTED_LANGUAGES.map((lang) => (
+
+                {/* Search Bar */}
+                <div className="relative mb-2">
+                  <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={langSearch}
+                    onChange={(e) => setLangSearch(e.target.value)}
+                    placeholder={t('searchLanguage') || 'Search language...'}
+                    className="w-full pl-8 pr-7 py-1.5 text-xs bg-stone-800/80 border border-stone-700 rounded-lg text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition"
+                    autoFocus
+                  />
+                  {langSearch && (
                     <button
-                      key={lang.code}
-                      onClick={() => {
-                        setLanguage(lang.code as SupportedLanguage);
-                        setLangMenuOpen(false);
-                      }}
-                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-stone-200 hover:bg-stone-800 transition"
+                      onClick={() => setLangSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-white"
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">{lang.flag}</span>
-                        <div className="text-left">
-                          <div className="font-medium text-stone-100">{lang.name}</div>
-                          <div className="text-[10px] text-stone-400">{lang.nativeName}</div>
-                        </div>
-                      </div>
-                      {currentLanguage === lang.code && <Check className="w-4 h-4 text-rose-400" />}
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Region Filter Chips */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-1.5 mb-1.5 scrollbar-none text-[10px]">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'asia', label: 'Asia' },
+                    { id: 'europe', label: 'Europe' },
+                    { id: 'americas', label: 'Americas' },
+                    { id: 'mideast_africa', label: 'ME & Africa' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSelectedRegion(tab.id as any)}
+                      className={`px-2 py-0.5 rounded-md font-medium whitespace-nowrap transition ${
+                        selectedRegion === tab.id
+                          ? 'bg-rose-600 text-white shadow-sm'
+                          : 'bg-stone-800 text-stone-400 hover:text-stone-200 hover:bg-stone-700'
+                      }`}
+                    >
+                      {tab.label}
                     </button>
                   ))}
+                </div>
+
+                {/* Scrollable Language List */}
+                <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1 divide-y divide-stone-800/40">
+                  {filteredLanguages.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-stone-400">
+                      No language found for "{langSearch}"
+                    </div>
+                  ) : (
+                    filteredLanguages.map((lang) => {
+                      const isSelected = currentLanguage === lang.code;
+                      return (
+                        <button
+                          key={lang.code}
+                          onClick={() => {
+                            setLanguage(lang.code as SupportedLanguage);
+                            setLangMenuOpen(false);
+                            setLangSearch('');
+                          }}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition ${
+                            isSelected
+                              ? 'bg-rose-600/20 text-rose-200 border border-rose-500/30'
+                              : 'text-stone-200 hover:bg-stone-800/80 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="text-base flex-shrink-0">{lang.flag}</span>
+                            <div className="text-left truncate">
+                              <div className="font-medium text-stone-100 truncate flex items-center gap-1.5">
+                                <span>{lang.name}</span>
+                                {lang.dir === 'rtl' && (
+                                  <span className="text-[9px] bg-stone-800 text-amber-400/90 px-1 rounded uppercase">RTL</span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-stone-400 truncate">{lang.nativeName}</div>
+                            </div>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-rose-400 flex-shrink-0 ml-2" />}
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
