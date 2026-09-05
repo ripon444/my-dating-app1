@@ -35,6 +35,7 @@ import {
 import { AdminAnalytics, ExternalProvider, ExternalSyncLog, Report, User, Profile } from '../types';
 import { api } from '../services/api';
 import { Logo } from './Logo';
+import { safeStorage } from '../utils/storage';
 
 interface AdminPortalProps {
   onBackToSite: () => void;
@@ -44,7 +45,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   // Auth state
   const [adminUser, setAdminUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('dating_admin_session');
+      const saved = safeStorage.getItem('dating_admin_session');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.role === 'ADMIN') return parsed;
@@ -138,7 +139,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
           email: inputEmail,
         };
         setAdminUser(verifiedAdmin);
-        localStorage.setItem('dating_admin_session', JSON.stringify(verifiedAdmin));
+        safeStorage.setItem('dating_admin_session', JSON.stringify(verifiedAdmin));
       } else {
         setLoginError('Access denied: You do not have administrator permissions.');
       }
@@ -160,7 +161,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
           updatedAt: new Date().toISOString(),
         };
         setAdminUser(fallbackAdmin);
-        localStorage.setItem('dating_admin_session', JSON.stringify(fallbackAdmin));
+        safeStorage.setItem('dating_admin_session', JSON.stringify(fallbackAdmin));
       } else {
         setLoginError('Invalid administrator credentials. Please check your email, password, or security key.');
       }
@@ -171,7 +172,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
 
   // Handle Admin Logout
   const handleAdminLogout = () => {
-    localStorage.removeItem('dating_admin_session');
+    safeStorage.removeItem('dating_admin_session');
     setAdminUser(null);
     setEmail('');
     setPassword('');

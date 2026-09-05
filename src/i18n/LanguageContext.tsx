@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { SupportedLanguage, SUPPORTED_LANGUAGES, translations } from './translations';
+import { safeStorage } from '../utils/storage';
 
 interface LanguageContextType {
   currentLanguage: SupportedLanguage;
@@ -12,19 +13,21 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>(() => {
-    const saved = localStorage.getItem('gm_lang');
+    const saved = safeStorage.getItem('gm_lang');
     return (saved as SupportedLanguage) || 'en';
   });
 
   useEffect(() => {
-    localStorage.setItem('gm_lang', currentLanguage);
+    safeStorage.setItem('gm_lang', currentLanguage);
     const langConfig = SUPPORTED_LANGUAGES.find((l) => l.code === currentLanguage);
-    if (langConfig?.dir === 'rtl') {
-      document.documentElement.dir = 'rtl';
-    } else {
-      document.documentElement.dir = 'ltr';
+    if (typeof document !== 'undefined') {
+      if (langConfig?.dir === 'rtl') {
+        document.documentElement.dir = 'rtl';
+      } else {
+        document.documentElement.dir = 'ltr';
+      }
+      document.documentElement.lang = currentLanguage;
     }
-    document.documentElement.lang = currentLanguage;
   }, [currentLanguage]);
 
   const t = (key: string, variables?: Record<string, string | number>): string => {

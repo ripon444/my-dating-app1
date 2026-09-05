@@ -1,18 +1,19 @@
 // API Service Layer with Token-Based Session Storage
 import { Profile, User, Match, Conversation, Message, Call, ExternalProvider, ExternalSyncLog, Report, AdminAnalytics, DiscoveryFilters } from '../types';
+import { safeStorage } from '../utils/storage';
 
 const TOKEN_KEY = 'globalmatch_auth_token';
 
 export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return safeStorage.getItem(TOKEN_KEY);
 }
 
 export function setStoredToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
+  safeStorage.setItem(TOKEN_KEY, token);
 }
 
 export function removeStoredToken() {
-  localStorage.removeItem(TOKEN_KEY);
+  safeStorage.removeItem(TOKEN_KEY);
 }
 
 async function authFetch(input: string, init?: RequestInit): Promise<Response> {
