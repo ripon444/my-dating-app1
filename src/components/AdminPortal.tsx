@@ -895,7 +895,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                       <p className="text-[11px] text-stone-400 truncate max-w-xs">{p.base_url}</p>
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      p.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-stone-800 text-stone-400'
+                      p.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-stone-800 text-stone-400'
                     }`}>
                       {p.status}
                     </span>
@@ -903,7 +903,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
 
                   <div className="text-xs text-stone-300 bg-stone-950 p-2.5 rounded-xl border border-stone-800 space-y-1">
                     <div><strong>Sync Interval:</strong> Every {p.sync_interval_hours}h</div>
-                    <div><strong>Last Synced:</strong> {new Date(p.last_sync_at).toLocaleString()}</div>
+                    <div><strong>Last Synced:</strong> {p.last_synced_at ? new Date(p.last_synced_at).toLocaleString() : 'Never'}</div>
                     <div className="text-[10px] text-stone-400 italic">Attribution: {p.attribution_requirement}</div>
                   </div>
 

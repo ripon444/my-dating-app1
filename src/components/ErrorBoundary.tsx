@@ -12,10 +12,13 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    errorMessage: '',
-  };
+  constructor(props: Props) {
+    super(props);
+    this.state = {
+      hasError: false,
+      errorMessage: '',
+    };
+  }
 
   public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, errorMessage: error?.message || 'An unexpected error occurred' };

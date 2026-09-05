@@ -446,9 +446,10 @@ function MainApp() {
   };
 
   // Direct Message Handler from Profile Modal
-  const handleStartChat = async (profile: Profile) => {
+  const handleStartChat = async (profileOrId: Profile | string) => {
     try {
-      const res = await api.createOrGetConversation(profile.user_id || profile.id);
+      const targetId = typeof profileOrId === 'string' ? profileOrId : (profileOrId.user_id || profileOrId.id);
+      const res = await api.createOrGetConversation(targetId);
       if (res.conversation) {
         setConversations((prev) => {
           if (prev.some((c) => c.id === res.conversation.id)) return prev;

@@ -172,7 +172,9 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
                 <h1 className="text-2xl font-bold text-white font-serif">{profile.name}</h1>
                 <span className="text-2xl font-light text-stone-300">{profile.age}</span>
                 {profile.is_verified && (
-                  <CheckCircle2 className="w-5 h-5 text-sky-400" title="Verified Profile" />
+                  <span title="Verified Profile" className="inline-flex items-center">
+                    <CheckCircle2 className="w-5 h-5 text-sky-400" />
+                  </span>
                 )}
               </div>
 

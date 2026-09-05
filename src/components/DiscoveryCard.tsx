@@ -218,7 +218,9 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
                 </span>
               )}
               {profile.is_verified && (
-                <CheckCircle2 className="w-5 h-5 text-sky-400 fill-sky-400/20" title="Verified Profile" />
+                <span title="Verified Profile" className="inline-flex items-center">
+                  <CheckCircle2 className="w-5 h-5 text-sky-400 fill-sky-400/20" />
+                </span>
               )}
             </div>
             
