@@ -48,7 +48,7 @@ export const PartnerDisclosureModal: React.FC<PartnerDisclosureModalProps> = ({
               100% Transparency in Dating
             </h3>
             <p>
-              Global Match connects authentic individuals across borders. To expand cross-border international discovery, we partner with reputable, licensed global dating federations via secure, authenticated REST APIs.
+              Lovemeetly connects authentic individuals across borders. To expand cross-border international discovery, we partner with reputable, licensed global dating federations via secure, authenticated REST APIs.
             </p>
           </div>
 
@@ -63,7 +63,7 @@ export const PartnerDisclosureModal: React.FC<PartnerDisclosureModalProps> = ({
                   Native Member Profiles
                 </div>
                 <p className="text-[11px] text-stone-400">
-                  Created directly by registered Global Match members. Native members support real-time text messaging, encrypted voice & video calls, mutual match notifications, and photo verification.
+                  Created directly by registered Lovemeetly members. Native members support real-time text messaging, encrypted voice & video calls, mutual match notifications, and photo verification.
                 </p>
               </div>
 

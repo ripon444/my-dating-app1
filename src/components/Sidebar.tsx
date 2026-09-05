@@ -95,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>{t('guidelines')}</span>
           </button>
           <div className="px-3 pt-2 text-[10px] text-stone-600">
-            © 2026 Global Match Platform. Licensed integrations strictly adhere to partner syndication agreements.
+            © 2026 Lovemeetly Platform. Licensed integrations strictly adhere to partner syndication agreements.
           </div>
         </div>
       </aside>

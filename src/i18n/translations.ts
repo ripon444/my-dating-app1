@@ -26,7 +26,7 @@ export const SUPPORTED_LANGUAGES: LanguageOption[] = [
 
 export const translations: Record<SupportedLanguage, Record<string, string>> = {
   en: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: 'Connect Authentically Across the Globe',
     discover: 'Discover',
     matches: 'Matches',
@@ -96,7 +96,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     aiBioAssist: 'AI Bio Assistant',
     generateBio: 'Generate Bio with AI',
     ageGateTitle: 'Age Verification',
-    ageGateDesc: 'You must be at least 18 years old to join Global Match.',
+    ageGateDesc: 'You must be at least 18 years old to join Lovemeetly.',
     enterDob: 'Enter Date of Birth',
     verifyAndContinue: 'Verify & Continue',
     terms: 'Terms of Service',
@@ -112,7 +112,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'Sync Provider Feed',
   },
   bn: {
-    appName: 'গ্লোবাল ম্যাচ',
+    appName: 'Lovemeetly',
     appTagline: 'বিশ্বজুড়ে খাঁটি সংযোগ গড়ে তুলুন',
     discover: 'আবিষ্কার করুন',
     matches: 'ম্যাচসমূহ',
@@ -182,7 +182,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     aiBioAssist: 'AI বায়ো সহায়ক',
     generateBio: 'AI দিয়ে বায়ো তৈরি করুন',
     ageGateTitle: 'বয়স যাচাইকরণ',
-    ageGateDesc: 'গ্লোবাল ম্যাচে যোগদানের জন্য আপনার বয়স কমপক্ষে ১৮ বছর হতে হবে।',
+    ageGateDesc: 'Lovemeetly-তে যোগদানের জন্য আপনার বয়স কমপক্ষে ১৮ বছর হতে হবে।',
     enterDob: 'জন্ম তারিখ লিখুন',
     verifyAndContinue: 'যাচাই করে এগিয়ে যান',
     terms: 'ব্যবহারের শর্তাবলী',
@@ -198,7 +198,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'ফিড সিঙ্ক করুন',
   },
   es: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: 'Conecta de forma auténtica en todo el mundo',
     discover: 'Descubrir',
     matches: 'Matches',
@@ -268,7 +268,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     aiBioAssist: 'Asistente de Biografía IA',
     generateBio: 'Generar biografía con IA',
     ageGateTitle: 'Verificación de Edad',
-    ageGateDesc: 'Debes tener al menos 18 años para unirte a Global Match.',
+    ageGateDesc: 'Debes tener al menos 18 años para unirte a Lovemeetly.',
     enterDob: 'Fecha de nacimiento',
     verifyAndContinue: 'Verificar y continuar',
     terms: 'Términos de servicio',
@@ -284,7 +284,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'Sincronizar feed',
   },
   fr: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: 'Rencontrez authentiquement partout dans le monde',
     discover: 'Découvrir',
     matches: 'Matchs',
@@ -354,7 +354,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     aiBioAssist: 'Assistant Bio IA',
     generateBio: 'Générer avec l’IA',
     ageGateTitle: 'Vérification de l’âge',
-    ageGateDesc: 'Vous devez avoir au moins 18 ans pour rejoindre Global Match.',
+    ageGateDesc: 'Vous devez avoir au moins 18 ans pour rejoindre Lovemeetly.',
     enterDob: 'Date de naissance',
     verifyAndContinue: 'Vérifier et continuer',
     terms: 'Conditions d’utilisation',
@@ -370,7 +370,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'Synchroniser',
   },
   de: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: 'Authentische weltweite Begegnungen',
     discover: 'Entdecken',
     matches: 'Matches',
@@ -456,7 +456,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'Feed synchronisieren',
   },
   pt: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: 'Conexões autênticas ao redor do mundo',
     discover: 'Descobrir',
     matches: 'Combinações',
@@ -714,7 +714,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'फ़ीड सिंक करें',
   },
   ja: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: '世界中とつながる、本物の出会い',
     discover: '探す',
     matches: 'マッチ',
@@ -800,7 +800,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     syncNow: 'フィードを同期',
   },
   ko: {
-    appName: 'Global Match',
+    appName: 'Lovemeetly',
     appTagline: '전 세계를 잇는 진정한 만남',
     discover: '탐색',
     matches: '매치',

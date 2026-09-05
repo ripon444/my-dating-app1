@@ -3,6 +3,7 @@ import { Heart, Lock, Mail, User as UserIcon, Calendar, Check, AlertCircle, X, L
 import { api } from '../services/api';
 import { User, Profile } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
+import { Logo } from './Logo';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -101,7 +102,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const calculatedAge = Math.abs(ageDate.getUTCFullYear() - 1970);
 
     if (isNaN(calculatedAge) || calculatedAge < 18) {
-      setError('You must be at least 18 years old to join Global Match.');
+      setError('You must be at least 18 years old to join Lovemeetly.');
       return;
     }
 
@@ -161,9 +162,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </button>
 
         {/* Brand Icon */}
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-500 flex items-center justify-center shadow-lg shadow-rose-900/40 mb-3">
-          <Heart className="w-6 h-6 text-white fill-white" />
-        </div>
+        <Logo size="lg" showText={false} className="justify-center mb-3" />
 
         {/* Title & Subtitle */}
         <div className="text-center space-y-1 mb-4">

@@ -22,6 +22,7 @@ import {
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
 import { User, Profile } from '../types';
+import { Logo } from './Logo';
 
 interface NavbarProps {
   user: User | null;
@@ -99,19 +100,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
         {/* Brand Logo & Tagline */}
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('discover')}>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 via-pink-600 to-amber-500 flex items-center justify-center shadow-lg shadow-rose-600/20">
-            <Heart className="w-5 h-5 text-white fill-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-lg text-stone-100 tracking-tight font-serif">Global Match</span>
-              <span className="text-[10px] uppercase font-semibold px-2 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full">
-                Global
-              </span>
-            </div>
-            <p className="text-xs text-stone-400 hidden sm:block">Unified Global & Partner Dating</p>
-          </div>
+        <div className="cursor-pointer" onClick={() => setActiveTab('discover')}>
+          <Logo size="md" subtitle="Unified Global & Partner Dating" />
         </div>
 
         {/* Center Quick Navigation (Desktop) */}

@@ -33,9 +33,9 @@ export const ShareProfileModal: React.FC<ShareProfileModalProps> = ({
   if (!isOpen) return null;
 
   const identifier = profile.username || profile.user_id || profile.id;
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://globalmatch.com';
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://lovemeetly.com';
   const profileUrl = `${origin}/profile/${identifier}`;
-  const shareText = `Check out ${profile.name}'s profile on Global Match!`;
+  const shareText = `Check out ${profile.name}'s profile on Lovemeetly!`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(profileUrl);
@@ -47,7 +47,7 @@ export const ShareProfileModal: React.FC<ShareProfileModalProps> = ({
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `${profile.name} on Global Match`,
+          title: `${profile.name} on Lovemeetly`,
           text: shareText,
           url: profileUrl,
         });

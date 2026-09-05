@@ -367,7 +367,7 @@ app.post('/api/auth/register', async (req, res) => {
     const calculatedAge = Math.abs(ageDate.getUTCFullYear() - 1970);
 
     if (calculatedAge < 18 || isNaN(calculatedAge)) {
-      return res.status(400).json({ error: 'You must be at least 18 years old to join Global Match.' });
+      return res.status(400).json({ error: 'You must be at least 18 years old to join Lovemeetly.' });
     }
 
     // Generate cryptographic unique User ID and Profile ID
@@ -403,7 +403,7 @@ app.post('/api/auth/register', async (req, res) => {
         show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
       ) VALUES (
         ?, ?, 'native', ?, ?, ?, ?, ?, ?, 'Downtown',
-        15, 'Hello! I just joined Global Match to connect with genuine people worldwide.', '', ?, '{}', '',
+        15, 'Hello! I just joined Lovemeetly to connect with genuine people worldwide.', '', ?, '{}', '',
         ?, '["Travel", "Music", "Food", "Culture"]', '["English"]', 'Long-term relationship',
         92, 0, ?, 1, 0, 1, 1, 1, 1, 1, ?, ?
       )`,
@@ -1989,7 +1989,7 @@ async function start() {
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`Global Match Dating Platform Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Lovemeetly Dating Platform Server running on http://0.0.0.0:${PORT}`);
 
     // Boot SQL databases and sync in background without blocking port 3000
     (async () => {

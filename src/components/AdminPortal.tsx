@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { AdminAnalytics, ExternalProvider, ExternalSyncLog, Report, User, Profile } from '../types';
 import { api } from '../services/api';
+import { Logo } from './Logo';
 
 interface AdminPortalProps {
   onBackToSite: () => void;
@@ -242,11 +243,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
         {/* Top bar with back button */}
         <header className="p-4 sm:p-6 flex items-center justify-between border-b border-stone-800/80 bg-stone-900/60 backdrop-blur-md">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-600 to-pink-500 flex items-center justify-center text-white font-serif font-bold text-base shadow-md">
-              GM
-            </div>
+            <Logo size="sm" showText={false} />
             <span className="font-serif font-bold text-white text-base tracking-wide">
-              Global Match <span className="text-rose-400 text-xs font-mono font-normal">/ Admin</span>
+              Lovemeetly <span className="text-rose-400 text-xs font-mono font-normal">/ Admin</span>
             </span>
           </div>
 
@@ -378,7 +377,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
 
         {/* Footer */}
         <footer className="p-4 text-center text-xs text-stone-400 border-t border-stone-900">
-          © 2026 Global Match Platform Inc. • Administrative Gateway
+          © 2026 Lovemeetly Platform Inc. • Administrative Gateway
         </footer>
       </div>
     );
@@ -407,12 +406,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
           
           {/* Left Title */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-600 to-indigo-600 flex items-center justify-center text-white shadow">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
+            <Logo size="sm" showText={false} />
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold text-white font-serif">Global Match Admin Center</h1>
+                <h1 className="text-base font-bold text-white font-serif">Lovemeetly Admin Center</h1>
                 <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-500/30">
                   SUPER ADMIN
                 </span>

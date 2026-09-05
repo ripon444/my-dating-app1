@@ -101,7 +101,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
             <div className="space-y-3">
               <h3 className="text-base font-bold text-white font-serif">Community Guidelines</h3>
               <p>
-                Global Match is dedicated to fostering genuine, respectful, and safe human connections worldwide. We strictly prohibit:
+                Lovemeetly is dedicated to fostering genuine, respectful, and safe human connections worldwide. We strictly prohibit:
               </p>
               <ul className="list-disc list-inside space-y-2 text-xs text-stone-300">
                 <li>Underage accounts: All members must be at least 18 years of age.</li>
@@ -117,7 +117,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
               <h3 className="text-base font-bold text-white font-serif">Terms of Service</h3>
               <p className="text-xs text-stone-400">Effective: January 2026</p>
               <p>
-                By registering or using Global Match, you represent and warrant that you are at least 18 years old, possess the legal capacity to form a binding contract, and agree to abide by all platform rules and subscription billing terms.
+                By registering or using Lovemeetly, you represent and warrant that you are at least 18 years old, possess the legal capacity to form a binding contract, and agree to abide by all platform rules and subscription billing terms.
               </p>
               <p>
                 Subscriptions auto-renew monthly and can be cancelled at any time prior to the billing cycle end date without penalty.

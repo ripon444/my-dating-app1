@@ -1143,7 +1143,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                         {item.profile?.name || 'Registered User'}
                       </h4>
                       <p className="text-xs text-neutral-400 truncate">
-                        {item.profile?.city ? `${item.profile.city}, ${item.profile.country}` : 'Global Match'}
+                        {item.profile?.city ? `${item.profile.city}, ${item.profile.country}` : 'Lovemeetly'}
                       </p>
                     </div>
                   </div>
@@ -1190,7 +1190,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                         {item.profile?.name || 'Registered User'}
                       </h4>
                       <p className="text-xs text-neutral-400 truncate">
-                        {item.profile?.city ? `${item.profile.city}, ${item.profile.country}` : 'Global Match'}
+                        {item.profile?.city ? `${item.profile.city}, ${item.profile.country}` : 'Lovemeetly'}
                       </p>
                     </div>
                   </div>

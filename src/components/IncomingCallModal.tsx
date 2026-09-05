@@ -117,7 +117,7 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
   if (!call || call.status !== 'ringing') return null;
 
   const caller = call.caller_profile || {
-    name: 'Global Match Member',
+    name: 'Lovemeetly Member',
     photos: ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'],
     city: 'New York',
     country: 'United States',
@@ -205,7 +205,7 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
         {/* Caller Information */}
         <h2 className="text-2xl font-bold text-white font-serif mb-1">{caller.name}</h2>
         <p className="text-xs text-stone-400 mb-4">
-          {caller.city ? `${caller.city}, ${caller.country}` : 'Global Match Member'}
+          {caller.city ? `${caller.city}, ${caller.country}` : 'Lovemeetly Member'}
         </p>
 
         <div className="flex items-center gap-1 text-[11px] text-emerald-400 mb-8 bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-800/40">

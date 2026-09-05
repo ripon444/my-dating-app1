@@ -1,6 +1,6 @@
 {
-  "name": "Global Match Dating",
-  "description": "A production-grade, secure global dating and partner platform featuring unified native & external partner profiles, real-time chat, WebRTC voice/video calling, AI translation and bio writing, subscription tiers, and comprehensive moderation & provider administration.",
+  "name": "Lovemeetly",
+  "description": "Lovemeetly is a modern, secure global dating and partner platform featuring unified native & external partner profiles, real-time chat, WebRTC voice/video calling, AI translation and bio writing, subscription tiers, and comprehensive moderation & provider administration.",
   "requestFramePermissions": [
     "camera",
     "microphone"

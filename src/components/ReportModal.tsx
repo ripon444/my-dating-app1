@@ -86,7 +86,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
             <h3 className="text-base font-bold text-white">Report Submitted</h3>
             <p className="text-xs text-stone-400 max-w-xs mx-auto">
-              Thank you for keeping Global Match safe. Our 24/7 trust and safety moderation team is reviewing this profile.
+              Thank you for keeping Lovemeetly safe. Our 24/7 trust and safety moderation team is reviewing this profile.
             </p>
           </div>
         ) : (
