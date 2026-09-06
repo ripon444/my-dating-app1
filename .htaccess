@@ -6,6 +6,13 @@
   # Security: Deny access to sensitive files and directories
   RewriteRule ^(\.env|\.git|data/|server/|src/|package\.json|bun\.lock|tsconfig.*) - [F,L]
 
+  # Proxy API and Socket.IO calls to local Node.js server (if running on port 3000)
+  <IfModule mod_proxy.c>
+    RewriteCond %{REQUEST_URI} ^/api/ [OR]
+    RewriteCond %{REQUEST_URI} ^/socket\.io/
+    RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
+  </IfModule>
+
   # If dist directory exists, serve compiled dist/ assets and index.html
   RewriteCond %{DOCUMENT_ROOT}/dist/index.html -f
   RewriteRule ^$ dist/index.html [L]

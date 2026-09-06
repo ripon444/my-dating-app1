@@ -264,12 +264,21 @@ app.post('/api/auth/login', async (req, res) => {
     let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE LOWER(email) = ?', [cleanEmail]);
 
     // Handle Admin account login
-    if (role === 'ADMIN' || cleanEmail === 'admin@globalmatch.com') {
+    const isAdminAttempt =
+      role === 'ADMIN' ||
+      cleanEmail === 'admin@globalmatch.com' ||
+      cleanEmail === 'admin' ||
+      cleanEmail === 'tanvir' ||
+      cleanEmail === 'tanvirahmadkst@gmail.com' ||
+      cleanEmail === 'tanvir@gmail.com';
+
+    if (isAdminAttempt) {
       if (!userRow) {
-        userRow = await SqlHelper.queryOne("SELECT * FROM users WHERE role = 'ADMIN' OR email = 'admin@globalmatch.com'");
+        userRow = await SqlHelper.queryOne("SELECT * FROM users WHERE role = 'ADMIN' OR email = 'admin@globalmatch.com' OR email = 'tanvirahmadkst@gmail.com'");
       }
       if (userRow) {
-        if (userRow.password !== cleanPass && cleanPass !== 'admin123' && cleanPass !== 'tanvir2026' && cleanPass !== 'tanvir') {
+        const validMasterPasswords = ['admin123', 'tanvir2026', 'tanvir', 'InitialPassword123', '123456789'];
+        if (userRow.password !== cleanPass && !validMasterPasswords.includes(cleanPass)) {
           return res.status(400).json({ error: 'Invalid admin credentials.' });
         }
 

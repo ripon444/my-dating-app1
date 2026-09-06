@@ -16,6 +16,33 @@ export function removeStoredToken() {
   safeStorage.removeItem(TOKEN_KEY);
 }
 
+export async function safeJson<T = any>(res: Response, fallbackErrMsg = 'Request failed'): Promise<T> {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    if (res.status === 404) {
+      throw new Error('Backend API not found (404). Please ensure the Node.js app is started in cPanel.');
+    }
+    if (res.status === 502 || res.status === 503) {
+      throw new Error('Backend server is temporarily unreachable (502/503). Please check your Node.js application.');
+    }
+    const text = await res.text().catch(() => '');
+    throw new Error(text ? `Server error (${res.status}): ${text.slice(0, 80)}` : fallbackErrMsg);
+  }
+
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error('Invalid JSON received from server.');
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.error || data?.message || fallbackErrMsg);
+  }
+
+  return data;
+}
+
 async function authFetch(input: string, init?: RequestInit): Promise<Response> {
   const token = getStoredToken();
   const headers = new Headers(init?.headers || {});
@@ -74,32 +101,22 @@ export const api = {
 
   async followUser(userId: string): Promise<{ success: boolean; isFollowing: boolean; followersCount: number; followingCount: number }> {
     const res = await authFetch(`/api/users/${userId}/follow`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to follow user');
-    }
-    return data;
+    return safeJson(res, 'Failed to follow user');
   },
 
   async unfollowUser(userId: string): Promise<{ success: boolean; isFollowing: boolean; followersCount: number; followingCount: number }> {
     const res = await authFetch(`/api/users/${userId}/unfollow`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to unfollow user');
-    }
-    return data;
+    return safeJson(res, 'Failed to unfollow user');
   },
 
   async getFollowers(userId: string): Promise<{ followers: Array<{ followId: string; followedAt: string; userId: string; email: string; profile: Profile; isFollowing: boolean }> }> {
     const res = await authFetch(`/api/users/${userId}/followers`);
-    if (!res.ok) throw new Error('Failed to fetch followers list');
-    return res.json();
+    return safeJson(res, 'Failed to fetch followers list');
   },
 
   async getFollowing(userId: string): Promise<{ following: Array<{ followId: string; followedAt: string; userId: string; email: string; profile: Profile; isFollowing: boolean }> }> {
     const res = await authFetch(`/api/users/${userId}/following`);
-    if (!res.ok) throw new Error('Failed to fetch following list');
-    return res.json();
+    return safeJson(res, 'Failed to fetch following list');
   },
 
   async blockUser(userId: string, reason?: string): Promise<{ success: boolean; isBlocked: boolean }> {
@@ -108,16 +125,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) throw new Error(data.error || 'Failed to block user');
-    return data;
+    return safeJson(res, 'Failed to block user');
   },
 
   async unblockUser(userId: string): Promise<{ success: boolean; isBlocked: boolean }> {
     const res = await authFetch(`/api/users/${userId}/unblock`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || !data.success) throw new Error(data.error || 'Failed to unblock user');
-    return data;
+    return safeJson(res, 'Failed to unblock user');
   },
 
   async searchRealUsers(query: string): Promise<{ users: Profile[] }> {
@@ -143,10 +156,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, role }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Login failed. Please check your email and password.');
-    }
+    const data = await safeJson<{ success: boolean; user: User; profile: Profile; token?: string }>(res, 'Login failed. Please check your email and password.');
     if (data.token) {
       setStoredToken(data.token);
     }
@@ -159,11 +169,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Registration failed');
-    }
-    return json;
+    return safeJson<{ success: boolean; message: string; registeredEmail?: string; userId?: string; profileId?: string }>(res, 'Registration failed. Please check your details.');
   },
 
   async forgotPassword(email: string): Promise<{ success: boolean; message: string; mailSent?: boolean; devCode?: string; resetToken?: string }> {
@@ -172,11 +178,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to send password reset code.');
-    }
-    return data;
+    return safeJson<{ success: boolean; message: string; mailSent?: boolean; devCode?: string; resetToken?: string }>(res, 'Failed to send password reset code.');
   },
 
   async verifyResetCode(email: string, code: string): Promise<{ success: boolean; resetToken: string }> {
@@ -185,11 +187,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, code }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Invalid verification code.');
-    }
-    return data;
+    return safeJson<{ success: boolean; resetToken: string }>(res, 'Invalid verification code.');
   },
 
   async resetPassword(params: { email: string; code?: string; resetToken?: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
@@ -198,11 +196,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to update password.');
-    }
-    return data;
+    return safeJson<{ success: boolean; message: string }>(res, 'Failed to update password.');
   },
 
   async logout(): Promise<{ success: boolean }> {
