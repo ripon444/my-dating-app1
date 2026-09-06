@@ -44,6 +44,16 @@ export async function safeJson<T = any>(res: Response, fallbackErrMsg = 'Request
   return data;
 }
 
+export function resolveApiUrl(path: string): string {
+  if (path.startsWith('/api/')) {
+    return '/server-api/' + path.substring(5);
+  }
+  if (path === '/api') {
+    return '/server-api';
+  }
+  return path;
+}
+
 async function authFetch(input: string, init?: RequestInit): Promise<Response> {
   const token = getStoredToken();
   const headers = new Headers(init?.headers || {});
@@ -52,10 +62,29 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  return fetch(input, {
-    ...init,
-    headers,
-  });
+  // Primary URL is /server-api to bypass LiteSpeed /api interception
+  const primaryUrl = resolveApiUrl(input);
+  try {
+    const res = await fetch(primaryUrl, {
+      ...init,
+      headers,
+    });
+
+    // If LiteSpeed gave a 502/503 HTML or 404 on /server-api, fallback to original url if different
+    if ((res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== input) {
+      const fallbackRes = await fetch(input, { ...init, headers }).catch(() => null);
+      if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
+        return fallbackRes;
+      }
+    }
+    return res;
+  } catch (err) {
+    if (primaryUrl !== input) {
+      const fallbackRes = await fetch(input, { ...init, headers }).catch(() => null);
+      if (fallbackRes) return fallbackRes;
+    }
+    throw err;
+  }
 }
 
 export const api = {
@@ -152,7 +181,7 @@ export const api = {
   },
 
   async login(email: string, password?: string, role?: string): Promise<{ success: boolean; user: User; profile: Profile; token?: string }> {
-    const res = await fetch('/api/auth/login', {
+    const res = await authFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, role }),
@@ -165,7 +194,7 @@ export const api = {
   },
 
   async register(params: { email: string; password?: string; name: string; dob: string; gender: string }): Promise<{ success: boolean; message: string; registeredEmail?: string; userId?: string; profileId?: string }> {
-    const res = await fetch('/api/auth/register', {
+    const res = await authFetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -174,7 +203,7 @@ export const api = {
   },
 
   async forgotPassword(email: string): Promise<{ success: boolean; message: string; mailSent?: boolean; devCode?: string; resetToken?: string }> {
-    const res = await fetch('/api/auth/forgot-password', {
+    const res = await authFetch('/api/auth/forgot-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
@@ -183,7 +212,7 @@ export const api = {
   },
 
   async verifyResetCode(email: string, code: string): Promise<{ success: boolean; resetToken: string }> {
-    const res = await fetch('/api/auth/verify-reset-code', {
+    const res = await authFetch('/api/auth/verify-reset-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, code }),
@@ -192,7 +221,7 @@ export const api = {
   },
 
   async resetPassword(params: { email: string; code?: string; resetToken?: string; newPassword: string }): Promise<{ success: boolean; message: string }> {
-    const res = await fetch('/api/auth/reset-password', {
+    const res = await authFetch('/api/auth/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),

@@ -44,6 +44,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Seamless URL rewrite: route /server-api directly to /api handlers (bypassing LiteSpeed /api interception)
+app.use((req, res, next) => {
+  if (req.url.startsWith('/server-api')) {
+    req.url = req.url.replace(/^\/server-api/, '/api');
+  }
+  next();
+});
+
 // -------------------------------------------------------------
 // Gemini AI Server-Side Client
 // -------------------------------------------------------------
@@ -2165,7 +2173,7 @@ async function start() {
   } else {
     app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      if (req.path.startsWith('/api') || req.path.startsWith('/server-api') || req.path.startsWith('/socket.io')) {
         return next();
       }
       res.sendFile(distIndex);
