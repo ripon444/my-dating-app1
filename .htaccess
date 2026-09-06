@@ -1,34 +1,9 @@
 # Apache / LiteSpeed Configuration for Lovemeetly
+# Node.js + Express handles both API and static frontend assets via Phusion Passenger
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
   # Security: Deny access to sensitive files and directories
   RewriteRule ^(\.env|\.git|data/|server/|src/|package\.json|bun\.lock|tsconfig.*) - [F,L]
-
-  # Proxy API and Socket.IO calls to local Node.js server (if running on port 3000)
-  <IfModule mod_proxy.c>
-    RewriteCond %{REQUEST_URI} ^/api/ [OR]
-    RewriteCond %{REQUEST_URI} ^/socket\.io/
-    RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
-  </IfModule>
-
-  # If dist directory exists, serve compiled dist/ assets and index.html
-  RewriteCond %{DOCUMENT_ROOT}/dist/index.html -f
-  RewriteRule ^$ dist/index.html [L]
-
-  RewriteCond %{DOCUMENT_ROOT}/dist/index.html -f
-  RewriteRule ^index\.html$ dist/index.html [L]
-
-  # Static assets rewrite to /dist/assets/
-  RewriteCond %{DOCUMENT_ROOT}/dist%{REQUEST_URI} -f
-  RewriteRule ^(.*)$ dist/$1 [L]
-
-  # Fallback for SPA routing
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteCond %{REQUEST_URI} !^/api/
-  RewriteCond %{REQUEST_URI} !^/socket\.io/
-  RewriteCond %{DOCUMENT_ROOT}/dist/index.html -f
-  RewriteRule ^ dist/index.html [L]
 </IfModule>
