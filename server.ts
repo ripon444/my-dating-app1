@@ -1715,7 +1715,7 @@ app.post('/api/calls/:id/end', async (req, res) => {
   res.json({ success: true, duration });
 });
 
-app.get('/api/calls/history', async (req, res) => {
+app.get(['/api/calls', '/api/calls/history'], async (req, res) => {
   const user = (req as any).user;
   if (!user) return res.json({ calls: [] });
 

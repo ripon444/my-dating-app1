@@ -50,6 +50,7 @@ import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './ty
 import { soundManager } from './utils/sound';
 import { api } from './services/api';
 import { getSocket } from './services/socket';
+import { FALLBACK_PROFILES } from './data/fallbackProfiles';
 
 // Helper function to extract profile target from Facebook-style URL
 function getProfileTargetFromUrl(): string | null {
@@ -113,7 +114,7 @@ function MainApp() {
   const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('swipe');
 
   // Discovery State
-  const [discoverProfiles, setDiscoverProfiles] = useState<Profile[]>([]);
+  const [discoverProfiles, setDiscoverProfiles] = useState<Profile[]>(() => FALLBACK_PROFILES);
   const [currentDeckIndex, setCurrentDeckIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<DiscoveryFilters>({
@@ -194,24 +195,44 @@ function MainApp() {
   // Initial Data Fetch
   const loadInitialData = async () => {
     try {
-      const [meData, discoverData, matchesData, convsData, callsData, notifsData] = await Promise.all([
+      const [meRes, discoverRes, matchesRes, convsRes, callsRes, notifsRes] = await Promise.allSettled([
         api.getMe(),
         api.getDiscoverProfiles(filters),
         api.getMatches(),
         api.getConversations(),
         api.getCallHistory(),
-        api.getNotifications().catch(() => ({ notifications: [] })),
+        api.getNotifications(),
       ]);
 
-      setCurrentUser(meData.user);
-      setCurrentProfile(meData.profile);
-      setDiscoverProfiles(discoverData.profiles);
-      setMatches(matchesData.matches);
-      setConversations(convsData.conversations);
-      setCallHistory(callsData.calls);
-      setNotifications(notifsData.notifications || []);
+      if (meRes.status === 'fulfilled' && meRes.value) {
+        setCurrentUser(meRes.value.user);
+        setCurrentProfile(meRes.value.profile);
+      }
+
+      if (discoverRes.status === 'fulfilled' && discoverRes.value?.profiles && discoverRes.value.profiles.length > 0) {
+        setDiscoverProfiles(discoverRes.value.profiles);
+      } else {
+        setDiscoverProfiles(FALLBACK_PROFILES);
+      }
+
+      if (matchesRes.status === 'fulfilled' && matchesRes.value) {
+        setMatches(matchesRes.value.matches || []);
+      }
+
+      if (convsRes.status === 'fulfilled' && convsRes.value) {
+        setConversations(convsRes.value.conversations || []);
+      }
+
+      if (callsRes.status === 'fulfilled' && callsRes.value) {
+        setCallHistory(callsRes.value.calls || []);
+      }
+
+      if (notifsRes.status === 'fulfilled' && notifsRes.value) {
+        setNotifications(notifsRes.value.notifications || []);
+      }
     } catch (err) {
       console.error('Failed to load initial app data:', err);
+      setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
     } finally {
       setIsLoading(false);
     }

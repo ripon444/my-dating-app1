@@ -1,6 +1,7 @@
 // API Service Layer with Token-Based Session Storage
 import { Profile, User, Match, Conversation, Message, Call, ExternalProvider, ExternalSyncLog, Report, AdminAnalytics, DiscoveryFilters } from '../types';
 import { safeStorage } from '../utils/storage';
+import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
 
 const TOKEN_KEY = 'globalmatch_auth_token';
 
@@ -219,16 +220,29 @@ export const api = {
 
   // Discovery
   async getDiscoverProfiles(filters?: Partial<DiscoveryFilters>): Promise<{ profiles: Profile[] }> {
-    const params = new URLSearchParams();
-    if (filters?.minAge) params.append('minAge', String(filters.minAge));
-    if (filters?.maxAge) params.append('maxAge', String(filters.maxAge));
-    if (filters?.gender) params.append('gender', filters.gender);
-    if (filters?.country) params.append('country', filters.country);
-    if (filters?.profileSource) params.append('source', filters.profileSource);
-    if (filters?.onlineOnly) params.append('onlineOnly', String(filters.onlineOnly));
+    try {
+      const params = new URLSearchParams();
+      if (filters?.minAge) params.append('minAge', String(filters.minAge));
+      if (filters?.maxAge) params.append('maxAge', String(filters.maxAge));
+      if (filters?.gender) params.append('gender', filters.gender);
+      if (filters?.country) params.append('country', filters.country);
+      if (filters?.profileSource) params.append('source', filters.profileSource);
+      if (filters?.onlineOnly) params.append('onlineOnly', String(filters.onlineOnly));
 
-    const res = await authFetch(`/api/discover?${params.toString()}`);
-    return res.json();
+      const res = await authFetch(`/api/discover?${params.toString()}`);
+      if (!res.ok) {
+        console.warn('[API Discover] Received non-OK status, falling back to local profiles');
+        return { profiles: FALLBACK_PROFILES };
+      }
+      const data = await res.json();
+      if (!data || !Array.isArray(data.profiles) || data.profiles.length === 0) {
+        return { profiles: FALLBACK_PROFILES };
+      }
+      return data;
+    } catch (err) {
+      console.warn('[API Discover] Request failed, using fallback profiles:', err);
+      return { profiles: FALLBACK_PROFILES };
+    }
   },
 
   // Likes & Matches
@@ -242,8 +256,13 @@ export const api = {
   },
 
   async getMatches(): Promise<{ matches: Match[] }> {
-    const res = await authFetch('/api/matches');
-    return res.json();
+    try {
+      const res = await authFetch('/api/matches');
+      if (!res.ok) return { matches: [] };
+      return res.json();
+    } catch {
+      return { matches: [] };
+    }
   },
 
   async unmatch(matchId: string): Promise<{ success: boolean }> {
@@ -253,8 +272,13 @@ export const api = {
 
   // Chat
   async getConversations(): Promise<{ conversations: Conversation[] }> {
-    const res = await authFetch('/api/conversations');
-    return res.json();
+    try {
+      const res = await authFetch('/api/conversations');
+      if (!res.ok) return { conversations: [] };
+      return res.json();
+    } catch {
+      return { conversations: [] };
+    }
   },
 
   async createOrGetConversation(targetUserId: string): Promise<{ conversation: Conversation }> {
@@ -354,8 +378,13 @@ export const api = {
   },
 
   async getCallHistory(): Promise<{ calls: Call[] }> {
-    const res = await authFetch('/api/calls/history');
-    return res.json();
+    try {
+      const res = await authFetch('/api/calls/history');
+      if (!res.ok) return { calls: [] };
+      return res.json();
+    } catch {
+      return { calls: [] };
+    }
   },
 
   // Subscriptions & Boosts

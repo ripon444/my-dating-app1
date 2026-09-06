@@ -106,12 +106,15 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
       {/* Background Image Carousel */}
       <div className="absolute inset-0 z-0 bg-stone-950">
         <img
-          src={photos[photoIndex]}
+          src={photos[photoIndex] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
           alt={profile.name}
           className="w-full h-full object-cover cursor-pointer"
           referrerPolicy="no-referrer"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
+          }}
           onClick={() => onViewDetails(profile)}
-          title="Click to view full Facebook profile"
+          title="Click to view full profile"
         />
         
         {/* Soft Multi-Stop Gradient Overlays for optimal readability */}
