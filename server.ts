@@ -22,7 +22,8 @@ import {
 } from './src/db/repository.ts';
 import { seedPostgresIfEmpty } from './src/db/seed.ts';
 import { initializePostgresTables } from './src/db/migrate.ts';
-import { syncSqliteWithPostgres, syncSingleUser } from './src/db/sync.ts';
+import { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite } from './src/db/sync.ts';
+export { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite };
 import { sendPasswordResetEmail } from './server/email.ts';
 import { db } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
@@ -2142,17 +2143,23 @@ process.on('unhandledRejection', (reason) => {
 // Vite Middleware / Static Serve & Immediate Server Startup
 // -------------------------------------------------------------
 async function start() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const distIndex = path.join(distPath, 'index.html');
+  const isProduction = process.env.NODE_ENV === 'production' || (!process.env.NODE_ENV && fs.existsSync(distIndex));
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+        return next();
+      }
+      res.sendFile(distIndex);
     });
   }
 

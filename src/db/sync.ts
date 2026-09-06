@@ -3,11 +3,119 @@ import { users, profiles } from './schema.ts';
 import { SqlHelper } from '../../server/db.ts';
 
 /**
- * Bi-directional / SQLite-to-Postgres user and profile sync
- * Ensures foreign keys and joins in PostgreSQL always find users and profiles
- * created via SQLite authentication and vice-versa.
+ * Bi-directional PostgreSQL <-> SQLite user and profile sync
+ * Ensures data in Neon PostgreSQL (such as registered users, profiles, follows)
+ * is seamlessly accessible in the SQLite caching layer and vice-versa.
  */
+export async function syncPostgresToSqlite() {
+  try {
+    const pgUsers = await db.select().from(users);
+    if (pgUsers && pgUsers.length > 0) {
+      for (const u of pgUsers) {
+        await SqlHelper.execute(
+          `INSERT OR REPLACE INTO users (
+            id, email, password, role, is_email_verified, is_age_verified, is_banned,
+            subscription_tier, subscription_expires_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            u.id,
+            u.email,
+            u.password || '',
+            u.role || 'USER',
+            u.isEmailVerified ?? 1,
+            u.isAgeVerified ?? 1,
+            u.isBanned ?? 0,
+            u.subscriptionTier || 'FREE',
+            u.subscriptionExpiresAt || null,
+            u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
+            u.updatedAt ? new Date(u.updatedAt).toISOString() : new Date().toISOString(),
+          ]
+        );
+      }
+      console.log(`[Sync Engine] Successfully synced ${pgUsers.length} users from PostgreSQL to SQLite.`);
+    }
+
+    const pgProfiles = await db.select().from(profiles);
+    if (pgProfiles && pgProfiles.length > 0) {
+      for (const p of pgProfiles) {
+        await SqlHelper.execute(
+          `INSERT OR REPLACE INTO profiles (
+            id, user_id, source_type, provider_id, provider_name, external_profile_id, external_profile_url,
+            last_synced_at, attribution_requirement, name, age, date_of_birth, gender, country, city, region,
+            approx_distance_km, bio, cover_photo, username, social_links_json, website, photos_json,
+            interests_json, languages_json, relationship_goal, education, profession, height, smoking,
+            drinking, children, compatibility_score, is_online, last_active, is_verified, is_boosted,
+            boost_expires_at, is_visible, show_age, show_approx_location, allow_calls, allow_messages,
+            created_at, updated_at
+          ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?,
+            ?, ?
+          )`,
+          [
+            p.id,
+            p.userId,
+            p.sourceType || 'native',
+            p.providerId || null,
+            p.providerName || null,
+            p.externalProfileId || null,
+            p.externalProfileUrl || null,
+            p.lastSyncedAt || null,
+            p.attributionRequirement || null,
+            p.name,
+            p.age || 25,
+            p.dateOfBirth || '1999-01-01',
+            p.gender || 'OTHER',
+            p.country || '',
+            p.city || '',
+            p.region || '',
+            p.approxDistanceKm || 15,
+            p.bio || '',
+            p.coverPhoto || '',
+            p.username || null,
+            p.socialLinksJson || '{}',
+            p.website || '',
+            p.photosJson || '[]',
+            p.interestsJson || '[]',
+            p.languagesJson || '[]',
+            p.relationshipGoal || 'Relationship',
+            p.education || null,
+            p.profession || null,
+            p.height || null,
+            p.smoking || null,
+            p.drinking || null,
+            p.children || null,
+            p.compatibilityScore || 85,
+            p.isOnline || 0,
+            p.lastActive || null,
+            p.isVerified || 1,
+            p.isBoosted || 0,
+            p.boostExpiresAt || null,
+            p.isVisible !== 0 ? 1 : 0,
+            p.showAge !== 0 ? 1 : 0,
+            p.showApproxLocation !== 0 ? 1 : 0,
+            p.allowCalls !== 0 ? 1 : 0,
+            p.allowMessages !== 0 ? 1 : 0,
+            p.createdAt ? new Date(p.createdAt).toISOString() : new Date().toISOString(),
+            p.updatedAt ? new Date(p.updatedAt).toISOString() : new Date().toISOString(),
+          ]
+        );
+      }
+      console.log(`[Sync Engine] Successfully synced ${pgProfiles.length} profiles from PostgreSQL to SQLite.`);
+    }
+  } catch (err) {
+    console.warn('[Sync Engine] PostgreSQL to SQLite sync warning (non-fatal):', err);
+  }
+}
+
 export async function syncSqliteWithPostgres() {
+  // First pull down any data from PostgreSQL into SQLite
+  await syncPostgresToSqlite();
+
   try {
     const sqliteUsers = await SqlHelper.queryAll<any>('SELECT * FROM users');
     if (!sqliteUsers || sqliteUsers.length === 0) return;

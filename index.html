@@ -34,6 +34,21 @@
         </style>
       </div>
     </div>
+    <script>
+      // Production fallback check: If index.html is served statically on a web host (e.g. LiteSpeed/cPanel)
+      // and raw TypeScript /src/main.tsx cannot be parsed, automatically redirect to the compiled /dist/ bundle
+      (function() {
+        var checkTimer = setTimeout(function() {
+          if (!window.__LOVE_REACT_LOADED__) {
+            var pathname = window.location.pathname;
+            if (pathname === '/' || pathname.endsWith('/index.html')) {
+              var target = (pathname.replace(/\/index\.html$/, '') || '') + '/dist/' + window.location.search + window.location.hash;
+              window.location.replace(target);
+            }
+          }
+        }, 2000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
