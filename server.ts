@@ -2172,10 +2172,10 @@ async function start() {
     });
   }
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`Lovemeetly Dating Platform Server running on http://0.0.0.0:${PORT}`);
+  const onServerReady = () => {
+    console.log(`Lovemeetly Dating Platform Server running on port ${PORT}`);
 
-    // Boot SQL databases and sync in background without blocking port 3000
+    // Boot SQL databases and sync in background without blocking server listen
     (async () => {
       try {
         await getSqlDb();
@@ -2187,7 +2187,14 @@ async function start() {
         console.warn('[Server Startup DB Warning]:', dbErr);
       }
     })();
-  });
+  };
+
+  // If running inside cPanel with Phusion Passenger, listen on 'passenger' or custom PORT if in production
+  if (typeof (global as any).PhusionPassenger !== 'undefined') {
+    (httpServer as any).listen('passenger', onServerReady);
+  } else {
+    httpServer.listen(PORT, '0.0.0.0', onServerReady);
+  }
 }
 
 start();
