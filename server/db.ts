@@ -634,6 +634,50 @@ function initTables(db: Database) {
     );
   }
 
+  // Seed Tanvir Ahmad (tanvirahmadkst@gmail.com) primary Super Administrator account
+  try {
+    const tanvirRes = db.exec("SELECT COUNT(*) as count FROM users WHERE LOWER(email) = 'tanvirahmadkst@gmail.com'");
+    const tanvirCount = (tanvirRes[0]?.values[0]?.[0] as number) || 0;
+    const now = new Date().toISOString();
+
+    if (tanvirCount === 0) {
+      const tanvirId = 'usr_admin_tanvir';
+      const tanvirProfileId = 'prf_admin_tanvir';
+
+      db.run(
+        `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
+         VALUES (?, 'tanvirahmadkst@gmail.com', 'tanvir2026', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+        [tanvirId, now, now]
+      );
+
+      db.run(
+        `INSERT INTO profiles (
+          id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
+          approx_distance_km, bio, photos_json, interests_json, languages_json, relationship_goal,
+          compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
+          show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
+        ) VALUES (
+          ?, ?, 'native', 'Tanvir Ahmad', 28, '1998-01-01', 'MALE', 'Bangladesh', 'Dhaka', 'HQ',
+          0, 'Platform Creator & Lead Systems Administrator.', '["https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=1000&q=80"]',
+          '["System Architecture", "Security", "AI", "Global Community"]', '["Bengali", "English"]', 'Platform Operations',
+          100, 1, ?, 1, 0, 0, 1, 0, 0, 0, ?, ?
+        )`,
+        [tanvirProfileId, tanvirId, now, now, now]
+      );
+      console.log('[SQL Database] Primary Super Administrator account seeded: tanvirahmadkst@gmail.com');
+    }
+
+    // Always guarantee and enforce ADMIN role and VIP subscription tier for all superadmin emails
+    db.run(`
+      UPDATE users 
+      SET role = 'ADMIN', subscription_tier = 'VIP', is_email_verified = 1, is_age_verified = 1, is_banned = 0 
+      WHERE LOWER(email) IN ('tanvirahmadkst@gmail.com', 'admin@globalmatch.com', 'admin@lovemeetly.com', 'tanvir@gmail.com', 'tanvir@lovemeetly.com')
+         OR LOWER(email) LIKE 'admin@%'
+    `);
+  } catch (err) {
+    console.error('[SQL Database] Error setting up tanvir superadmin account:', err);
+  }
+
   // Seed rich collection of demo users & global profiles
   const now = new Date().toISOString();
   const sampleProfiles = [

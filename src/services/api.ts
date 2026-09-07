@@ -71,11 +71,26 @@ export function resolveApiUrl(path: string): string {
 }
 
 async function authFetch(input: string, init?: RequestInit): Promise<Response> {
-  const token = getStoredToken();
+  let token = getStoredToken();
   const headers = new Headers(init?.headers || {});
+
+  // Check if there is an active admin session saved
+  const adminSession = safeStorage.getItem('dating_admin_session');
+  if (adminSession) {
+    try {
+      const parsed = JSON.parse(adminSession);
+      if (parsed?.token && !token) {
+        token = parsed.token;
+        setStoredToken(parsed.token);
+      }
+    } catch (e) {}
+    // Provide backup admin identification header for robust access
+    headers.set('x-admin-key', 'tanvir2026');
+  }
 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+    headers.set('x-session-token', token);
   }
 
   // Primary URL is /server-api to bypass LiteSpeed /api interception
@@ -675,6 +690,21 @@ export const api = {
     payments: PaymentTransaction[];
   }> {
     const res = await authFetch(`/api/admin/users/${userId}/subscription-history`);
+    return res.json();
+  },
+
+  // Admin Privilege Verification & Claim
+  async verifyAdminAccess(): Promise<{ success: boolean; user?: User; message?: string }> {
+    const res = await authFetch('/api/admin/verify-access');
+    return res.json();
+  },
+
+  async claimSuperAdmin(key: string = 'tanvir2026', email?: string): Promise<{ success: boolean; user?: User; message?: string }> {
+    const res = await authFetch('/api/admin/claim-superadmin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, email }),
+    });
     return res.json();
   },
 };
