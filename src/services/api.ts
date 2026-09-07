@@ -1,5 +1,21 @@
 // API Service Layer with Token-Based Session Storage
-import { Profile, User, Match, Conversation, Message, Call, ExternalProvider, ExternalSyncLog, Report, AdminAnalytics, DiscoveryFilters } from '../types';
+import {
+  Profile,
+  User,
+  Match,
+  Conversation,
+  Message,
+  Call,
+  ExternalProvider,
+  ExternalSyncLog,
+  Report,
+  AdminAnalytics,
+  DiscoveryFilters,
+  SubscriptionPlan,
+  PaymentTransaction,
+  PaymentSummaryStats,
+  NowPaymentsSettings,
+} from '../types';
 import { safeStorage } from '../utils/storage';
 import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
 
@@ -417,6 +433,71 @@ export const api = {
   },
 
   // Subscriptions & Boosts
+  async getSubscriptionPlans(): Promise<{ plans: SubscriptionPlan[] }> {
+    try {
+      const res = await fetch('/api/subscriptions/plans');
+      if (!res.ok) return { plans: [] };
+      return res.json();
+    } catch {
+      return { plans: [] };
+    }
+  },
+
+  async getMySubscriptionStatus(): Promise<{
+    user: User;
+    tier: string;
+    expiresAt: string | null;
+    daysRemaining: number;
+    activeSubscription: any;
+    paymentHistory: PaymentTransaction[];
+  }> {
+    const res = await authFetch('/api/subscriptions/my-status');
+    return res.json();
+  },
+
+  async subscribeFree(planId: string): Promise<{ success: boolean; message: string; user: User; expiresAt: string }> {
+    const res = await authFetch('/api/subscriptions/subscribe-free', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to activate free subscription');
+    return data;
+  },
+
+  async createPaymentInvoice(planId: string): Promise<{
+    success: boolean;
+    orderId: string;
+    invoiceUrl: string;
+    invoiceId?: string;
+    amount: number;
+    currency: string;
+    planName: string;
+  }> {
+    const res = await authFetch('/api/payments/create-invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Payment initialization failed');
+    return data;
+  },
+
+  async checkPaymentStatus(orderId: string): Promise<{
+    orderId: string;
+    paymentStatus: string;
+    isCompleted: boolean;
+    amount: number;
+    currency: string;
+    planName: string;
+    user?: User;
+  }> {
+    const res = await authFetch(`/api/payments/check-status/${orderId}`);
+    return res.json();
+  },
+
   async checkoutSubscription(tier: 'PREMIUM' | 'VIP'): Promise<{ success: boolean; user: User; message: string }> {
     const res = await authFetch('/api/subscriptions/checkout', {
       method: 'POST',
@@ -491,6 +572,109 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, notes }),
     });
+    return res.json();
+  },
+
+  // Admin: Subscription Plans CRUD
+  async adminGetPlans(): Promise<{ plans: SubscriptionPlan[] }> {
+    const res = await authFetch('/api/admin/subscriptions/plans');
+    return res.json();
+  },
+
+  async adminCreatePlan(data: Partial<SubscriptionPlan>): Promise<{ success: boolean; plan: SubscriptionPlan }> {
+    const res = await authFetch('/api/admin/subscriptions/plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to create plan');
+    return result;
+  },
+
+  async adminUpdatePlan(id: string, data: Partial<SubscriptionPlan>): Promise<{ success: boolean; plan: SubscriptionPlan }> {
+    const res = await authFetch(`/api/admin/subscriptions/plans/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to update plan');
+    return result;
+  },
+
+  async adminDeletePlan(id: string): Promise<{ success: boolean }> {
+    const res = await authFetch(`/api/admin/subscriptions/plans/${id}`, {
+      method: 'DELETE',
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to delete plan');
+    return result;
+  },
+
+  // Admin: Payments List & Stats
+  async adminGetPayments(params?: { search?: string; status?: string; limit?: number }): Promise<{
+    transactions: PaymentTransaction[];
+    stats: PaymentSummaryStats;
+  }> {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.status) q.set('status', params.status);
+    if (params?.limit) q.set('limit', String(params.limit));
+    const res = await authFetch(`/api/admin/payments?${q.toString()}`);
+    return res.json();
+  },
+
+  // Admin: NOWPayments Settings
+  async adminGetPaymentSettings(): Promise<NowPaymentsSettings> {
+    const res = await authFetch('/api/admin/payments/settings');
+    return res.json();
+  },
+
+  async adminSavePaymentSettings(data: {
+    apiKey?: string;
+    ipnSecret?: string;
+    isSandbox?: boolean;
+    isEnabled?: boolean;
+    payoutCurrency?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const res = await authFetch('/api/admin/payments/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to save payment settings');
+    return result;
+  },
+
+  // Admin: User Subscription Controls
+  async adminManageUserSubscription(
+    userId: string,
+    data: {
+      action: 'activate' | 'extend' | 'cancel';
+      tier?: string;
+      duration?: number;
+      durationUnit?: string;
+      customExpiresAt?: string;
+    }
+  ): Promise<{ success: boolean; message: string; user: User }> {
+    const res = await authFetch(`/api/admin/users/${userId}/subscription`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Subscription action failed');
+    return result;
+  },
+
+  async adminGetUserSubscriptionHistory(userId: string): Promise<{
+    user: User;
+    subscriptions: any[];
+    payments: PaymentTransaction[];
+  }> {
+    const res = await authFetch(`/api/admin/users/${userId}/subscription-history`);
     return res.json();
   },
 };

@@ -30,12 +30,17 @@ import {
   Settings,
   Sliders,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Crown,
+  Coins
 } from 'lucide-react';
 import { AdminAnalytics, ExternalProvider, ExternalSyncLog, Report, User, Profile } from '../types';
 import { api } from '../services/api';
 import { Logo } from './Logo';
 import { safeStorage } from '../utils/storage';
+import { AdminSubscriptionPlansTab } from './admin/AdminSubscriptionPlansTab';
+import { AdminPaymentsTab } from './admin/AdminPaymentsTab';
+import { AdminUserSubscriptionModal } from './admin/AdminUserSubscriptionModal';
 
 interface AdminPortalProps {
   onBackToSite: () => void;
@@ -64,7 +69,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [logoutMessage, setLogoutMessage] = useState('');
 
   // Admin Dashboard State
-  const [activeTab, setActiveTab] = useState<'kpi' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings'>('kpi');
+  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'payments' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings'>('kpi');
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [providers, setProviders] = useState<ExternalProvider[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
@@ -72,6 +77,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [isSyncing, setIsSyncing] = useState<Record<string, boolean>>({});
   const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // User subscription management state
+  const [selectedUserForSub, setSelectedUserForSub] = useState<User | null>(null);
+  const [isUserSubModalOpen, setIsUserSubModalOpen] = useState(false);
 
   // User management state
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -479,6 +488,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
         <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-stone-800">
           {[
             { id: 'kpi', label: 'Platform KPIs & Revenue', icon: BarChart3 },
+            { id: 'subscriptions', label: 'Subscription Plans', icon: Crown },
+            { id: 'payments', label: 'Payments & Billing', icon: Coins },
             { id: 'users', label: `Users & Profiles (${profiles.length})`, icon: Users },
             { id: 'moderation', label: `Moderation Queue (${reports.filter(r => r.status === 'PENDING').length})`, icon: AlertTriangle },
             { id: 'providers', label: 'Partner Syndication Feeds', icon: Globe },
@@ -609,6 +620,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
         )}
 
         {/* ------------------------------------------------------------- */}
+        {/* TAB: SUBSCRIPTION PLANS MANAGEMENT */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'subscriptions' && (
+          <AdminSubscriptionPlansTab
+            onSuccessMessage={(msg) => {
+              setActionSuccessMsg(msg);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+            }}
+          />
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: PAYMENTS & BILLING */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'payments' && (
+          <AdminPaymentsTab
+            onSuccessMessage={(msg) => {
+              setActionSuccessMsg(msg);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+            }}
+          />
+        )}
+
+        {/* ------------------------------------------------------------- */}
         {/* TAB 2: USERS & PROFILES MANAGEMENT */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'users' && (
@@ -647,6 +682,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                 <thead className="bg-stone-950 text-stone-400 uppercase tracking-wider text-[10px] border-b border-stone-800">
                   <tr>
                     <th className="p-3.5">User</th>
+                    <th className="p-3.5">Tier</th>
                     <th className="p-3.5">Source</th>
                     <th className="p-3.5">Location</th>
                     <th className="p-3.5">Goal / Bio</th>
@@ -655,65 +691,105 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-800">
-                  {filteredProfiles.map((prof) => (
-                    <tr key={prof.id} className="hover:bg-stone-800/40 transition">
-                      <td className="p-3.5">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={prof.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
-                            alt={prof.name}
-                            className="w-10 h-10 rounded-xl object-cover border border-stone-700 shrink-0"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div>
-                            <div className="font-bold text-white flex items-center gap-1.5">
-                              <span>{prof.name}</span>
-                              <span className="text-stone-400 font-normal">({prof.age})</span>
-                              {prof.is_verified && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
+                  {filteredProfiles.map((prof) => {
+                    const profTier = (prof as any).subscription_tier || (prof as any).subscriptionTier || 'FREE';
+                    const isVip = profTier === 'VIP';
+
+                    return (
+                      <tr key={prof.id} className="hover:bg-stone-800/40 transition">
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={prof.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
+                              alt={prof.name}
+                              className="w-10 h-10 rounded-xl object-cover border border-stone-700 shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div>
+                              <div className="font-bold text-white flex items-center gap-1.5">
+                                <span>{prof.name}</span>
+                                <span className="text-stone-400 font-normal">({prof.age})</span>
+                                {prof.is_verified && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
+                              </div>
+                              <div className="text-[10px] text-stone-400">ID: {prof.id}</div>
                             </div>
-                            <div className="text-[10px] text-stone-400">ID: {prof.id}</div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="p-3.5">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          prof.source_type === 'native'
-                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        }`}>
-                          {prof.source_type === 'native' ? 'Native Member' : 'Partner Syndicated'}
-                        </span>
-                      </td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            isVip
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              : profTier === 'PREMIUM'
+                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                              : 'bg-stone-800 text-stone-400'
+                          }`}>
+                            {profTier}
+                          </span>
+                        </td>
 
-                      <td className="p-3.5 text-stone-300">
-                        {prof.city}, {prof.country}
-                      </td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            prof.source_type === 'native'
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          }`}>
+                            {prof.source_type === 'native' ? 'Native Member' : 'Partner Syndicated'}
+                          </span>
+                        </td>
 
-                      <td className="p-3.5 max-w-xs truncate text-stone-400">
-                        {prof.relationship_goal || prof.bio}
-                      </td>
+                        <td className="p-3.5 text-stone-300">
+                          {prof.city}, {prof.country}
+                        </td>
 
-                      <td className="p-3.5">
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
-                          Active
-                        </span>
-                      </td>
+                        <td className="p-3.5 max-w-xs truncate text-stone-400">
+                          {prof.relationship_goal || prof.bio}
+                        </td>
 
-                      <td className="p-3.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActionSuccessMsg(`Admin verified status toggled for ${prof.name}`);
-                            setTimeout(() => setActionSuccessMsg(''), 4000);
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[11px] font-semibold transition"
-                        >
-                          Manage
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="p-3.5">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
+                            Active
+                          </span>
+                        </td>
+
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedUserForSub({
+                                  id: prof.user_id,
+                                  email: (prof as any).email || `${prof.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@user.lovemeetly`,
+                                  role: 'USER',
+                                  subscriptionTier: profTier,
+                                  subscriptionExpiresAt: (prof as any).subscription_expires_at || null,
+                                  createdAt: prof.created_at,
+                                  profile: prof,
+                                });
+                                setIsUserSubModalOpen(true);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[11px] font-semibold transition flex items-center gap-1"
+                              title="Manage User Subscription"
+                            >
+                              <Crown className="w-3 h-3 text-amber-400" />
+                              <span>Subscription</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActionSuccessMsg(`Admin status toggled for ${prof.name}`);
+                                setTimeout(() => setActionSuccessMsg(''), 4000);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[11px] font-semibold transition"
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1017,6 +1093,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
               </button>
             </div>
           </div>
+        )}
+
+        {/* User Subscription Modal */}
+        {isUserSubModalOpen && selectedUserForSub && (
+          <AdminUserSubscriptionModal
+            user={selectedUserForSub}
+            isOpen={isUserSubModalOpen}
+            onClose={() => {
+              setIsUserSubModalOpen(false);
+              setSelectedUserForSub(null);
+            }}
+            onSuccess={(updatedUser) => {
+              setActionSuccessMsg(`Subscription updated successfully for ${updatedUser.email || updatedUser.id}`);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+              loadAdminData();
+            }}
+          />
         )}
 
       </div>

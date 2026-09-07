@@ -1,5 +1,5 @@
 import { db } from './index.ts';
-import { users, profiles } from './schema.ts';
+import { users, profiles, subscriptionPlans, paymentTransactions, userSubscriptions, paymentSettings } from './schema.ts';
 import { SqlHelper } from '../../server/db.ts';
 
 /**
@@ -300,5 +300,74 @@ export async function syncSingleUser(userId: string) {
     }
   } catch (err) {
     console.warn('[Sync Engine] syncSingleUser notice:', err);
+  }
+}
+
+/**
+ * Syncs a single payment transaction into PostgreSQL
+ */
+export async function syncSinglePayment(paymentId: string) {
+  try {
+    const pay = await SqlHelper.queryOne<any>('SELECT * FROM payment_transactions WHERE id = ?', [paymentId]);
+    if (!pay) return;
+
+    await db.insert(paymentTransactions).values({
+      id: pay.id,
+      userId: pay.user_id,
+      userEmail: pay.user_email,
+      userName: pay.user_name,
+      planId: pay.plan_id,
+      planName: pay.plan_name,
+      planTier: pay.plan_tier || 'VIP',
+      amount: Number(pay.amount) || 0,
+      currency: pay.currency || 'USDT',
+      cryptoCurrency: pay.crypto_currency || '',
+      paymentId: pay.payment_id,
+      orderId: pay.order_id,
+      paymentStatus: pay.payment_status || 'waiting',
+      paymentAddress: pay.payment_address,
+      transactionHash: pay.transaction_hash,
+      nowpaymentsResponseJson: pay.nowpayments_response_json,
+    }).onConflictDoUpdate({
+      target: paymentTransactions.id,
+      set: {
+        paymentStatus: pay.payment_status || 'waiting',
+        transactionHash: pay.transaction_hash,
+        paymentAddress: pay.payment_address,
+        paymentId: pay.payment_id,
+      }
+    }).catch(() => {});
+  } catch (err) {
+    console.warn('[Sync Engine] syncSinglePayment notice:', err);
+  }
+}
+
+/**
+ * Syncs a single user subscription record into PostgreSQL
+ */
+export async function syncSingleSubscription(subId: string) {
+  try {
+    const sub = await SqlHelper.queryOne<any>('SELECT * FROM user_subscriptions WHERE id = ?', [subId]);
+    if (!sub) return;
+
+    await db.insert(userSubscriptions).values({
+      id: sub.id,
+      userId: sub.user_id,
+      planId: sub.plan_id,
+      planName: sub.plan_name,
+      tier: sub.tier || 'VIP',
+      status: sub.status || 'active',
+      startedAt: sub.started_at,
+      expiresAt: sub.expires_at,
+      paymentId: sub.payment_id,
+    }).onConflictDoUpdate({
+      target: userSubscriptions.id,
+      set: {
+        status: sub.status || 'active',
+        expiresAt: sub.expires_at,
+      }
+    }).catch(() => {});
+  } catch (err) {
+    console.warn('[Sync Engine] syncSingleSubscription notice:', err);
   }
 }

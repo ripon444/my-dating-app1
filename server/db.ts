@@ -314,9 +314,141 @@ function initTables(db: Database) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_pair ON blocks(blocker_id, blocked_id);
     CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
     CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks(blocked_id);
+
+    CREATE TABLE IF NOT EXISTS subscription_plans (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      tier TEXT DEFAULT 'VIP',
+      description TEXT DEFAULT '',
+      price REAL NOT NULL DEFAULT 0,
+      currency TEXT DEFAULT 'USDT',
+      duration INTEGER NOT NULL DEFAULT 1,
+      duration_unit TEXT DEFAULT 'months',
+      features_json TEXT DEFAULT '[]',
+      is_active INTEGER DEFAULT 1,
+      display_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS payment_transactions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_email TEXT,
+      user_name TEXT,
+      plan_id TEXT NOT NULL,
+      plan_name TEXT,
+      plan_tier TEXT DEFAULT 'VIP',
+      amount REAL NOT NULL,
+      currency TEXT DEFAULT 'USDT',
+      crypto_currency TEXT DEFAULT '',
+      payment_id TEXT,
+      order_id TEXT NOT NULL,
+      payment_status TEXT NOT NULL DEFAULT 'waiting',
+      payment_address TEXT,
+      transaction_hash TEXT,
+      nowpayments_response_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS user_subscriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      plan_name TEXT,
+      tier TEXT DEFAULT 'VIP',
+      status TEXT DEFAULT 'active',
+      started_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      payment_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS payment_settings (
+      id TEXT PRIMARY KEY,
+      api_key TEXT DEFAULT '',
+      ipn_secret TEXT DEFAULT '',
+      is_sandbox INTEGER DEFAULT 0,
+      is_enabled INTEGER DEFAULT 1,
+      payout_currency TEXT DEFAULT 'USDT',
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payment_transactions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payment_transactions(order_id);
+    CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payment_transactions(payment_id);
+    CREATE INDEX IF NOT EXISTS idx_user_subs_user_id ON user_subscriptions(user_id);
   `);
 
   // Run safe schema migrations for existing databases
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        tier TEXT DEFAULT 'VIP',
+        description TEXT DEFAULT '',
+        price REAL NOT NULL DEFAULT 0,
+        currency TEXT DEFAULT 'USDT',
+        duration INTEGER NOT NULL DEFAULT 1,
+        duration_unit TEXT DEFAULT 'months',
+        features_json TEXT DEFAULT '[]',
+        is_active INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_email TEXT,
+        user_name TEXT,
+        plan_id TEXT NOT NULL,
+        plan_name TEXT,
+        plan_tier TEXT DEFAULT 'VIP',
+        amount REAL NOT NULL,
+        currency TEXT DEFAULT 'USDT',
+        crypto_currency TEXT DEFAULT '',
+        payment_id TEXT,
+        order_id TEXT NOT NULL,
+        payment_status TEXT NOT NULL DEFAULT 'waiting',
+        payment_address TEXT,
+        transaction_hash TEXT,
+        nowpayments_response_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS user_subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        plan_name TEXT,
+        tier TEXT DEFAULT 'VIP',
+        status TEXT DEFAULT 'active',
+        started_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        payment_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_settings (
+        id TEXT PRIMARY KEY,
+        api_key TEXT DEFAULT '',
+        ipn_secret TEXT DEFAULT '',
+        is_sandbox INTEGER DEFAULT 0,
+        is_enabled INTEGER DEFAULT 1,
+        payout_currency TEXT DEFAULT 'USDT',
+        updated_at TEXT NOT NULL
+      );
+    `);
+  } catch (e) {}
   try {
     db.run(`
       CREATE TABLE IF NOT EXISTS follows (
@@ -363,6 +495,114 @@ function initTables(db: Database) {
   try {
     db.run('CREATE INDEX IF NOT EXISTS idx_profiles_username ON profiles(username);');
   } catch (e) {}
+
+  // Seed default payment settings if not existing
+  try {
+    const paySetRes = db.exec("SELECT COUNT(*) as count FROM payment_settings WHERE id = 'nowpayments'");
+    const paySetCount = (paySetRes[0]?.values[0]?.[0] as number) || 0;
+    if (paySetCount === 0) {
+      db.run(
+        `INSERT INTO payment_settings (id, api_key, ipn_secret, is_sandbox, is_enabled, payout_currency, updated_at)
+         VALUES ('nowpayments', '', '', 0, 1, 'USDT', ?)`,
+        [new Date().toISOString()]
+      );
+    }
+  } catch (e) {}
+
+  // Seed default subscription plans if not existing
+  try {
+    const planRes = db.exec("SELECT COUNT(*) as count FROM subscription_plans");
+    const planCount = (planRes[0]?.values[0]?.[0] as number) || 0;
+    if (planCount === 0) {
+      const now = new Date().toISOString();
+      // 1. VIP Free Trial (0 USDT)
+      db.run(
+        `INSERT INTO subscription_plans (id, name, tier, description, price, currency, duration, duration_unit, features_json, is_active, display_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'plan_vip_free_1m',
+          'VIP Free Trial',
+          'VIP',
+          'Enjoy 1 month of 100% free VIP benefits to connect worldwide.',
+          0,
+          'USDT',
+          1,
+          'months',
+          JSON.stringify([
+            '1 Month 100% Free VIP Access',
+            'Explore All Elite Features',
+            'Unlimited Likes & Rewinds',
+            'Global Discovery & Passport',
+            'Zero Payment Required'
+          ]),
+          1,
+          0,
+          now,
+          now
+        ]
+      );
+
+      // 2. VIP 1 Month (15 USDT)
+      db.run(
+        `INSERT INTO subscription_plans (id, name, tier, description, price, currency, duration, duration_unit, features_json, is_active, display_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'plan_vip_1m',
+          'VIP 1 Month',
+          'VIP',
+          'Full premium access for 1 month with top priority placement.',
+          15,
+          'USDT',
+          1,
+          'months',
+          JSON.stringify([
+            'Unlimited Likes & Rewinds',
+            'Global Passport (Browse any country)',
+            'AI Real-time Translations',
+            'See Who Liked You',
+            'Top-of-Stack Placement',
+            '5 Weekly Super Likes',
+            'High-Definition Video Calling',
+            'Exclusive VIP Gold Badge'
+          ]),
+          1,
+          1,
+          now,
+          now
+        ]
+      );
+
+      // 3. VIP 2 Months (25 USDT)
+      db.run(
+        `INSERT INTO subscription_plans (id, name, tier, description, price, currency, duration, duration_unit, features_json, is_active, display_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'plan_vip_2m',
+          'VIP 2 Months',
+          'VIP',
+          'Best value: 2 months of VIP access with maximum exposure.',
+          25,
+          'USDT',
+          2,
+          'months',
+          JSON.stringify([
+            'Everything in VIP 1 Month',
+            'Save 17% with 2-Month VIP Pass',
+            'Priority Profile Verification',
+            'Extended VIP Concierge Access',
+            'Maximum Global Visibility'
+          ]),
+          1,
+          2,
+          now,
+          now
+        ]
+      );
+      console.log('[SQL Database] Initial subscription plans seeded (VIP Free 1M, VIP 1M, VIP 2M)');
+    }
+  } catch (e) {
+    console.warn('[SQL Database] Error checking/seeding plans:', e);
+  }
 
   // Seed default admin account if not existing
   const res = db.exec("SELECT COUNT(*) as count FROM users WHERE email = 'admin@globalmatch.com'");

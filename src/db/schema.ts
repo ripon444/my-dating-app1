@@ -233,3 +233,77 @@ export const followsRelations = relations(follows, ({ one }) => ({
     relationName: 'user_followers',
   }),
 }));
+
+// 13. Subscription Plans Table
+export const subscriptionPlans = pgTable('subscription_plans', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  tier: text('tier').default('VIP').notNull(),
+  description: text('description').default(''),
+  price: real('price').notNull().default(0),
+  currency: text('currency').default('USDT'),
+  duration: integer('duration').notNull().default(1),
+  durationUnit: text('duration_unit').default('months').notNull(), // 'days' | 'months'
+  featuresJson: text('features_json').default('[]'),
+  isActive: integer('is_active').default(1),
+  displayOrder: integer('display_order').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 14. Payment Transactions Table (NOWPayments & Free Plans)
+export const paymentTransactions = pgTable('payment_transactions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  userEmail: text('user_email'),
+  userName: text('user_name'),
+  planId: text('plan_id').notNull(),
+  planName: text('plan_name'),
+  planTier: text('plan_tier').default('VIP'),
+  amount: real('amount').notNull(),
+  currency: text('currency').default('USDT'),
+  cryptoCurrency: text('crypto_currency').default(''),
+  paymentId: text('payment_id'),
+  orderId: text('order_id').notNull(),
+  paymentStatus: text('payment_status').default('waiting').notNull(),
+  paymentAddress: text('payment_address'),
+  transactionHash: text('transaction_hash'),
+  nowpaymentsResponseJson: text('nowpayments_response_json'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  completedAt: timestamp('completed_at'),
+}, (table) => [
+  index('idx_payments_user_id').on(table.userId),
+  index('idx_payments_order_id').on(table.orderId),
+  index('idx_payments_payment_id').on(table.paymentId),
+  index('idx_payments_status').on(table.paymentStatus),
+]);
+
+// 15. User Subscriptions Table (Active / Expired Records & Abuse Prevention)
+export const userSubscriptions = pgTable('user_subscriptions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  planId: text('plan_id').notNull(),
+  planName: text('plan_name'),
+  tier: text('tier').default('VIP').notNull(),
+  status: text('status').default('active').notNull(), // 'active', 'expired', 'cancelled'
+  startedAt: text('started_at').notNull(),
+  expiresAt: text('expires_at').notNull(),
+  paymentId: text('payment_id'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_user_subs_user_id').on(table.userId),
+  index('idx_user_subs_status').on(table.status),
+]);
+
+// 16. Payment Settings Table (NOWPayments credentials and toggles)
+export const paymentSettings = pgTable('payment_settings', {
+  id: text('id').primaryKey(),
+  apiKey: text('api_key').default(''),
+  ipnSecret: text('ipn_secret').default(''),
+  isSandbox: integer('is_sandbox').default(0),
+  isEnabled: integer('is_enabled').default(1),
+  payoutCurrency: text('payout_currency').default('USDT'),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});

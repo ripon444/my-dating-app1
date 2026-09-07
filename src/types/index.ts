@@ -351,3 +351,123 @@ export interface AdminAnalytics {
   callsByDay: { date: string; voice: number; video: number }[];
   registrationsByCountry: { country: string; count: number }[];
 }
+
+// -------------------------------------------------------------
+// Subscription Plans & NOWPayments Payment Types
+// -------------------------------------------------------------
+export interface SubscriptionPlan {
+  id: string;
+  name: string;
+  tier: SubscriptionTier;
+  description: string;
+  price: number; // in USDT, 0 = FREE
+  price_usdt?: number; // alias
+  currency: string;
+  duration: number;
+  durationUnit: 'days' | 'months';
+  duration_unit?: 'days' | 'months' | 'years'; // alias
+  features: string[];
+  isActive: boolean;
+  is_active?: boolean; // alias
+  displayOrder: number;
+  display_order?: number; // alias
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+}
+
+export type PaymentStatus = 
+  | 'waiting' 
+  | 'confirming' 
+  | 'confirmed' 
+  | 'sending' 
+  | 'finished' 
+  | 'failed' 
+  | 'refunded' 
+  | 'expired';
+
+export interface PaymentTransaction {
+  id: string;
+  userId?: string;
+  user_id?: string;
+  userEmail?: string;
+  user_email?: string;
+  userName?: string;
+  user_name?: string;
+  planId?: string;
+  plan_id?: string;
+  planName?: string;
+  plan_name?: string;
+  planTier?: SubscriptionTier;
+  plan_tier?: SubscriptionTier;
+  amount: number;
+  currency: string;
+  cryptoCurrency?: string;
+  crypto_currency?: string;
+  pay_currency?: string;
+  paymentId?: string;
+  payment_id?: string;
+  orderId?: string;
+  order_id?: string;
+  paymentStatus?: PaymentStatus | string;
+  payment_status?: string;
+  paymentAddress?: string;
+  payment_address?: string;
+  transactionHash?: string;
+  transaction_hash?: string;
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+  completedAt?: string;
+  completed_at?: string;
+  invoice_url?: string;
+}
+
+export interface UserSubscriptionRecord {
+  id: string;
+  userId?: string;
+  user_id?: string;
+  planId?: string;
+  plan_id?: string;
+  planName?: string;
+  plan_name?: string;
+  tier: SubscriptionTier;
+  status: 'active' | 'expired' | 'cancelled';
+  startedAt?: string;
+  started_at?: string;
+  expiresAt?: string;
+  expires_at?: string;
+  paymentId?: string;
+  payment_id?: string;
+  createdAt?: string;
+  created_at?: string;
+}
+
+export interface PaymentSummaryStats {
+  totalPayments?: number;
+  successfulPayments?: number;
+  pendingPayments?: number;
+  failedPayments?: number;
+  totalRevenue?: number;
+  totalVolumeUsdt?: number;
+  totalTransactions?: number;
+  finishedCount?: number;
+  waitingCount?: number;
+  failedCount?: number;
+}
+
+export interface NowPaymentsSettings {
+  isConfigured?: boolean;
+  hasApiKey?: boolean;
+  hasIpnSecret?: boolean;
+  isSandbox?: boolean;
+  isEnabled?: boolean;
+  payoutCurrency?: string;
+  webhookUrl?: string;
+  apiKey?: string;
+  ipnSecret?: string;
+  apiKeyMasked?: string;
+  ipnSecretMasked?: string;
+}

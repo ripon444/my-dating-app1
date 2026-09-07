@@ -179,6 +179,73 @@ export async function initializePostgresTables() {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        tier TEXT DEFAULT 'VIP' NOT NULL,
+        description TEXT DEFAULT '',
+        price REAL NOT NULL DEFAULT 0,
+        currency TEXT DEFAULT 'USDT',
+        duration INTEGER NOT NULL DEFAULT 1,
+        duration_unit TEXT DEFAULT 'months' NOT NULL,
+        features_json TEXT DEFAULT '[]',
+        is_active INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_email TEXT,
+        user_name TEXT,
+        plan_id TEXT NOT NULL,
+        plan_name TEXT,
+        plan_tier TEXT DEFAULT 'VIP',
+        amount REAL NOT NULL,
+        currency TEXT DEFAULT 'USDT',
+        crypto_currency TEXT DEFAULT '',
+        payment_id TEXT,
+        order_id TEXT NOT NULL,
+        payment_status TEXT DEFAULT 'waiting' NOT NULL,
+        payment_address TEXT,
+        transaction_hash TEXT,
+        nowpayments_response_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS user_subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        plan_name TEXT,
+        tier TEXT DEFAULT 'VIP' NOT NULL,
+        status TEXT DEFAULT 'active' NOT NULL,
+        started_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        payment_id TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_settings (
+        id TEXT PRIMARY KEY,
+        api_key TEXT DEFAULT '',
+        ipn_secret TEXT DEFAULT '',
+        is_sandbox INTEGER DEFAULT 0,
+        is_enabled INTEGER DEFAULT 1,
+        payout_currency TEXT DEFAULT 'USDT',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payment_transactions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payment_transactions(order_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payment_transactions(payment_id);
+      CREATE INDEX IF NOT EXISTS idx_user_subs_user_id ON user_subscriptions(user_id);
+
       -- Safe Alter statements for upgrades
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS username TEXT;
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS social_links_json TEXT DEFAULT '{}';

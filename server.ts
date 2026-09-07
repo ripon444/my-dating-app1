@@ -25,6 +25,15 @@ import { initializePostgresTables } from './src/db/migrate.ts';
 import { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite } from './src/db/sync.ts';
 export { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite };
 import { sendPasswordResetEmail, sendWelcomeEmail } from './server/email.ts';
+import {
+  getNowPaymentsConfig,
+  saveNowPaymentsConfig,
+  verifyNowPaymentsSignature,
+  createNowPaymentsInvoice,
+  getNowPaymentsPaymentStatus,
+  calculateExpirationDate,
+} from './server/nowpayments.ts';
+import { syncSinglePayment, syncSingleSubscription } from './src/db/sync.ts';
 import { db } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
@@ -194,6 +203,9 @@ export function formatProfileRow(row: any): any {
 
 export function formatUserRow(row: any): any {
   if (!row) return null;
+  const isExpired = row.subscription_expires_at && new Date(row.subscription_expires_at) < new Date();
+  const effectiveTier = (isExpired && row.role !== 'ADMIN') ? 'FREE' : (row.subscription_tier || 'FREE');
+
   return {
     id: row.id,
     email: row.email,
@@ -201,8 +213,9 @@ export function formatUserRow(row: any): any {
     isEmailVerified: Boolean(row.is_email_verified),
     isAgeVerified: Boolean(row.is_age_verified),
     isBanned: Boolean(row.is_banned),
-    subscriptionTier: row.subscription_tier || 'FREE',
+    subscriptionTier: effectiveTier,
     subscriptionExpiresAt: row.subscription_expires_at,
+    isSubscriptionExpired: Boolean(isExpired),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1958,12 +1971,552 @@ app.post('/api/ai/translate', async (req, res) => {
   }
 });
 
-// 9. Subscriptions & Boosts
+// 9. Subscriptions & NOWPayments Integration
+
+// Helper to format plan row
+function formatPlanRow(row: any): any {
+  if (!row) return null;
+  let features: string[] = [];
+  try {
+    features = typeof row.features_json === 'string' ? JSON.parse(row.features_json) : (row.features_json || []);
+  } catch {
+    features = [];
+  }
+  const priceNum = Number(row.price) || 0;
+  const durationNum = Number(row.duration) || 1;
+  const durationUnit = row.duration_unit || 'months';
+  const isActive = Boolean(row.is_active);
+  const displayOrder = Number(row.display_order) || 0;
+
+  return {
+    id: row.id,
+    name: row.name,
+    tier: row.tier || 'VIP',
+    description: row.description || '',
+    price: priceNum,
+    price_usdt: priceNum,
+    currency: row.currency || 'USDT',
+    duration: durationNum,
+    durationUnit: durationUnit,
+    duration_unit: durationUnit,
+    features,
+    isActive: isActive,
+    is_active: isActive,
+    displayOrder: displayOrder,
+    display_order: displayOrder,
+    createdAt: row.created_at,
+    created_at: row.created_at,
+    updatedAt: row.updated_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// 9.1 Public: Get Active Subscription Plans
+app.get('/api/subscriptions/plans', async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>(
+      'SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY display_order ASC, price ASC'
+    );
+    const plans = rows.map(formatPlanRow);
+    res.json({ plans });
+  } catch (err: any) {
+    console.error('[Get Plans Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve subscription plans' });
+  }
+});
+
+// 9.2 User: Current Subscription Status & History
+app.get('/api/subscriptions/my-status', async (req, res) => {
+  const user = (req as any).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+  try {
+    const userRow = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
+    const activeSub = await SqlHelper.queryOne<any>(
+      "SELECT * FROM user_subscriptions WHERE user_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+      [user.id]
+    );
+
+    const history = await SqlHelper.queryAll<any>(
+      'SELECT * FROM payment_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20',
+      [user.id]
+    );
+
+    let daysRemaining = 0;
+    if (userRow?.subscription_expires_at) {
+      const exp = new Date(userRow.subscription_expires_at).getTime();
+      const now = Date.now();
+      if (exp > now) {
+        daysRemaining = Math.ceil((exp - now) / 86400000);
+      }
+    }
+
+    res.json({
+      user: formatUserRow(userRow),
+      tier: userRow?.subscription_tier || 'FREE',
+      expiresAt: userRow?.subscription_expires_at || null,
+      daysRemaining,
+      activeSubscription: activeSub || null,
+      paymentHistory: history,
+    });
+  } catch (err: any) {
+    console.error('[My Status Error]:', err);
+    res.status(500).json({ error: 'Failed to load subscription status' });
+  }
+});
+
+// 9.3 User: Activate Free / Promotional Subscription Plan
+app.post('/api/subscriptions/subscribe-free', async (req, res) => {
+  const user = (req as any).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+  const { planId } = req.body;
+  if (!planId) return res.status(400).json({ error: 'Plan ID is required' });
+
+  try {
+    const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
+    if (!plan) return res.status(404).json({ error: 'Subscription plan not found' });
+    if (!plan.is_active) return res.status(400).json({ error: 'This subscription plan is currently not available.' });
+    if (Number(plan.price) !== 0) {
+      return res.status(400).json({ error: 'This is a paid plan and cannot be activated via free checkout.' });
+    }
+
+    // Abuse Prevention 1: User already has an active VIP subscription
+    const freshUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
+    if (
+      freshUser?.subscription_tier !== 'FREE' &&
+      freshUser?.subscription_expires_at &&
+      new Date(freshUser.subscription_expires_at) > new Date()
+    ) {
+      const expDate = new Date(freshUser.subscription_expires_at).toLocaleDateString();
+      return res.status(400).json({
+        error: `You already have an active ${freshUser.subscription_tier} membership until ${expDate}. You can choose a paid plan to extend or upgrade anytime.`,
+      });
+    }
+
+    // Abuse Prevention 2: Check if this user has already claimed this specific free plan
+    const priorClaim = await SqlHelper.queryOne<any>(
+      'SELECT id, created_at FROM user_subscriptions WHERE user_id = ? AND plan_id = ?',
+      [user.id, plan.id]
+    );
+    if (priorClaim) {
+      return res.status(400).json({
+        error: 'You have already claimed this free promotional subscription. Please upgrade to a paid VIP plan to continue enjoying unlimited premium features.',
+      });
+    }
+
+    const now = new Date();
+    const expiresAt = calculateExpirationDate(now, plan.duration, plan.duration_unit).toISOString();
+    const nowIso = now.toISOString();
+
+    const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+    const payId = 'pay_free_' + Date.now().toString(36);
+    const orderId = 'ord_free_' + Date.now().toString(36);
+
+    // Record transaction
+    await SqlHelper.execute(
+      `INSERT INTO payment_transactions (
+        id, user_id, user_email, user_name, plan_id, plan_name, plan_tier, amount, currency,
+        crypto_currency, payment_id, order_id, payment_status, created_at, updated_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'USDT', 'FREE', ?, ?, 'finished', ?, ?, ?)`,
+      [
+        payId,
+        user.id,
+        user.email,
+        user.name || 'User',
+        plan.id,
+        plan.name,
+        plan.tier || 'VIP',
+        payId,
+        orderId,
+        nowIso,
+        nowIso,
+        nowIso,
+      ]
+    );
+
+    // Record user subscription
+    await SqlHelper.execute(
+      `INSERT INTO user_subscriptions (
+        id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+      [
+        subId,
+        user.id,
+        plan.id,
+        plan.name,
+        plan.tier || 'VIP',
+        nowIso,
+        expiresAt,
+        payId,
+        nowIso,
+        nowIso,
+      ]
+    );
+
+    // Update user row
+    await SqlHelper.execute(
+      'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+      [plan.tier || 'VIP', expiresAt, nowIso, user.id]
+    );
+
+    const updatedUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
+
+    // Asynchronously sync
+    syncSingleUser(user.id).catch(() => {});
+    syncSinglePayment(payId).catch(() => {});
+    syncSingleSubscription(subId).catch(() => {});
+
+    res.json({
+      success: true,
+      message: `🎉 Free ${plan.name} activated successfully! Enjoy your VIP benefits until ${expiresAt.slice(0, 10)}.`,
+      user: formatUserRow(updatedUser),
+      expiresAt,
+    });
+  } catch (err: any) {
+    console.error('[Free Subscribe Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to activate free subscription' });
+  }
+});
+
+// 9.4 User: Create NOWPayments Crypto Invoice for Paid Plan
+app.post('/api/payments/create-invoice', async (req, res) => {
+  const user = (req as any).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+  const { planId } = req.body;
+  if (!planId) return res.status(400).json({ error: 'Plan ID is required' });
+
+  try {
+    const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
+    if (!plan) return res.status(404).json({ error: 'Subscription plan not found' });
+    if (!plan.is_active) return res.status(400).json({ error: 'This subscription plan is currently disabled.' });
+    if (Number(plan.price) <= 0) {
+      return res.status(400).json({ error: 'This plan is free. Please activate it directly without payment.' });
+    }
+
+    const config = await getNowPaymentsConfig();
+    if (!config.isEnabled) {
+      return res.status(400).json({ error: 'Online crypto payments are temporarily paused for maintenance.' });
+    }
+    if (!config.apiKey) {
+      return res.status(500).json({ error: 'NOWPayments API key is not configured yet. Please contact support or site administrator.' });
+    }
+
+    const orderId = 'ord_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+    const payRowId = 'pay_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
+    const nowIso = new Date().toISOString();
+
+    // Fetch user profile for name if available
+    const prof = await SqlHelper.queryOne<any>('SELECT name FROM profiles WHERE user_id = ?', [user.id]);
+    const userName = prof?.name || user.email.split('@')[0];
+
+    // Record pending transaction in database
+    await SqlHelper.execute(
+      `INSERT INTO payment_transactions (
+        id, user_id, user_email, user_name, plan_id, plan_name, plan_tier, amount, currency,
+        order_id, payment_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`,
+      [
+        payRowId,
+        user.id,
+        user.email,
+        userName,
+        plan.id,
+        plan.name,
+        plan.tier || 'VIP',
+        Number(plan.price),
+        plan.currency || 'USDT',
+        orderId,
+        nowIso,
+        nowIso,
+      ]
+    );
+
+    // Determine absolute URLs
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host') || 'lovemeetly.com';
+    const baseUrl = `${proto}://${host}`;
+
+    const invoiceResult = await createNowPaymentsInvoice({
+      orderId,
+      orderDescription: `Lovemeetly ${plan.name} (${plan.duration} ${plan.duration_unit}) - User ${user.email}`,
+      amount: Number(plan.price),
+      currency: plan.currency || 'USDT',
+      successUrl: `${baseUrl}/?payment_status=success&order_id=${orderId}`,
+      cancelUrl: `${baseUrl}/?payment_status=cancelled&order_id=${orderId}`,
+      ipnCallbackUrl: `${baseUrl}/api/payments/nowpayments-ipn`,
+    });
+
+    if (!invoiceResult.success || !invoiceResult.invoiceUrl) {
+      // Update transaction as failed
+      await SqlHelper.execute(
+        "UPDATE payment_transactions SET payment_status = 'failed', updated_at = ? WHERE id = ?",
+        [new Date().toISOString(), payRowId]
+      );
+      return res.status(400).json({ error: invoiceResult.error || 'Could not initiate NOWPayments checkout.' });
+    }
+
+    // Update transaction with invoice ID
+    await SqlHelper.execute(
+      'UPDATE payment_transactions SET payment_id = ?, updated_at = ? WHERE id = ?',
+      [invoiceResult.invoiceId || '', new Date().toISOString(), payRowId]
+    );
+
+    res.json({
+      success: true,
+      orderId,
+      invoiceUrl: invoiceResult.invoiceUrl,
+      invoiceId: invoiceResult.invoiceId,
+      amount: Number(plan.price),
+      currency: plan.currency || 'USDT',
+      planName: plan.name,
+    });
+  } catch (err: any) {
+    console.error('[Create Invoice Error]:', err);
+    res.status(500).json({ error: err.message || 'Payment initiation failed.' });
+  }
+});
+
+// 9.5 Webhook: NOWPayments IPN Instant Payment Notification
+app.post('/api/payments/nowpayments-ipn', async (req, res) => {
+  const signature = (req.headers['x-nowpayments-sig'] as string) || '';
+  const payload = req.body || {};
+
+  console.log('[NOWPayments IPN Received]', {
+    order_id: payload.order_id,
+    payment_id: payload.payment_id,
+    payment_status: payload.payment_status,
+    hasSignature: Boolean(signature),
+  });
+
+  try {
+    const config = await getNowPaymentsConfig();
+
+    // Verify cryptographic signature if IPN secret is configured
+    if (config.ipnSecret) {
+      const isValid = verifyNowPaymentsSignature(payload, signature, config.ipnSecret);
+      if (!isValid) {
+        console.warn('[NOWPayments IPN] Invalid HMAC signature! Verification failed.');
+        return res.status(400).send('Invalid signature');
+      }
+    } else {
+      console.warn('[NOWPayments IPN] IPN Secret is not set. Processing callback without signature verification.');
+    }
+
+    const orderId = payload.order_id;
+    const paymentId = String(payload.payment_id || payload.invoice_id || '');
+
+    // Locate transaction
+    const tx = await SqlHelper.queryOne<any>(
+      'SELECT * FROM payment_transactions WHERE order_id = ? OR payment_id = ?',
+      [orderId, paymentId]
+    );
+
+    if (!tx) {
+      console.warn('[NOWPayments IPN] Transaction record not found for orderId:', orderId, 'paymentId:', paymentId);
+      return res.status(200).json({ received: true, note: 'Order not found in database' });
+    }
+
+    const newStatus = (payload.payment_status || 'waiting').toLowerCase();
+    const payAddress = payload.pay_address || tx.payment_address || '';
+    const cryptoCur = payload.pay_currency || tx.crypto_currency || '';
+    const txHash = payload.tx_hash || payload.transaction_hash || tx.transaction_hash || '';
+    const nowIso = new Date().toISOString();
+
+    // Update payment transaction details
+    await SqlHelper.execute(
+      `UPDATE payment_transactions 
+       SET payment_status = ?, payment_address = ?, crypto_currency = ?, transaction_hash = ?,
+           payment_id = COALESCE(payment_id, ?), nowpayments_response_json = ?, updated_at = ?
+       WHERE id = ?`,
+      [newStatus, payAddress, cryptoCur, txHash, paymentId, JSON.stringify(payload), nowIso, tx.id]
+    );
+
+    // Auto-activate subscription when status is 'finished'
+    if (newStatus === 'finished') {
+      // Idempotency check: has this payment already activated a subscription?
+      const existingSub = await SqlHelper.queryOne<any>(
+        'SELECT id FROM user_subscriptions WHERE payment_id = ?',
+        [tx.id]
+      );
+
+      if (!existingSub) {
+        const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [tx.plan_id]);
+        const user = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [tx.user_id]);
+
+        if (plan && user) {
+          const targetTier = plan.tier || 'VIP';
+          // If user currently has active VIP, stack/extend from existing expiration date!
+          const baseDate = (
+            user.subscription_expires_at &&
+            new Date(user.subscription_expires_at) > new Date() &&
+            user.subscription_tier === targetTier
+          )
+            ? new Date(user.subscription_expires_at)
+            : new Date();
+
+          const expiresAt = calculateExpirationDate(baseDate, plan.duration, plan.duration_unit).toISOString();
+          const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+
+          // Record subscription
+          await SqlHelper.execute(
+            `INSERT INTO user_subscriptions (
+              id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+            [subId, user.id, plan.id, plan.name, targetTier, nowIso, expiresAt, tx.id, nowIso, nowIso]
+          );
+
+          // Update user tier and expiration
+          await SqlHelper.execute(
+            'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+            [targetTier, expiresAt, nowIso, user.id]
+          );
+
+          // Mark payment finished with completed_at
+          await SqlHelper.execute(
+            'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
+            [nowIso, nowIso, tx.id]
+          );
+
+          // Send in-app notification to user
+          const notifId = 'notif_' + Date.now().toString(36);
+          await SqlHelper.execute(
+            `INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at)
+             VALUES (?, ?, 'subscription', ?, ?, ?, 0, ?)`,
+            [
+              notifId,
+              user.id,
+              'VIP Subscription Activated! 👑',
+              `Your payment for ${plan.name} has been confirmed. Your VIP access is active until ${expiresAt.slice(0, 10)}. Enjoy all premium global features!`,
+              JSON.stringify({ planId: plan.id, tier: targetTier, expiresAt }),
+              nowIso,
+            ]
+          );
+
+          // Asynchronously sync
+          syncSingleUser(user.id).catch(() => {});
+          syncSinglePayment(tx.id).catch(() => {});
+          syncSingleSubscription(subId).catch(() => {});
+
+          console.log(`[NOWPayments IPN] VIP Plan ${plan.name} automatically activated for user ${user.id} until ${expiresAt}`);
+        }
+      } else {
+        console.log('[NOWPayments IPN] Payment already fulfilled for subscription ID:', existingSub.id);
+      }
+    }
+
+    res.status(200).json({ status: 'ok', received: true });
+  } catch (err: any) {
+    console.error('[NOWPayments IPN Error]:', err);
+    res.status(500).send('IPN processing error');
+  }
+});
+
+// 9.6 User: Check Payment Status & Auto-verify
+app.get('/api/payments/check-status/:orderId', async (req, res) => {
+  const user = (req as any).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+  const { orderId } = req.params;
+
+  try {
+    const tx = await SqlHelper.queryOne<any>(
+      'SELECT * FROM payment_transactions WHERE order_id = ? AND user_id = ?',
+      [orderId, user.id]
+    );
+
+    if (!tx) return res.status(404).json({ error: 'Payment transaction not found' });
+
+    // If still in waiting / confirming status and we have a payment_id, poll NOWPayments API for real-time status
+    if (tx.payment_status !== 'finished' && tx.payment_id) {
+      try {
+        const live = await getNowPaymentsPaymentStatus(tx.payment_id);
+        if (live && live.payment_status) {
+          const liveStatus = live.payment_status.toLowerCase();
+          if (liveStatus !== tx.payment_status) {
+            const nowIso = new Date().toISOString();
+            await SqlHelper.execute(
+              'UPDATE payment_transactions SET payment_status = ?, updated_at = ? WHERE id = ?',
+              [liveStatus, nowIso, tx.id]
+            );
+            tx.payment_status = liveStatus;
+
+            // If finished, activate!
+            if (liveStatus === 'finished') {
+              const existingSub = await SqlHelper.queryOne<any>(
+                'SELECT id FROM user_subscriptions WHERE payment_id = ?',
+                [tx.id]
+              );
+              if (!existingSub) {
+                const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [tx.plan_id]);
+                const freshUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
+                if (plan && freshUser) {
+                  const targetTier = plan.tier || 'VIP';
+                  const baseDate = (
+                    freshUser.subscription_expires_at &&
+                    new Date(freshUser.subscription_expires_at) > new Date() &&
+                    freshUser.subscription_tier === targetTier
+                  )
+                    ? new Date(freshUser.subscription_expires_at)
+                    : new Date();
+
+                  const expiresAt = calculateExpirationDate(baseDate, plan.duration, plan.duration_unit).toISOString();
+                  const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+
+                  await SqlHelper.execute(
+                    `INSERT INTO user_subscriptions (
+                      id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+                    [subId, freshUser.id, plan.id, plan.name, targetTier, nowIso, expiresAt, tx.id, nowIso, nowIso]
+                  );
+
+                  await SqlHelper.execute(
+                    'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+                    [targetTier, expiresAt, nowIso, freshUser.id]
+                  );
+
+                  await SqlHelper.execute(
+                    'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
+                    [nowIso, nowIso, tx.id]
+                  );
+
+                  syncSingleUser(freshUser.id).catch(() => {});
+                  syncSinglePayment(tx.id).catch(() => {});
+                  syncSingleSubscription(subId).catch(() => {});
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Live Poll Notice]:', err);
+      }
+    }
+
+    const updatedUserRow = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
+
+    res.json({
+      orderId: tx.order_id,
+      paymentStatus: tx.payment_status,
+      isCompleted: tx.payment_status === 'finished',
+      amount: tx.amount,
+      currency: tx.currency,
+      planName: tx.plan_name,
+      user: formatUserRow(updatedUserRow),
+    });
+  } catch (err: any) {
+    console.error('[Check Status Error]:', err);
+    res.status(500).json({ error: 'Failed to query payment status' });
+  }
+});
+
+// Legacy fallback route for backwards compatibility
 app.post('/api/subscriptions/checkout', async (req, res) => {
   const user = (req as any).user;
   if (!user) return res.status(401).json({ error: 'Authentication required' });
 
-  const { tier } = req.body;
+  const { tier = 'VIP' } = req.body;
   const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
 
   await SqlHelper.execute(
@@ -1979,6 +2532,458 @@ app.post('/api/subscriptions/checkout', async (req, res) => {
     message: `Successfully upgraded to ${tier}!`,
   });
 });
+
+// -------------------------------------------------------------
+// ADMIN: Subscription Plans & Payment Management Routes
+// -------------------------------------------------------------
+
+// Admin Middleware Check
+const requireAdmin = (req: any, res: any, next: any) => {
+  const user = req.user;
+  if (!user || user.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
+  }
+  next();
+};
+
+// A1. Admin: Get All Subscription Plans (Active & Inactive)
+app.get('/api/admin/subscriptions/plans', requireAdmin, async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>(
+      'SELECT * FROM subscription_plans ORDER BY display_order ASC, price ASC'
+    );
+    const plans = rows.map(formatPlanRow);
+    res.json({ plans });
+  } catch (err: any) {
+    console.error('[Admin Plans Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve plans' });
+  }
+});
+
+// A2. Admin: Create New Subscription Plan
+app.post('/api/admin/subscriptions/plans', requireAdmin, async (req, res) => {
+  const {
+    name,
+    tier = 'VIP',
+    description = '',
+    price,
+    price_usdt,
+    currency = 'USDT',
+    duration = 1,
+    durationUnit,
+    duration_unit,
+    features = [],
+    isActive,
+    is_active,
+    displayOrder,
+    display_order,
+  } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Plan name is required' });
+  }
+
+  const rawPrice = price !== undefined ? price : price_usdt;
+  const rawUnit = durationUnit !== undefined ? durationUnit : duration_unit;
+  const rawActive = isActive !== undefined ? isActive : is_active;
+  const rawOrder = displayOrder !== undefined ? displayOrder : display_order;
+
+  const cleanPrice = Math.max(0, Number(rawPrice) || 0);
+  const cleanDuration = Math.max(1, parseInt(String(duration), 10) || 1);
+  const cleanUnit = (rawUnit === 'days' ? 'days' : 'months');
+  const planId = 'plan_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+  const nowIso = new Date().toISOString();
+
+  try {
+    await SqlHelper.execute(
+      `INSERT INTO subscription_plans (
+        id, name, tier, description, price, currency, duration, duration_unit,
+        features_json, is_active, display_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        planId,
+        name.trim(),
+        (tier || 'VIP').toUpperCase(),
+        description.trim(),
+        cleanPrice,
+        (currency || 'USDT').toUpperCase(),
+        cleanDuration,
+        cleanUnit,
+        JSON.stringify(Array.isArray(features) ? features : []),
+        rawActive !== false ? 1 : 0,
+        Number(rawOrder) || 0,
+        nowIso,
+        nowIso,
+      ]
+    );
+
+    const created = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
+    res.json({ success: true, plan: formatPlanRow(created) });
+  } catch (err: any) {
+    console.error('[Admin Create Plan Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to create subscription plan' });
+  }
+});
+
+// A3. Admin: Update Existing Subscription Plan
+app.put('/api/admin/subscriptions/plans/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const {
+    name,
+    tier,
+    description,
+    price,
+    price_usdt,
+    currency,
+    duration,
+    durationUnit,
+    duration_unit,
+    features,
+    isActive,
+    is_active,
+    displayOrder,
+    display_order,
+  } = req.body;
+
+  try {
+    const existing = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Plan not found' });
+
+    const rawPrice = price !== undefined ? price : price_usdt;
+    const rawUnit = durationUnit !== undefined ? durationUnit : duration_unit;
+    const rawActive = isActive !== undefined ? isActive : is_active;
+    const rawOrder = displayOrder !== undefined ? displayOrder : display_order;
+
+    const updatedName = name !== undefined ? name.trim() : existing.name;
+    const updatedTier = tier !== undefined ? tier.toUpperCase() : existing.tier;
+    const updatedDesc = description !== undefined ? description : existing.description;
+    const updatedPrice = rawPrice !== undefined ? Math.max(0, Number(rawPrice)) : existing.price;
+    const updatedCurrency = currency !== undefined ? currency.toUpperCase() : existing.currency;
+    const updatedDuration = duration !== undefined ? Math.max(1, parseInt(String(duration), 10)) : existing.duration;
+    const updatedUnit = rawUnit !== undefined ? (rawUnit === 'days' ? 'days' : 'months') : existing.duration_unit;
+    const updatedFeatures = features !== undefined ? JSON.stringify(Array.isArray(features) ? features : []) : existing.features_json;
+    const updatedActive = rawActive !== undefined ? (rawActive ? 1 : 0) : existing.is_active;
+    const updatedOrder = rawOrder !== undefined ? Number(rawOrder) : existing.display_order;
+    const nowIso = new Date().toISOString();
+
+    await SqlHelper.execute(
+      `UPDATE subscription_plans SET
+        name = ?, tier = ?, description = ?, price = ?, currency = ?, duration = ?,
+        duration_unit = ?, features_json = ?, is_active = ?, display_order = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        updatedName,
+        updatedTier,
+        updatedDesc,
+        updatedPrice,
+        updatedCurrency,
+        updatedDuration,
+        updatedUnit,
+        updatedFeatures,
+        updatedActive,
+        updatedOrder,
+        nowIso,
+        id,
+      ]
+    );
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [id]);
+    res.json({ success: true, plan: formatPlanRow(updated) });
+  } catch (err: any) {
+    console.error('[Admin Update Plan Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to update plan' });
+  }
+});
+
+// A4. Admin: Delete Subscription Plan
+app.delete('/api/admin/subscriptions/plans/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const existing = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Plan not found' });
+
+    await SqlHelper.execute('DELETE FROM subscription_plans WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Plan deleted successfully' });
+  } catch (err: any) {
+    console.error('[Admin Delete Plan Error]:', err);
+    res.status(500).json({ error: 'Failed to delete plan' });
+  }
+});
+
+// A5. Admin: Payment Transactions List & KPI Summary Statistics
+app.get('/api/admin/payments', requireAdmin, async (req, res) => {
+  const search = ((req.query.search as string) || '').trim().toLowerCase();
+  const status = ((req.query.status as string) || '').trim().toLowerCase();
+  const limit = Math.min(100, Math.max(10, parseInt((req.query.limit as string) || '50', 10)));
+
+  try {
+    let query = `
+      SELECT p.*, u.email as current_user_email, prof.name as current_user_name
+      FROM payment_transactions p
+      LEFT JOIN users u ON p.user_id = u.id
+      LEFT JOIN profiles prof ON p.user_id = prof.user_id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (status && status !== 'all') {
+      query += ' AND LOWER(p.payment_status) = ?';
+      params.push(status);
+    }
+
+    if (search) {
+      query += ' AND (LOWER(p.user_email) LIKE ? OR LOWER(p.order_id) LIKE ? OR LOWER(p.payment_id) LIKE ? OR LOWER(p.plan_name) LIKE ?)';
+      const term = `%${search}%`;
+      params.push(term, term, term, term);
+    }
+
+    query += ' ORDER BY p.created_at DESC LIMIT ?';
+    params.push(limit);
+
+    const rows = await SqlHelper.queryAll<any>(query, params);
+
+    // Compute Summary Statistics
+    const allStatsRows = await SqlHelper.queryAll<any>('SELECT payment_status, amount, currency FROM payment_transactions');
+
+    let totalPayments = allStatsRows.length;
+    let successfulPayments = 0;
+    let pendingPayments = 0;
+    let failedPayments = 0;
+    let totalRevenue = 0;
+
+    for (const r of allStatsRows) {
+      const st = (r.payment_status || '').toLowerCase();
+      const amt = Number(r.amount) || 0;
+      if (st === 'finished') {
+        successfulPayments++;
+        totalRevenue += amt;
+      } else if (['waiting', 'confirming', 'confirmed', 'sending'].includes(st)) {
+        pendingPayments++;
+      } else if (['failed', 'expired', 'refunded'].includes(st)) {
+        failedPayments++;
+      }
+    }
+
+    const transactions = rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      userEmail: r.user_email || r.current_user_email || 'Unknown',
+      userName: r.user_name || r.current_user_name || 'User',
+      planId: r.plan_id,
+      planName: r.plan_name || 'VIP Plan',
+      planTier: r.plan_tier || 'VIP',
+      amount: Number(r.amount) || 0,
+      currency: r.currency || 'USDT',
+      cryptoCurrency: r.crypto_currency || '',
+      paymentId: r.payment_id || '',
+      orderId: r.order_id,
+      paymentStatus: r.payment_status || 'waiting',
+      paymentAddress: r.payment_address || '',
+      transactionHash: r.transaction_hash || '',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      completedAt: r.completed_at || null,
+    }));
+
+    res.json({
+      transactions,
+      stats: {
+        totalPayments,
+        successfulPayments,
+        pendingPayments,
+        failedPayments,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Admin Payments List Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve payment records' });
+  }
+});
+
+// A6. Admin: Get NOWPayments Gateway Settings
+app.get('/api/admin/payments/settings', requireAdmin, async (req, res) => {
+  try {
+    const config = await getNowPaymentsConfig();
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host') || 'lovemeetly.com';
+    const webhookUrl = `${proto}://${host}/api/payments/nowpayments-ipn`;
+
+    const mask = (str: string) => {
+      if (!str) return '';
+      if (str.length <= 8) return '********';
+      return str.slice(0, 4) + '****************' + str.slice(-4);
+    };
+
+    res.json({
+      isConfigured: Boolean(config.apiKey),
+      hasApiKey: Boolean(config.apiKey),
+      hasIpnSecret: Boolean(config.ipnSecret),
+      isSandbox: config.isSandbox,
+      isEnabled: config.isEnabled,
+      payoutCurrency: config.payoutCurrency,
+      webhookUrl,
+      apiKeyMasked: mask(config.apiKey),
+      ipnSecretMasked: mask(config.ipnSecret),
+    });
+  } catch (err: any) {
+    console.error('[Admin Get Payment Settings Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch payment settings' });
+  }
+});
+
+// A7. Admin: Update NOWPayments Gateway Settings
+app.post('/api/admin/payments/settings', requireAdmin, async (req, res) => {
+  const { apiKey, ipnSecret, isSandbox, isEnabled, payoutCurrency } = req.body;
+
+  try {
+    const current = await getNowPaymentsConfig();
+    // Allow keeping existing values if masked or unchanged
+    const newApiKey = (apiKey && !apiKey.includes('****')) ? apiKey : current.apiKey;
+    const newIpnSecret = (ipnSecret && !ipnSecret.includes('****')) ? ipnSecret : current.ipnSecret;
+
+    const saved = await saveNowPaymentsConfig({
+      apiKey: newApiKey,
+      ipnSecret: newIpnSecret,
+      isSandbox: isSandbox !== undefined ? Boolean(isSandbox) : current.isSandbox,
+      isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : current.isEnabled,
+      payoutCurrency: payoutCurrency || current.payoutCurrency,
+    });
+
+    res.json({
+      success: true,
+      message: 'NOWPayments gateway configuration saved successfully!',
+      isConfigured: Boolean(saved.apiKey),
+      isSandbox: saved.isSandbox,
+      isEnabled: saved.isEnabled,
+      payoutCurrency: saved.payoutCurrency,
+    });
+  } catch (err: any) {
+    console.error('[Admin Save Payment Settings Error]:', err);
+    res.status(500).json({ error: 'Failed to update payment settings' });
+  }
+});
+
+// A8. Admin: Manual User Subscription Controls (Activate, Extend, Cancel)
+app.post('/api/admin/users/:userId/subscription', requireAdmin, async (req, res) => {
+  const { userId } = req.params;
+  const { action, tier = 'VIP', duration = 1, durationUnit = 'months', customExpiresAt } = req.body;
+
+  try {
+    const userRow = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!userRow) return res.status(404).json({ error: 'User not found' });
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    if (action === 'activate') {
+      const expiresDate = customExpiresAt
+        ? new Date(customExpiresAt)
+        : calculateExpirationDate(now, Number(duration) || 1, durationUnit || 'months');
+      const expiresIso = expiresDate.toISOString();
+      const subId = 'sub_admin_' + Date.now().toString(36);
+
+      await SqlHelper.execute(
+        `INSERT INTO user_subscriptions (
+          id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
+        ) VALUES (?, ?, 'manual_admin', 'Admin Assigned VIP', ?, 'active', ?, ?, 'admin_manual', ?, ?)`,
+        [subId, userId, (tier || 'VIP').toUpperCase(), nowIso, expiresIso, nowIso, nowIso]
+      );
+
+      await SqlHelper.execute(
+        'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+        [(tier || 'VIP').toUpperCase(), expiresIso, nowIso, userId]
+      );
+
+      syncSingleUser(userId).catch(() => {});
+      const updatedUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [userId]);
+      return res.json({
+        success: true,
+        message: `Subscription successfully activated as ${tier} until ${expiresIso.slice(0, 10)}.`,
+        user: formatUserRow(updatedUser),
+      });
+    }
+
+    if (action === 'extend') {
+      const baseDate = (
+        userRow.subscription_expires_at &&
+        new Date(userRow.subscription_expires_at) > now
+      )
+        ? new Date(userRow.subscription_expires_at)
+        : now;
+
+      const newExpiresDate = calculateExpirationDate(baseDate, Number(duration) || 1, durationUnit || 'months');
+      const newExpiresIso = newExpiresDate.toISOString();
+
+      await SqlHelper.execute(
+        'UPDATE users SET subscription_tier = COALESCE(subscription_tier, ?), subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+        [(tier || 'VIP').toUpperCase(), newExpiresIso, nowIso, userId]
+      );
+
+      syncSingleUser(userId).catch(() => {});
+      const updatedUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [userId]);
+      return res.json({
+        success: true,
+        message: `Subscription extended by ${duration} ${durationUnit} until ${newExpiresIso.slice(0, 10)}.`,
+        user: formatUserRow(updatedUser),
+      });
+    }
+
+    if (action === 'cancel') {
+      await SqlHelper.execute(
+        "UPDATE user_subscriptions SET status = 'cancelled', updated_at = ? WHERE user_id = ? AND status = 'active'",
+        [nowIso, userId]
+      );
+
+      await SqlHelper.execute(
+        "UPDATE users SET subscription_tier = 'FREE', subscription_expires_at = NULL, updated_at = ? WHERE id = ?",
+        [nowIso, userId]
+      );
+
+      syncSingleUser(userId).catch(() => {});
+      const updatedUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [userId]);
+      return res.json({
+        success: true,
+        message: 'User subscription has been cancelled and reset to FREE tier.',
+        user: formatUserRow(updatedUser),
+      });
+    }
+
+    return res.status(400).json({ error: "Invalid action. Supported actions: 'activate', 'extend', 'cancel'." });
+  } catch (err: any) {
+    console.error('[Admin Subscription Control Error]:', err);
+    res.status(500).json({ error: err.message || 'Subscription control action failed' });
+  }
+});
+
+// A9. Admin: View User Subscription & Payment History
+app.get('/api/admin/users/:userId/subscription-history', requireAdmin, async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const userRow = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!userRow) return res.status(404).json({ error: 'User not found' });
+
+    const subscriptions = await SqlHelper.queryAll<any>(
+      'SELECT * FROM user_subscriptions WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
+
+    const payments = await SqlHelper.queryAll<any>(
+      'SELECT * FROM payment_transactions WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    );
+
+    res.json({
+      user: formatUserRow(userRow),
+      subscriptions,
+      payments,
+    });
+  } catch (err: any) {
+    console.error('[Admin User Sub History Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch user subscription history' });
+  }
+});
+
 
 app.post('/api/boosts/purchase', async (req, res) => {
   const user = (req as any).user;
