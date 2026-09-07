@@ -53,23 +53,29 @@
             var links = doc.querySelectorAll('link[rel="stylesheet"]');
             for (var i = 0; i < links.length; i++) {
               var href = links[i].getAttribute('href');
-              if (href && !document.querySelector('link[href="' + href + '"]')) {
-                var newLink = document.createElement('link');
-                newLink.rel = 'stylesheet';
-                newLink.href = href;
-                document.head.appendChild(newLink);
+              if (href) {
+                var distHref = href.startsWith('/assets/') ? '/dist' + href : href;
+                if (!document.querySelector('link[href="' + href + '"]') && !document.querySelector('link[href="' + distHref + '"]')) {
+                  var newLink = document.createElement('link');
+                  newLink.rel = 'stylesheet';
+                  newLink.href = distHref;
+                  document.head.appendChild(newLink);
+                }
               }
             }
 
             var scripts = doc.querySelectorAll('script[type="module"]');
             for (var j = 0; j < scripts.length; j++) {
               var src = scripts[j].getAttribute('src');
-              if (src && !document.querySelector('script[src="' + src + '"]')) {
-                var newScript = document.createElement('script');
-                newScript.type = 'module';
-                newScript.crossOrigin = 'anonymous';
-                newScript.src = src;
-                document.body.appendChild(newScript);
+              if (src) {
+                var distSrc = src.startsWith('/assets/') ? '/dist' + src : src;
+                if (!document.querySelector('script[src="' + src + '"]') && !document.querySelector('script[src="' + distSrc + '"]')) {
+                  var newScript = document.createElement('script');
+                  newScript.type = 'module';
+                  newScript.crossOrigin = 'anonymous';
+                  newScript.src = distSrc;
+                  document.body.appendChild(newScript);
+                }
               }
             }
           })
