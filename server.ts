@@ -24,7 +24,7 @@ import { seedPostgresIfEmpty } from './src/db/seed.ts';
 import { initializePostgresTables } from './src/db/migrate.ts';
 import { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite } from './src/db/sync.ts';
 export { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite };
-import { sendPasswordResetEmail } from './server/email.ts';
+import { sendPasswordResetEmail, sendWelcomeEmail } from './server/email.ts';
 import { db } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
@@ -448,6 +448,11 @@ app.post('/api/auth/register', async (req, res) => {
 
     // Synchronize newly created user & profile into PostgreSQL
     syncSingleUser(newUserId).catch((e) => console.warn('[Postgres Single User Sync Notice]:', e));
+
+    // Send fully branded Lovemeetly Welcome Email asynchronously
+    sendWelcomeEmail(cleanEmail, name).catch((mailErr) => {
+      console.warn('[Lovemeetly Welcome Mail] Non-blocking dispatch warning:', mailErr?.message || mailErr);
+    });
 
     // REQUIREMENT: DO NOT auto-login. Prompt user to manually log in.
     res.json({
