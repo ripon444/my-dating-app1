@@ -487,6 +487,23 @@ app.post('/api/auth/logout', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// Rate Limiting Structures for Password Reset Security
+// -------------------------------------------------------------
+interface ForgotReqLimit {
+  count: number;
+  firstRequestTime: number;
+  lastRequestTime: number;
+  blockedUntil?: number;
+}
+const forgotPasswordLimits = new Map<string, ForgotReqLimit>();
+
+interface VerifyAttemptLimit {
+  failedAttempts: number;
+  blockedUntil?: number;
+}
+const verifyCodeLimits = new Map<string, VerifyAttemptLimit>();
+
 // Password Reset Flows (Forgot Password, Verify Code, Update Password)
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
@@ -496,6 +513,58 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const rateLimitKey = `${cleanEmail}_${clientIp}`;
+
+    // Rate Limit Check (Cooldown & Max Requests per Hour)
+    const nowMs = Date.now();
+    const rateData = forgotPasswordLimits.get(rateLimitKey);
+
+    if (rateData?.blockedUntil && nowMs < rateData.blockedUntil) {
+      const waitMinutes = Math.ceil((rateData.blockedUntil - nowMs) / 60000);
+      return res.status(429).json({
+        error: `Too many password reset requests. For your security, please wait ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''} before trying again.`
+      });
+    }
+
+    if (rateData) {
+      // 60-second cooldown between consecutive email requests
+      const timeSinceLast = nowMs - rateData.lastRequestTime;
+      if (timeSinceLast < 60000) {
+        const remainingSeconds = Math.ceil((60000 - timeSinceLast) / 1000);
+        return res.status(429).json({
+          error: `Please wait ${remainingSeconds} second${remainingSeconds > 1 ? 's' : ''} before requesting a new verification code.`
+        });
+      }
+
+      // Max 5 requests within 1 hour
+      if (nowMs - rateData.firstRequestTime < 3600000) {
+        if (rateData.count >= 5) {
+          rateData.blockedUntil = nowMs + 30 * 60 * 1000; // Block for 30 minutes
+          forgotPasswordLimits.set(rateLimitKey, rateData);
+          return res.status(429).json({
+            error: 'Maximum password reset attempts exceeded for this hour. Please try again in 30 minutes.'
+          });
+        }
+        rateData.count += 1;
+        rateData.lastRequestTime = nowMs;
+        forgotPasswordLimits.set(rateLimitKey, rateData);
+      } else {
+        // Reset 1-hour window
+        forgotPasswordLimits.set(rateLimitKey, {
+          count: 1,
+          firstRequestTime: nowMs,
+          lastRequestTime: nowMs,
+        });
+      }
+    } else {
+      forgotPasswordLimits.set(rateLimitKey, {
+        count: 1,
+        firstRequestTime: nowMs,
+        lastRequestTime: nowMs,
+      });
+    }
+
     const userRow = await SqlHelper.queryOne<{ id: string; email: string }>('SELECT id, email FROM users WHERE LOWER(email) = ?', [cleanEmail]);
 
     if (!userRow) {
@@ -506,11 +575,11 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const profileRow = await SqlHelper.queryOne<{ name: string }>('SELECT name FROM profiles WHERE user_id = ?', [userRow.id]);
     const userName = profileRow?.name || '';
 
-    // Generate 6-digit verification code
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Cryptographically secure 6-digit verification code
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
     const resetToken = 'rst_' + Date.now().toString(36) + '_' + crypto.randomBytes(16).toString('hex');
     const now = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes validity
 
     // Invalidate any previous unused tokens for this email
     await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE LOWER(email) = ? AND used = 0', [cleanEmail]);
@@ -522,23 +591,28 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       [recordId, cleanEmail, otpCode, resetToken, expiresAt, now]
     );
 
-    // Send email using SMTP
+    // Dispatch verification code strictly to user's registered email
     const mailResult = await sendPasswordResetEmail(cleanEmail, otpCode, userName);
 
-    console.log(`[Auth Password Reset] Code generated for ${cleanEmail}: ${otpCode} (Mail sent: ${mailResult.success})`);
+    if (!mailResult.success) {
+      // Invalidate the record if sending failed
+      await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [recordId]);
+      console.error(`[Auth Password Reset] Failed to send email to ${cleanEmail}:`, mailResult.error);
+      return res.status(503).json({
+        error: 'Unable to deliver the verification code to your email address at this time. Please check your email or try again later.'
+      });
+    }
 
+    console.log(`[Auth Password Reset] Verification code dispatched via SMTP to ${cleanEmail}`);
+
+    // Strictly return success without exposing code, devCode or resetToken
     return res.json({
       success: true,
-      message: mailResult.success
-        ? `A 6-digit reset code has been sent to ${cleanEmail}. Please check your inbox.`
-        : `A reset code has been generated for ${cleanEmail}.`,
-      mailSent: mailResult.success,
-      devCode: otpCode,
-      resetToken,
+      message: `A 6-digit verification code has been sent to ${cleanEmail}. Please check your inbox and enter the code below.`,
     });
   } catch (err: any) {
-    console.error('[Auth Password Reset] Error:', err);
-    res.status(500).json({ error: err?.message || 'Failed to process forgot password request.' });
+    console.error('[Auth Password Reset] Error:', err?.message || err);
+    res.status(500).json({ error: 'Failed to process forgot password request. Please try again.' });
   }
 });
 
@@ -551,23 +625,57 @@ app.post('/api/auth/verify-reset-code', async (req, res) => {
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanCode = code.toString().trim();
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const verifyKey = `${cleanEmail}_${clientIp}`;
 
-    const record = await SqlHelper.queryOne<{ id: string; reset_token: string; expires_at: string; used: number }>(
-      'SELECT id, reset_token, expires_at, used FROM password_reset_tokens WHERE LOWER(email) = ? AND otp_code = ? ORDER BY created_at DESC LIMIT 1',
-      [cleanEmail, cleanCode]
+    // Rate Limit Check for Failed Attempts
+    const nowMs = Date.now();
+    const attemptData = verifyCodeLimits.get(verifyKey);
+
+    if (attemptData?.blockedUntil && nowMs < attemptData.blockedUntil) {
+      const waitMinutes = Math.ceil((attemptData.blockedUntil - nowMs) / 60000);
+      return res.status(429).json({
+        error: `Too many incorrect attempts. Please wait ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''} before trying again, or request a new code.`
+      });
+    }
+
+    const record = await SqlHelper.queryOne<{ id: string; otp_code: string; reset_token: string; expires_at: string; used: number }>(
+      'SELECT id, otp_code, reset_token, expires_at, used FROM password_reset_tokens WHERE LOWER(email) = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+      [cleanEmail]
     );
 
     if (!record) {
-      return res.status(400).json({ error: 'Invalid verification code. Please check your email and try again.' });
-    }
-
-    if (record.used) {
-      return res.status(400).json({ error: 'This verification code has already been used. Please request a new code.' });
+      return res.status(400).json({ error: 'No active verification code found for this email. Please request a new code.' });
     }
 
     if (new Date(record.expires_at).getTime() < Date.now()) {
+      await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [record.id]);
       return res.status(400).json({ error: 'This verification code has expired. Please request a new code.' });
     }
+
+    if (record.otp_code !== cleanCode) {
+      const failed = (attemptData?.failedAttempts || 0) + 1;
+      if (failed >= 5) {
+        // Invalidate token on 5 consecutive failures
+        await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [record.id]);
+        verifyCodeLimits.set(verifyKey, {
+          failedAttempts: 0,
+          blockedUntil: nowMs + 15 * 60 * 1000, // Lockout for 15 minutes
+        });
+        return res.status(429).json({
+          error: 'Too many incorrect attempts. For your security, this verification code has been cancelled. Please request a new code.'
+        });
+      } else {
+        verifyCodeLimits.set(verifyKey, { failedAttempts: failed });
+        const remaining = 5 - failed;
+        return res.status(400).json({
+          error: `Invalid verification code. You have ${remaining} attempt${remaining > 1 ? 's' : ''} remaining.`
+        });
+      }
+    }
+
+    // Success: clear rate limit data and issue reset authorization token
+    verifyCodeLimits.delete(verifyKey);
 
     res.json({
       success: true,
@@ -575,8 +683,8 @@ app.post('/api/auth/verify-reset-code', async (req, res) => {
       resetToken: record.reset_token,
     });
   } catch (err: any) {
-    console.error('[Auth Verify Code] Error:', err);
-    res.status(500).json({ error: err?.message || 'Verification failed.' });
+    console.error('[Auth Verify Code] Error:', err?.message || err);
+    res.status(500).json({ error: 'Verification failed. Please try again.' });
   }
 });
 
@@ -592,15 +700,58 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const verifyKey = `${cleanEmail}_${clientIp}`;
+
+    // Rate Limit Check for Failed Attempts
+    const nowMs = Date.now();
+    const attemptData = verifyCodeLimits.get(verifyKey);
+    if (attemptData?.blockedUntil && nowMs < attemptData.blockedUntil) {
+      const waitMinutes = Math.ceil((attemptData.blockedUntil - nowMs) / 60000);
+      return res.status(429).json({
+        error: `Too many incorrect attempts. Please wait ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''} before trying again.`
+      });
+    }
 
     // Verify token or code
     let record: any = null;
     if (code) {
       const cleanCode = code.toString().trim();
-      record = await SqlHelper.queryOne(
-        'SELECT * FROM password_reset_tokens WHERE LOWER(email) = ? AND otp_code = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
-        [cleanEmail, cleanCode]
+      const activeRecord = await SqlHelper.queryOne<{ id: string; otp_code: string; reset_token: string; expires_at: string; used: number }>(
+        'SELECT * FROM password_reset_tokens WHERE LOWER(email) = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+        [cleanEmail]
       );
+
+      if (!activeRecord) {
+        return res.status(400).json({ error: 'No active verification code found. Please request a new code.' });
+      }
+
+      if (new Date(activeRecord.expires_at).getTime() < Date.now()) {
+        await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [activeRecord.id]);
+        return res.status(400).json({ error: 'This verification code has expired. Please request a fresh reset code.' });
+      }
+
+      if (activeRecord.otp_code !== cleanCode) {
+        const failed = (attemptData?.failedAttempts || 0) + 1;
+        if (failed >= 5) {
+          await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [activeRecord.id]);
+          verifyCodeLimits.set(verifyKey, {
+            failedAttempts: 0,
+            blockedUntil: nowMs + 15 * 60 * 1000,
+          });
+          return res.status(429).json({
+            error: 'Too many incorrect attempts. This code has been cancelled for security. Please request a new code.'
+          });
+        } else {
+          verifyCodeLimits.set(verifyKey, { failedAttempts: failed });
+          const remaining = 5 - failed;
+          return res.status(400).json({
+            error: `Invalid verification code. You have ${remaining} attempt${remaining > 1 ? 's' : ''} remaining.`
+          });
+        }
+      }
+
+      record = activeRecord;
     } else if (resetToken) {
       record = await SqlHelper.queryOne(
         'SELECT * FROM password_reset_tokens WHERE LOWER(email) = ? AND reset_token = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
@@ -609,12 +760,16 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 
     if (!record) {
-      return res.status(400).json({ error: 'Invalid or already used verification code. Please request a new code.' });
+      return res.status(400).json({ error: 'Invalid or already used verification credentials. Please request a new code.' });
     }
 
     if (new Date(record.expires_at).getTime() < Date.now()) {
+      await SqlHelper.execute('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', [record.id]);
       return res.status(400).json({ error: 'This verification code has expired. Please request a fresh reset code.' });
     }
+
+    // Reset verify attempts
+    verifyCodeLimits.delete(verifyKey);
 
     const now = new Date().toISOString();
 
@@ -649,7 +804,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
     });
   } catch (err: any) {
     console.error('[Auth Password Reset] Error:', err);
-    res.status(500).json({ error: err?.message || 'Failed to reset password.' });
+    res.status(500).json({ error: 'Failed to reset password. Please try again.' });
   }
 });
 

@@ -34,7 +34,6 @@ export interface SendMailResult {
   success: boolean;
   messageId?: string;
   error?: string;
-  code?: string;
 }
 
 export async function sendPasswordResetEmail(
@@ -170,14 +169,12 @@ export async function sendPasswordResetEmail(
     return {
       success: true,
       messageId: info.messageId,
-      code: otpCode,
     };
   } catch (err: any) {
     console.error(`[SMTP Mail] Failed to send email to ${toEmail}:`, err?.message || err);
     return {
       success: false,
       error: err?.message || 'Failed to dispatch email via SMTP server.',
-      code: otpCode,
     };
   }
 }

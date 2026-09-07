@@ -202,13 +202,13 @@ export const api = {
     return safeJson<{ success: boolean; message: string; registeredEmail?: string; userId?: string; profileId?: string }>(res, 'Registration failed. Please check your details.');
   },
 
-  async forgotPassword(email: string): Promise<{ success: boolean; message: string; mailSent?: boolean; devCode?: string; resetToken?: string }> {
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
     const res = await authFetch('/api/auth/forgot-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    return safeJson<{ success: boolean; message: string; mailSent?: boolean; devCode?: string; resetToken?: string }>(res, 'Failed to send password reset code.');
+    return safeJson<{ success: boolean; message: string }>(res, 'Failed to send password reset code.');
   },
 
   async verifyResetCode(email: string, code: string): Promise<{ success: boolean; resetToken: string }> {
