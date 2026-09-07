@@ -34,7 +34,57 @@
         </style>
       </div>
     </div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Production Fallback:
+      // If root index.html is served directly by LiteSpeed/Apache in production
+      // and /src/main.tsx fails (e.g. 403 Forbidden or not compiled by Vite dev server),
+      // seamlessly load the compiled production assets from /dist/index.html
+      var __fallbackTriggered = false;
+      function __loadCompiledFallback() {
+        if (__fallbackTriggered || window.__LOVE_REACT_LOADED__) return;
+        __fallbackTriggered = true;
+        fetch('/dist/index.html')
+          .then(function(res) { return res.text(); })
+          .then(function(html) {
+            if (window.__LOVE_REACT_LOADED__) return;
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(html, 'text/html');
+
+            var links = doc.querySelectorAll('link[rel="stylesheet"]');
+            for (var i = 0; i < links.length; i++) {
+              var href = links[i].getAttribute('href');
+              if (href && !document.querySelector('link[href="' + href + '"]')) {
+                var newLink = document.createElement('link');
+                newLink.rel = 'stylesheet';
+                newLink.href = href;
+                document.head.appendChild(newLink);
+              }
+            }
+
+            var scripts = doc.querySelectorAll('script[type="module"]');
+            for (var j = 0; j < scripts.length; j++) {
+              var src = scripts[j].getAttribute('src');
+              if (src && !document.querySelector('script[src="' + src + '"]')) {
+                var newScript = document.createElement('script');
+                newScript.type = 'module';
+                newScript.crossOrigin = 'anonymous';
+                newScript.src = src;
+                document.body.appendChild(newScript);
+              }
+            }
+          })
+          .catch(function(err) {
+            console.warn('Fallback bundle load:', err);
+          });
+      }
+
+      setTimeout(function() {
+        if (!window.__LOVE_REACT_LOADED__) {
+          __loadCompiledFallback();
+        }
+      }, 400);
+    </script>
+    <script type="module" src="/src/main.tsx" onerror="__loadCompiledFallback()"></script>
   </body>
 </html>
 
