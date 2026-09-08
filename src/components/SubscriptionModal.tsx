@@ -114,7 +114,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         orderId: initialOrderId,
         planName: 'VIP Plan Upgrade',
         amount: 0,
-        currency: 'USD',
+        currency: 'USDT',
         status: 'waiting',
       });
       startPollingPayment(initialOrderId);
@@ -171,7 +171,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               orderId: res.orderId,
               planName: res.planName || 'VIP Subscription',
               amount: Number(res.amount || 0),
-              currency: res.currency || 'USD',
+              currency: res.currency || 'USDT',
               status: res.paymentStatus,
             };
           }
@@ -180,7 +180,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             status: res.paymentStatus,
             planName: prev.planName && prev.planName !== 'VIP Plan Upgrade' ? prev.planName : (res.planName || prev.planName),
             amount: prev.amount > 0 ? prev.amount : (Number(res.amount) || 0),
-            currency: prev.currency || res.currency || 'USD',
+            currency: prev.currency || res.currency || 'USDT',
           };
         });
 
@@ -244,7 +244,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           invoiceUrl: res.invoiceUrl,
           planName: plan.name,
           amount: Number(plan.price || plan.price_usdt || res.amount || 0),
-          currency: 'USD',
+          currency: 'USDT',
           status: 'waiting',
         });
 
@@ -365,7 +365,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                     </span>
                   </h4>
                   <p className="text-xs text-stone-400 mt-0.5">
-                    Amount: <strong className="text-white">${activeOrder.amount > 0 ? activeOrder.amount : ''} USD</strong> • Multi-Crypto Gateway
+                    Amount: <strong className="text-white">{activeOrder.amount > 0 ? activeOrder.amount : ''} {activeOrder.currency || 'USDT'}</strong> • Multi-Crypto Gateway
                   </p>
                 </div>
               </div>

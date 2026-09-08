@@ -2322,7 +2322,7 @@ app.post('/api/payments/create-invoice', async (req, res) => {
         plan.name,
         plan.tier || 'VIP',
         Number(plan.price),
-        'USD',
+        plan.currency || 'USDT',
         orderId,
         nowIso,
         nowIso,
@@ -2339,7 +2339,7 @@ app.post('/api/payments/create-invoice', async (req, res) => {
       orderId,
       orderDescription: `Lovemeetly ${plan.name} (${plan.duration} ${plan.duration_unit}) - User ${user.email}`,
       amount: Number(plan.price),
-      currency: 'USD',
+      currency: plan.currency || 'USDT',
       successUrl: `${baseUrl}/?payment_status=success&order_id=${orderId}`,
       cancelUrl: `${baseUrl}/?payment_status=cancelled&order_id=${orderId}`,
       ipnCallbackUrl: `${baseUrl}/api/payments/nowpayments-ipn`,
@@ -2366,7 +2366,7 @@ app.post('/api/payments/create-invoice', async (req, res) => {
       invoiceUrl: invoiceResult.invoiceUrl,
       invoiceId: invoiceResult.invoiceId,
       amount: Number(plan.price),
-      currency: 'USD',
+      currency: plan.currency || 'USDT',
       planName: plan.name,
     });
   } catch (err: any) {

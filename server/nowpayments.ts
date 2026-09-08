@@ -155,11 +155,12 @@ export async function createNowPaymentsInvoice(params: {
     ? 'https://api-sandbox.nowpayments.io/v1'
     : 'https://api.nowpayments.io/v1';
 
-  // The subscription pricing is in USD (fiat base currency).
-  // NOWPayments allows price_currency="usd", which lets the customer pay with ANY supported cryptocurrency
-  // at real-time exchange rates without forcing a single coin or causing currency unavailable errors.
-  const rawCurrency = (params.currency || 'usd').trim().toLowerCase();
-  const priceCurrency = (rawCurrency === 'usdt' || rawCurrency === 'usd') ? 'usd' : rawCurrency;
+  // Subscription prices are denominated in USDT (Tether stablecoin) as configured in subscription plans.
+  // Passing price_currency="usdt" ensures NOWPayments bases the invoice in USDT directly.
+  // This prevents fiat-to-crypto internal conversion cuts (such as 10 USD -> 9.991984 USDT)
+  // which trigger NOWPayments' "Crypto amount is less than minimal" error on 10-14 USDT plans.
+  const rawCurrency = (params.currency || 'usdt').trim().toLowerCase();
+  const priceCurrency = rawCurrency;
 
   const requestBody: Record<string, any> = {
     price_amount: Number(params.amount),
@@ -235,6 +236,49 @@ export async function getNowPaymentsPaymentStatus(paymentId: string): Promise<an
     return await response.json();
   } catch (e) {
     console.error('[NOWPayments API] Error querying payment status:', e);
+    return null;
+  }
+}
+
+/**
+ * Checks dynamic minimum payment amount from NOWPayments API.
+ * Minimum amounts vary dynamically depending on network conditions, blockchain gas fees,
+ * and the specific cryptocurrency pair (currencyFrom -> currencyTo).
+ */
+export async function getNowPaymentsMinAmount(params: {
+  currencyFrom?: string;
+  currencyTo?: string;
+  isFixedRate?: boolean;
+}): Promise<{ minAmount: number; currencyFrom?: string; currencyTo?: string } | null> {
+  const config = await getNowPaymentsConfig();
+  if (!config.apiKey) return null;
+
+  const baseUrl = config.isSandbox
+    ? 'https://api-sandbox.nowpayments.io/v1'
+    : 'https://api.nowpayments.io/v1';
+
+  try {
+    const query = new URLSearchParams();
+    if (params.currencyFrom) query.set('currency_from', params.currencyFrom.toLowerCase().trim());
+    if (params.currencyTo) query.set('currency_to', params.currencyTo.toLowerCase().trim());
+    if (params.isFixedRate !== undefined) query.set('is_fixed_rate', String(params.isFixedRate));
+
+    const response = await fetch(`${baseUrl}/min-amount?${query.toString()}`, {
+      method: 'GET',
+      headers: {
+        'x-api-key': config.apiKey,
+      },
+    });
+
+    if (!response.ok) return null;
+    const data: any = await response.json();
+    return {
+      minAmount: Number(data.min_amount || 0),
+      currencyFrom: data.currency_from,
+      currencyTo: data.currency_to,
+    };
+  } catch (err) {
+    console.warn('[NOWPayments API] Error checking min-amount:', err);
     return null;
   }
 }
