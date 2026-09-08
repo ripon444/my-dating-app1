@@ -130,6 +130,7 @@ export async function createNowPaymentsInvoice(params: {
   orderDescription: string;
   amount: number;
   currency?: string;
+  payCurrency?: string;
   successUrl: string;
   cancelUrl: string;
   ipnCallbackUrl: string;
@@ -154,18 +155,23 @@ export async function createNowPaymentsInvoice(params: {
     ? 'https://api-sandbox.nowpayments.io/v1'
     : 'https://api.nowpayments.io/v1';
 
-  const priceCurrency = (params.currency || 'USDT').toLowerCase();
+  const priceCurrency = (params.currency || 'usd').toLowerCase();
 
-  const requestBody = {
+  const requestBody: Record<string, any> = {
     price_amount: params.amount,
     price_currency: priceCurrency,
-    pay_currency: null, // Allow user to choose any crypto on NOWPayments checkout page
     ipn_callback_url: params.ipnCallbackUrl,
     order_id: params.orderId,
     order_description: params.orderDescription,
     success_url: params.successUrl,
     cancel_url: params.cancelUrl,
   };
+
+  // Only include pay_currency if explicitly provided as a valid non-empty string.
+  // If omitted, NOWPayments enables the customer to select any cryptocurrency on the hosted invoice checkout page.
+  if (params.payCurrency && typeof params.payCurrency === 'string' && params.payCurrency.trim()) {
+    requestBody.pay_currency = params.payCurrency.trim().toLowerCase();
+  }
 
   try {
     const response = await fetch(`${baseUrl}/invoice`, {

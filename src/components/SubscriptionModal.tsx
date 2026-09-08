@@ -209,15 +209,19 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       const res = await api.createPaymentInvoice(plan.id);
 
       if (res.invoiceUrl) {
-        // Open payment page in new window
-        const paymentWin = window.open(res.invoiceUrl, '_blank');
-        if (!paymentWin) {
-          // Fallback if popup blocked
+        // If inside an iframe (like AI Studio preview), open in a new tab so frame restrictions don't block it
+        // On the live website (lovemeetly.com), directly redirect straight to NOWPayments checkout
+        const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (inIframe) {
+          const paymentWin = window.open(res.invoiceUrl, '_blank');
+          if (!paymentWin) {
+            window.location.href = res.invoiceUrl;
+          }
+        } else {
           window.location.href = res.invoiceUrl;
-          return;
         }
 
-        // Set active order and start polling
+        // Set active order and start polling in case browser tab remains
         setActiveOrder({
           orderId: res.orderId,
           invoiceUrl: res.invoiceUrl,
