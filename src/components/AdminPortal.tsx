@@ -70,8 +70,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   });
 
   // Login form state
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@love.com');
+  const [password, setPassword] = useState('Tanvir@123456789');
   const [secretKey, setSecretKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -142,19 +142,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     setLogoutMessage('');
     setLoginLoading(true);
 
-    const inputEmail = email.trim() || 'tanvirahmadkst@gmail.com';
-    const inputPass = password.trim() || 'tanvir2026';
+    const inputEmail = email.trim() || 'admin@love.com';
+    const inputPass = password.trim() || 'Tanvir@123456789';
 
     try {
       const res = await api.login(inputEmail, inputPass, 'ADMIN');
       const isAuthAdmin = 
         res.user.role === 'ADMIN' || 
+        inputEmail.toLowerCase() === 'admin@love.com' ||
         inputEmail.toLowerCase().includes('admin') || 
         inputEmail.toLowerCase().includes('tanvir') || 
         inputEmail.toLowerCase() === 'tanvirahmadkst@gmail.com' ||
+        inputPass === 'Tanvir@123456789' ||
+        inputPass === 'tanvir@123456789' ||
         inputPass === 'admin123' || 
         inputPass === 'tanvir' || 
         inputPass === 'tanvir2026' || 
+        secretKey === 'Tanvir@123456789' ||
         secretKey === 'tanvir' || 
         secretKey === 'tanvir2026';
 
@@ -175,13 +179,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
       }
     } catch (err: any) {
       const isMasterAttempt =
+        inputEmail.toLowerCase() === 'admin@love.com' ||
         inputEmail.toLowerCase() === 'tanvirahmadkst@gmail.com' ||
-        inputEmail.toLowerCase() === 'admin@globalmatch.com' ||
         inputEmail.toLowerCase().includes('admin') || 
         inputEmail.toLowerCase().includes('tanvir') ||
+        inputPass === 'Tanvir@123456789' ||
+        inputPass === 'tanvir@123456789' ||
         inputPass === 'admin123' ||
         inputPass === 'tanvir' ||
         inputPass === 'tanvir2026' ||
+        secretKey === 'Tanvir@123456789' ||
         secretKey === 'tanvir' ||
         secretKey === 'tanvir2026';
 
@@ -348,7 +355,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@globalmatch.com"
+                  placeholder="admin@love.com"
                   className="w-full bg-stone-950 border border-stone-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-500 transition"
                 />
               </div>
@@ -405,12 +412,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
               </button>
             </form>
 
-            <div className="pt-4 border-t border-stone-800/80 text-center space-y-1">
-              <p className="text-[11px] text-stone-300">
-                Primary Super Admin: <span className="text-rose-400 font-mono font-semibold">tanvirahmadkst@gmail.com</span> / <span className="text-rose-400 font-mono font-semibold">tanvir2026</span>
+            <div className="pt-4 border-t border-stone-800/80 text-center space-y-1.5">
+              <p className="text-xs text-stone-200">
+                Admin Email: <span className="text-rose-400 font-mono font-semibold">admin@love.com</span>
               </p>
-              <p className="text-[10px] text-stone-400">
-                Alternate Admin: <span className="text-stone-300 font-mono">admin@globalmatch.com</span> / <span className="text-stone-300 font-mono">admin123</span>
+              <p className="text-xs text-stone-200">
+                Password: <span className="text-rose-400 font-mono font-semibold">Tanvir@123456789</span>
+              </p>
+              <p className="text-[11px] text-stone-400 pt-1 border-t border-stone-800/50">
+                Super Admin Email: <span className="text-amber-400 font-mono">tanvirahmadkst@gmail.com</span>
               </p>
               <p className="text-[10px] text-stone-500">
                 All administrator actions are logged and authorized under system security policies.
@@ -796,10 +806,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                                   id: prof.user_id,
                                   email: (prof as any).email || `${prof.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@user.lovemeetly`,
                                   role: 'USER',
+                                  isEmailVerified: true,
+                                  isAgeVerified: true,
+                                  isBanned: false,
                                   subscriptionTier: profTier,
-                                  subscriptionExpiresAt: (prof as any).subscription_expires_at || null,
+                                  subscriptionExpiresAt: (prof as any).subscription_expires_at || undefined,
                                   createdAt: prof.created_at,
-                                  profile: prof,
+                                  updatedAt: prof.updated_at,
                                 });
                                 setIsUserSubModalOpen(true);
                               }}
@@ -1107,7 +1120,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
 
                 <div className="p-4 rounded-2xl bg-stone-950 border border-stone-800 space-y-1.5">
                   <div className="text-xs font-bold text-indigo-400">Default Super Administrator</div>
-                  <div className="text-sm font-mono text-white">admin@globalmatch.com</div>
+                  <div className="text-sm font-mono text-white">admin@love.com</div>
                   <p className="text-[10px] text-stone-400">Role: ADMIN with full platform governance clearance.</p>
                 </div>
               </div>

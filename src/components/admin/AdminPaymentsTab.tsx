@@ -43,7 +43,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [selectedTx, setSelectedTx] = useState<PaymentTransaction | null>(null);
+  const [selectedTx, setSelectedTx] = useState<any | null>(null);
 
   // Settings state
   const [settings, setSettings] = useState<NowPaymentsSettings | null>(null);
@@ -55,6 +55,8 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [showIpnSecret, setShowIpnSecret] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [saveErrorMsg, setSaveErrorMsg] = useState('');
   const [copiedIpnUrl, setCopiedIpnUrl] = useState(false);
 
   const loadPayments = async () => {
@@ -64,13 +66,16 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
         search: searchQuery.trim() || undefined,
         status: statusFilter || undefined,
       });
-      setTransactions(res.transactions || []);
-      setStats(res.stats || {
-        totalVolumeUsdt: 0,
-        totalTransactions: 0,
-        finishedCount: 0,
-        waitingCount: 0,
-        failedCount: 0,
+      const txList = Array.isArray(res.transactions) ? res.transactions : [];
+      setTransactions(txList);
+
+      const rawStats = (res && res.stats) ? res.stats : {};
+      setStats({
+        totalVolumeUsdt: Number(rawStats.totalVolumeUsdt ?? rawStats.totalRevenue ?? 0),
+        totalTransactions: Number(rawStats.totalTransactions ?? rawStats.totalPayments ?? txList.length),
+        finishedCount: Number(rawStats.finishedCount ?? rawStats.successfulPayments ?? 0),
+        waitingCount: Number(rawStats.waitingCount ?? rawStats.pendingPayments ?? 0),
+        failedCount: Number(rawStats.failedCount ?? rawStats.failedPayments ?? 0),
       });
     } catch (err) {
       console.error('Failed to load payments:', err);
@@ -83,11 +88,13 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
     try {
       const s = await api.adminGetPaymentSettings();
       setSettings(s);
-      setApiKey(s.apiKey || '');
-      setIpnSecret(s.ipnSecret || '');
-      setIsSandbox(!!s.isSandbox);
-      setIsEnabled(s.isEnabled !== false);
-      setPayoutCurrency(s.payoutCurrency || 'usdttrc20');
+      if (s) {
+        if (s.apiKey) setApiKey(s.apiKey);
+        if (s.ipnSecret) setIpnSecret(s.ipnSecret);
+        setIsSandbox(!!s.isSandbox);
+        setIsEnabled(s.isEnabled !== false);
+        if (s.payoutCurrency) setPayoutCurrency(s.payoutCurrency);
+      }
     } catch (err) {
       console.error('Failed to load payment settings:', err);
     }
@@ -106,18 +113,21 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingSettings(true);
+    setSaveSuccessMsg('');
+    setSaveErrorMsg('');
     try {
-      await api.adminSavePaymentSettings({
+      const res = await api.adminSavePaymentSettings({
         apiKey: apiKey.trim(),
         ipnSecret: ipnSecret.trim(),
         isSandbox,
         isEnabled,
         payoutCurrency: payoutCurrency.trim().toLowerCase(),
       });
+      setSaveSuccessMsg('NOWPayments Gateway configuration saved successfully!');
       onSuccessMessage('NOWPayments Gateway configuration saved successfully!');
       await loadSettings();
     } catch (err: any) {
-      alert(err.message || 'Failed to save settings');
+      setSaveErrorMsg(err.message || 'Failed to save gateway settings');
     } finally {
       setIsSavingSettings(false);
     }
@@ -133,8 +143,9 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
     setTimeout(() => setCopiedIpnUrl(false), 2500);
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
+  const getStatusBadge = (status?: string) => {
+    const s = String(status || 'waiting').toLowerCase();
+    switch (s) {
       case 'finished':
       case 'confirmed':
         return (
@@ -163,17 +174,23 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
         return (
           <span className="px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 text-[10px] font-bold uppercase flex items-center gap-1">
             <AlertCircle className="w-3 h-3 text-red-400" />
-            <span>{status}</span>
+            <span>{status || 'Failed'}</span>
           </span>
         );
       default:
         return (
           <span className="px-2.5 py-0.5 rounded-full bg-stone-800 text-stone-400 text-[10px] font-bold uppercase">
-            {status}
+            {status || 'Unknown'}
           </span>
         );
     }
   };
+
+  const safeTotalVol = Number(stats?.totalVolumeUsdt ?? 0);
+  const safeTotalTx = Number(stats?.totalTransactions ?? transactions.length);
+  const safeFinished = Number(stats?.finishedCount ?? 0);
+  const safeWaiting = Number(stats?.waitingCount ?? 0);
+  const safeFailed = Number(stats?.failedCount ?? 0);
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -203,7 +220,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
             }`}
           >
             <Coins className="w-3.5 h-3.5" />
-            <span>Transactions ({stats.totalTransactions})</span>
+            <span>Transactions ({safeTotalTx})</span>
           </button>
 
           <button
@@ -226,7 +243,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
         <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 shadow">
           <div className="text-[11px] font-semibold text-stone-400">Total Volume</div>
           <div className="text-xl font-black text-amber-400 mt-1">
-            {stats.totalVolumeUsdt.toLocaleString()} USDT
+            {safeTotalVol.toLocaleString()} USDT
           </div>
           <div className="text-[10px] text-emerald-400 mt-0.5">Completed Crypto Volume</div>
         </div>
@@ -234,7 +251,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
         <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 shadow">
           <div className="text-[11px] font-semibold text-stone-400">Successful Invoices</div>
           <div className="text-xl font-black text-emerald-400 mt-1">
-            {stats.finishedCount}
+            {safeFinished}
           </div>
           <div className="text-[10px] text-stone-400 mt-0.5">Subscriptions activated</div>
         </div>
@@ -242,7 +259,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
         <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 shadow">
           <div className="text-[11px] font-semibold text-stone-400">Pending / Confirming</div>
           <div className="text-xl font-black text-amber-300 mt-1">
-            {stats.waitingCount}
+            {safeWaiting}
           </div>
           <div className="text-[10px] text-stone-400 mt-0.5">Awaiting network confirmation</div>
         </div>
@@ -250,7 +267,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
         <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 shadow">
           <div className="text-[11px] font-semibold text-stone-400">Failed / Expired</div>
           <div className="text-xl font-black text-red-400 mt-1">
-            {stats.failedCount}
+            {safeFailed}
           </div>
           <div className="text-[10px] text-stone-400 mt-0.5">Cancelled or timed out</div>
         </div>
@@ -341,12 +358,12 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
                   {transactions.map((tx) => (
                     <tr key={tx.id} className="hover:bg-stone-800/40 transition">
                       <td className="p-3.5 text-stone-400 whitespace-nowrap">
-                        {new Date(tx.created_at).toLocaleString([], {
+                        {tx.created_at ? new Date(tx.created_at).toLocaleString([], {
                           month: 'short',
                           day: 'numeric',
                           hour: '2-digit',
                           minute: '2-digit',
-                        })}
+                        }) : 'N/A'}
                       </td>
 
                       <td className="p-3.5 font-mono text-stone-200">
@@ -410,6 +427,20 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
                 Configure your NOWPayments merchant account credentials to enable automated crypto checkout and instant subscription activation.
               </p>
             </div>
+
+            {saveSuccessMsg && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>{saveSuccessMsg}</span>
+              </div>
+            )}
+
+            {saveErrorMsg && (
+              <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                <span>{saveErrorMsg}</span>
+              </div>
+            )}
 
             {/* API Key */}
             <div className="space-y-1.5">
@@ -619,7 +650,7 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-stone-400">Created At:</span>
-                  <span className="text-stone-300">{new Date(selectedTx.created_at).toLocaleString()}</span>
+                  <span className="text-stone-300">{selectedTx.created_at ? new Date(selectedTx.created_at).toLocaleString() : 'N/A'}</span>
                 </div>
                 {selectedTx.completed_at && (
                   <div className="flex justify-between">

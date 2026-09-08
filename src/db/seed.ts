@@ -16,9 +16,9 @@ export async function seedPostgresIfEmpty() {
     const sampleUsersData = [
       {
         user: {
-          id: 'usr_admin_01',
-          email: 'admin@globalmatch.com',
-          password: 'admin123_demo_hashed',
+          id: 'usr_admin_love',
+          email: 'admin@love.com',
+          password: 'Tanvir@123456789',
           role: 'ADMIN',
           isEmailVerified: 1,
           isAgeVerified: 1,
@@ -28,8 +28,8 @@ export async function seedPostgresIfEmpty() {
           updatedAt: now,
         },
         profile: {
-          id: 'prf_admin_01',
-          userId: 'usr_admin_01',
+          id: 'prf_admin_love',
+          userId: 'usr_admin_love',
           sourceType: 'native',
           name: 'System Administrator',
           age: 32,

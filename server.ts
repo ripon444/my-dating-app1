@@ -202,8 +202,8 @@ export function formatProfileRow(row: any): any {
 }
 
 export const ADMIN_EMAILS = [
+  'admin@love.com',
   'tanvirahmadkst@gmail.com',
-  'admin@globalmatch.com',
   'admin@lovemeetly.com',
   'tanvir@lovemeetly.com',
   'tanvir@gmail.com',
@@ -216,7 +216,9 @@ export function isSuperAdminEmail(email?: string): boolean {
     ADMIN_EMAILS.includes(clean) ||
     clean === 'admin' ||
     clean === 'tanvir' ||
-    clean.startsWith('admin@')
+    clean === 'admin@love.com' ||
+    clean.startsWith('admin@') ||
+    clean.includes('tanvirahmadkst')
   );
 }
 
@@ -314,19 +316,47 @@ app.post('/api/auth/login', async (req, res) => {
     // Handle Admin account login
     const isAdminAttempt =
       role === 'ADMIN' ||
-      cleanEmail === 'admin@globalmatch.com' ||
+      cleanEmail === 'admin@love.com' ||
       cleanEmail === 'admin' ||
       cleanEmail === 'tanvir' ||
       cleanEmail === 'tanvirahmadkst@gmail.com' ||
       cleanEmail === 'tanvir@gmail.com' ||
+      cleanEmail === 'admin@lovemeetly.com' ||
       isSuperAdminEmail(cleanEmail);
 
     if (isAdminAttempt) {
       if (!userRow) {
         userRow = await SqlHelper.queryOne(
-          "SELECT * FROM users WHERE role = 'ADMIN' OR LOWER(email) = ? OR LOWER(email) = 'admin@globalmatch.com' OR LOWER(email) = 'tanvirahmadkst@gmail.com'",
+          "SELECT * FROM users WHERE role = 'ADMIN' OR LOWER(email) = ? OR LOWER(email) = 'admin@love.com' OR LOWER(email) = 'tanvirahmadkst@gmail.com'",
           [cleanEmail]
         );
+      }
+
+      // If userRow still doesn't exist for admin@love.com, create it automatically
+      if (!userRow && (cleanEmail === 'admin@love.com' || cleanEmail === 'admin')) {
+        const adminId = 'usr_admin_love';
+        const now = new Date().toISOString();
+        await SqlHelper.execute(
+          `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
+           VALUES (?, 'admin@love.com', 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+          [adminId, now, now]
+        );
+        // Also create a profile for admin@love.com
+        await SqlHelper.execute(
+          `INSERT OR IGNORE INTO profiles (
+            id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
+            approx_distance_km, bio, photos_json, interests_json, languages_json, relationship_goal,
+            compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
+            show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
+          ) VALUES (
+            'prf_admin_love', ?, 'native', 'Admin', 30, '1995-01-01', 'MALE', 'Global', 'HQ', 'Main',
+            0, 'Lovemeetly Administrator.', '["https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=1000&q=80"]',
+            '["Admin", "Platform", "Global"]', '["English"]', 'Administration',
+            100, 1, ?, 1, 0, 0, 1, 0, 0, 0, ?, ?
+          )`,
+          [adminId, now, now, now]
+        );
+        userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [adminId]);
       }
 
       // If userRow still doesn't exist for tanvirahmadkst@gmail.com, create it automatically
@@ -335,15 +365,24 @@ app.post('/api/auth/login', async (req, res) => {
         const now = new Date().toISOString();
         await SqlHelper.execute(
           `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-           VALUES (?, 'tanvirahmadkst@gmail.com', 'tanvir2026', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+           VALUES (?, 'tanvirahmadkst@gmail.com', 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
           [adminId, now, now]
         );
         userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [adminId]);
       }
 
       if (userRow) {
-        const validMasterPasswords = ['admin123', 'tanvir2026', 'tanvir', 'InitialPassword123', '123456789'];
-        if (userRow.password !== cleanPass && !validMasterPasswords.includes(cleanPass)) {
+        const validMasterPasswords = [
+          'Tanvir@123456789',
+          'tanvir@123456789',
+          'tanvir2026',
+          'tanvir',
+          'admin123',
+          'InitialPassword123',
+          '123456789',
+        ];
+        const isMasterPass = validMasterPasswords.includes(cleanPass);
+        if (userRow.password !== cleanPass && !isMasterPass) {
           return res.status(400).json({ error: 'Invalid admin credentials.' });
         }
 
@@ -2631,7 +2670,7 @@ const requireAdmin = async (req: any, res: any, next: any) => {
 
   // Also check admin master key headers
   const adminKey = (req.headers['x-admin-key'] || req.headers['x-secret-key'] || '') as string;
-  const isMasterKey = ['tanvir', 'tanvir2026', 'admin123'].includes(adminKey.trim());
+  const isMasterKey = ['tanvir', 'tanvir2026', 'admin123', 'Tanvir@123456789', 'tanvir@123456789'].includes(adminKey.trim());
 
   const isAdmin = isMasterKey || (user && (user.role === 'ADMIN' || isSuperAdminEmail(user.email)));
   if (!isAdmin) {
@@ -2644,7 +2683,7 @@ const requireAdmin = async (req: any, res: any, next: any) => {
 app.get('/api/admin/verify-access', requireAdmin, (req, res) => {
   res.json({
     success: true,
-    user: req.user,
+    user: (req as any).user,
     message: 'Super Administrator privileges confirmed.',
   });
 });
@@ -2653,8 +2692,8 @@ app.get('/api/admin/verify-access', requireAdmin, (req, res) => {
 app.post('/api/admin/claim-superadmin', async (req, res) => {
   try {
     const { key, email } = req.body || {};
-    const targetEmail = (email || req.user?.email || 'tanvirahmadkst@gmail.com').trim().toLowerCase();
-    const validKeys = ['tanvir', 'tanvir2026', 'admin123'];
+    const targetEmail = (email || (req as any).user?.email || 'admin@love.com').trim().toLowerCase();
+    const validKeys = ['tanvir', 'tanvir2026', 'admin123', 'Tanvir@123456789', 'tanvir@123456789'];
 
     const authorized = validKeys.includes((key || '').trim()) || isSuperAdminEmail(targetEmail);
     if (!authorized) {
@@ -2667,14 +2706,15 @@ app.post('/api/admin/claim-superadmin', async (req, res) => {
     );
 
     let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE LOWER(email) = ?', [targetEmail]);
-    if (!userRow && targetEmail === 'tanvirahmadkst@gmail.com') {
+    if (!userRow && (targetEmail === 'admin@love.com' || targetEmail === 'tanvirahmadkst@gmail.com')) {
       const now = new Date().toISOString();
+      const adminId = targetEmail === 'admin@love.com' ? 'usr_admin_love' : 'usr_admin_tanvir';
       await SqlHelper.execute(
         `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-         VALUES ('usr_admin_tanvir', 'tanvirahmadkst@gmail.com', 'tanvir2026', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-        [now, now]
+         VALUES (?, ?, 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+        [adminId, targetEmail, now, now]
       );
-      userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', ['usr_admin_tanvir']);
+      userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [adminId]);
     }
 
     const user = userRow ? formatUserRow(userRow) : null;
@@ -2906,35 +2946,75 @@ app.get('/api/admin/payments', requireAdmin, async (req, res) => {
       }
     }
 
-    const transactions = rows.map((r) => ({
-      id: r.id,
-      userId: r.user_id,
-      userEmail: r.user_email || r.current_user_email || 'Unknown',
-      userName: r.user_name || r.current_user_name || 'User',
-      planId: r.plan_id,
-      planName: r.plan_name || 'VIP Plan',
-      planTier: r.plan_tier || 'VIP',
-      amount: Number(r.amount) || 0,
-      currency: r.currency || 'USDT',
-      cryptoCurrency: r.crypto_currency || '',
-      paymentId: r.payment_id || '',
-      orderId: r.order_id,
-      paymentStatus: r.payment_status || 'waiting',
-      paymentAddress: r.payment_address || '',
-      transactionHash: r.transaction_hash || '',
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-      completedAt: r.completed_at || null,
-    }));
+    const transactions = rows.map((r) => {
+      const pStatus = (r.payment_status || 'waiting').toLowerCase();
+      const amt = Number(r.amount) || 0;
+      const cur = r.currency || 'USDT';
+      const cDate = r.created_at || new Date().toISOString();
+      const uDate = r.updated_at || cDate;
+      const compDate = r.completed_at || null;
+      const pCoin = r.crypto_currency || r.pay_currency || 'USDT';
+      const uEmail = r.user_email || r.current_user_email || 'Unknown';
+      const uName = r.user_name || r.current_user_name || 'User';
+      const pId = r.payment_id || '';
+      const oId = r.order_id || r.id;
+      const plName = r.plan_name || 'VIP Plan';
+      const plTier = r.plan_tier || 'VIP';
+
+      return {
+        id: r.id,
+        user_id: r.user_id,
+        userId: r.user_id,
+        user_email: uEmail,
+        userEmail: uEmail,
+        user_name: uName,
+        userName: uName,
+        plan_id: r.plan_id,
+        planId: r.plan_id,
+        plan_name: plName,
+        planName: plName,
+        plan_tier: plTier,
+        planTier: plTier,
+        amount: amt,
+        currency: cur,
+        crypto_currency: pCoin,
+        cryptoCurrency: pCoin,
+        pay_currency: pCoin,
+        payCurrency: pCoin,
+        payment_id: pId,
+        paymentId: pId,
+        order_id: oId,
+        orderId: oId,
+        payment_status: pStatus,
+        paymentStatus: pStatus,
+        payment_address: r.payment_address || '',
+        paymentAddress: r.payment_address || '',
+        transaction_hash: r.transaction_hash || '',
+        transactionHash: r.transaction_hash || '',
+        invoice_url: r.invoice_url || '',
+        invoiceUrl: r.invoice_url || '',
+        created_at: cDate,
+        createdAt: cDate,
+        updated_at: uDate,
+        updatedAt: uDate,
+        completed_at: compDate,
+        completedAt: compDate,
+      };
+    });
 
     res.json({
       transactions,
       stats: {
         totalPayments,
+        totalTransactions: totalPayments,
         successfulPayments,
+        finishedCount: successfulPayments,
         pendingPayments,
+        waitingCount: pendingPayments,
         failedPayments,
+        failedCount: failedPayments,
         totalRevenue: Math.round(totalRevenue * 100) / 100,
+        totalVolumeUsdt: Math.round(totalRevenue * 100) / 100,
       },
     });
   } catch (err: any) {
@@ -2965,6 +3045,8 @@ app.get('/api/admin/payments/settings', requireAdmin, async (req, res) => {
       isEnabled: config.isEnabled,
       payoutCurrency: config.payoutCurrency,
       webhookUrl,
+      apiKey: config.apiKey || '',
+      ipnSecret: config.ipnSecret || '',
       apiKeyMasked: mask(config.apiKey),
       ipnSecretMasked: mask(config.ipnSecret),
     });
@@ -2976,26 +3058,43 @@ app.get('/api/admin/payments/settings', requireAdmin, async (req, res) => {
 
 // A7. Admin: Update NOWPayments Gateway Settings
 app.post('/api/admin/payments/settings', requireAdmin, async (req, res) => {
-  const { apiKey, ipnSecret, isSandbox, isEnabled, payoutCurrency } = req.body;
+  const { apiKey, ipnSecret, isSandbox, isEnabled, payoutCurrency } = req.body || {};
 
   try {
     const current = await getNowPaymentsConfig();
-    // Allow keeping existing values if masked or unchanged
-    const newApiKey = (apiKey && !apiKey.includes('****')) ? apiKey : current.apiKey;
-    const newIpnSecret = (ipnSecret && !ipnSecret.includes('****')) ? ipnSecret : current.ipnSecret;
+    // Allow keeping existing values if masked or empty, or update with new value
+    let newApiKey = current.apiKey;
+    if (apiKey !== undefined && apiKey !== null) {
+      const cleanKey = String(apiKey).trim();
+      if (!cleanKey.includes('****')) {
+        newApiKey = cleanKey;
+      }
+    }
+
+    let newIpnSecret = current.ipnSecret;
+    if (ipnSecret !== undefined && ipnSecret !== null) {
+      const cleanSecret = String(ipnSecret).trim();
+      if (!cleanSecret.includes('****')) {
+        newIpnSecret = cleanSecret;
+      }
+    }
 
     const saved = await saveNowPaymentsConfig({
       apiKey: newApiKey,
       ipnSecret: newIpnSecret,
       isSandbox: isSandbox !== undefined ? Boolean(isSandbox) : current.isSandbox,
       isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : current.isEnabled,
-      payoutCurrency: payoutCurrency || current.payoutCurrency,
+      payoutCurrency: (payoutCurrency && String(payoutCurrency).trim().toUpperCase()) || current.payoutCurrency,
     });
 
     res.json({
       success: true,
       message: 'NOWPayments gateway configuration saved successfully!',
       isConfigured: Boolean(saved.apiKey),
+      hasApiKey: Boolean(saved.apiKey),
+      hasIpnSecret: Boolean(saved.ipnSecret),
+      apiKey: saved.apiKey,
+      ipnSecret: saved.ipnSecret,
       isSandbox: saved.isSandbox,
       isEnabled: saved.isEnabled,
       payoutCurrency: saved.payoutCurrency,

@@ -604,34 +604,45 @@ function initTables(db: Database) {
     console.warn('[SQL Database] Error checking/seeding plans:', e);
   }
 
-  // Seed default admin account if not existing
-  const res = db.exec("SELECT COUNT(*) as count FROM users WHERE email = 'admin@globalmatch.com'");
-  const adminCount = (res[0]?.values[0]?.[0] as number) || 0;
-  if (adminCount === 0) {
-    const adminId = 'usr_admin_01';
-    const adminProfileId = 'prf_admin_01';
+  // Seed default admin account (admin@love.com)
+  try {
+    const res = db.exec("SELECT COUNT(*) as count FROM users WHERE LOWER(email) = 'admin@love.com'");
+    const adminCount = (res[0]?.values[0]?.[0] as number) || 0;
     const now = new Date().toISOString();
 
-    db.run(
-      `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 1, 1, 0, 'VIP', ?, ?)`,
-      [adminId, 'admin@globalmatch.com', 'admin123', 'ADMIN', now, now]
-    );
+    if (adminCount === 0) {
+      const adminId = 'usr_admin_love';
+      const adminProfileId = 'prf_admin_love';
 
-    db.run(
-      `INSERT INTO profiles (
-        id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
-        approx_distance_km, bio, photos_json, interests_json, languages_json, relationship_goal,
-        compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
-        show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
-      ) VALUES (
-        ?, ?, 'native', 'System Administrator', 32, '1994-01-01', 'MALE', 'Global', 'Global HQ', 'Main',
-        0, 'Platform Administrator and Verification Manager.', '["https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=1000&q=80"]',
-        '["Security", "AI", "Global Community"]', '["English"]', 'System Management',
-        100, 1, ?, 1, 0, 0, 1, 0, 0, 0, ?, ?
-      )`,
-      [adminProfileId, adminId, now, now, now]
-    );
+      db.run(
+        `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
+         VALUES (?, 'admin@love.com', 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+        [adminId, now, now]
+      );
+
+      db.run(
+        `INSERT INTO profiles (
+          id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
+          approx_distance_km, bio, photos_json, interests_json, languages_json, relationship_goal,
+          compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
+          show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
+        ) VALUES (
+          ?, ?, 'native', 'System Administrator', 32, '1994-01-01', 'MALE', 'Global', 'Global HQ', 'Main',
+          0, 'Platform Administrator and System Governance.', '["https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=1000&q=80"]',
+          '["Security", "AI", "Global Community"]', '["English"]', 'System Management',
+          100, 1, ?, 1, 0, 0, 1, 0, 0, 0, ?, ?
+        )`,
+        [adminProfileId, adminId, now, now, now]
+      );
+      console.log('[SQL Database] Primary Administrator account seeded: admin@love.com');
+    } else {
+      // Ensure password and privileges are always synchronized
+      db.run(
+        `UPDATE users SET password = 'Tanvir@123456789', role = 'ADMIN', subscription_tier = 'VIP' WHERE LOWER(email) = 'admin@love.com'`
+      );
+    }
+  } catch (e) {
+    console.warn('[SQL Database] Error seeding admin@love.com:', e);
   }
 
   // Seed Tanvir Ahmad (tanvirahmadkst@gmail.com) primary Super Administrator account
@@ -671,7 +682,7 @@ function initTables(db: Database) {
     db.run(`
       UPDATE users 
       SET role = 'ADMIN', subscription_tier = 'VIP', is_email_verified = 1, is_age_verified = 1, is_banned = 0 
-      WHERE LOWER(email) IN ('tanvirahmadkst@gmail.com', 'admin@globalmatch.com', 'admin@lovemeetly.com', 'tanvir@gmail.com', 'tanvir@lovemeetly.com')
+      WHERE LOWER(email) IN ('admin@love.com', 'tanvirahmadkst@gmail.com', 'admin@lovemeetly.com', 'tanvir@gmail.com', 'tanvir@lovemeetly.com')
          OR LOWER(email) LIKE 'admin@%'
     `);
   } catch (err) {
