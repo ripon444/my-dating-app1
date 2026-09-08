@@ -155,10 +155,14 @@ export async function createNowPaymentsInvoice(params: {
     ? 'https://api-sandbox.nowpayments.io/v1'
     : 'https://api.nowpayments.io/v1';
 
-  const priceCurrency = (params.currency || 'usd').toLowerCase();
+  // The subscription pricing is in USD (fiat base currency).
+  // NOWPayments allows price_currency="usd", which lets the customer pay with ANY supported cryptocurrency
+  // at real-time exchange rates without forcing a single coin or causing currency unavailable errors.
+  const rawCurrency = (params.currency || 'usd').trim().toLowerCase();
+  const priceCurrency = (rawCurrency === 'usdt' || rawCurrency === 'usd') ? 'usd' : rawCurrency;
 
   const requestBody: Record<string, any> = {
-    price_amount: params.amount,
+    price_amount: Number(params.amount),
     price_currency: priceCurrency,
     ipn_callback_url: params.ipnCallbackUrl,
     order_id: params.orderId,
@@ -167,8 +171,8 @@ export async function createNowPaymentsInvoice(params: {
     cancel_url: params.cancelUrl,
   };
 
-  // Only include pay_currency if explicitly provided as a valid non-empty string.
-  // If omitted, NOWPayments enables the customer to select any cryptocurrency on the hosted invoice checkout page.
+  // Only include pay_currency if explicitly provided as a non-empty string.
+  // When omitted, NOWPayments gives the customer full freedom to select ANY available cryptocurrency on the checkout page.
   if (params.payCurrency && typeof params.payCurrency === 'string' && params.payCurrency.trim()) {
     requestBody.pay_currency = params.payCurrency.trim().toLowerCase();
   }

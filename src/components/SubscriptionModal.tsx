@@ -114,7 +114,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         orderId: initialOrderId,
         planName: 'VIP Plan Upgrade',
         amount: 0,
-        currency: 'USDT',
+        currency: 'USD',
         status: 'waiting',
       });
       startPollingPayment(initialOrderId);
@@ -165,7 +165,24 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         }
 
         // Still waiting or confirming
-        setActiveOrder((prev) => prev ? { ...prev, status: res.paymentStatus } : null);
+        setActiveOrder((prev) => {
+          if (!prev) {
+            return {
+              orderId: res.orderId,
+              planName: res.planName || 'VIP Subscription',
+              amount: Number(res.amount || 0),
+              currency: res.currency || 'USD',
+              status: res.paymentStatus,
+            };
+          }
+          return {
+            ...prev,
+            status: res.paymentStatus,
+            planName: prev.planName && prev.planName !== 'VIP Plan Upgrade' ? prev.planName : (res.planName || prev.planName),
+            amount: prev.amount > 0 ? prev.amount : (Number(res.amount) || 0),
+            currency: prev.currency || res.currency || 'USD',
+          };
+        });
 
         // Max poll ~5 minutes (60 checks * 5s)
         if (checkCount > 60) {
@@ -226,8 +243,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           orderId: res.orderId,
           invoiceUrl: res.invoiceUrl,
           planName: plan.name,
-          amount: plan.price_usdt,
-          currency: 'USDT',
+          amount: Number(plan.price || plan.price_usdt || res.amount || 0),
+          currency: 'USD',
           status: 'waiting',
         });
 
@@ -348,7 +365,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                     </span>
                   </h4>
                   <p className="text-xs text-stone-400 mt-0.5">
-                    Amount: <strong className="text-white">{activeOrder.amount} USDT</strong> • NOWPayments Gateway
+                    Amount: <strong className="text-white">${activeOrder.amount > 0 ? activeOrder.amount : ''} USD</strong> • Multi-Crypto Gateway
                   </p>
                 </div>
               </div>
@@ -452,7 +469,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                       <p className="text-xs text-stone-400 line-clamp-2">{plan.description}</p>
                       <div className="flex items-baseline gap-1.5 pt-2">
                         <span className="text-3xl font-extrabold text-white">
-                          {isFree ? 'FREE' : `${plan.price_usdt} USDT`}
+                          {isFree ? 'FREE' : `$${plan.price || plan.price_usdt || 0}`}
                         </span>
                         <span className="text-xs text-stone-400">/{durationText}</span>
                       </div>
@@ -507,7 +524,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                             <>
                               <Coins className="w-4 h-4" />
                               <span>
-                                Pay {plan.price_usdt} USDT (Crypto)
+                                Pay ${plan.price || plan.price_usdt || 0} USD (Crypto)
                               </span>
                             </>
                           )}
@@ -525,7 +542,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         <div className="px-6 py-4 bg-stone-950 border-t border-stone-800 flex flex-wrap items-center justify-between gap-3 text-xs text-stone-400">
           <div className="flex items-center gap-2">
             <Lock className="w-4 h-4 text-emerald-400" />
-            <span>Instant Crypto Checkout via NOWPayments (USDT TRC20, ERC20, BTC, ETH, TON)</span>
+            <span>Multi-Crypto Checkout via NOWPayments (Pay with USDT, BTC, ETH, TON, LTC & 150+ coins)</span>
           </div>
           <div className="flex items-center gap-1.5 text-stone-400">
             <ShieldCheck className="w-4 h-4 text-amber-400" />
