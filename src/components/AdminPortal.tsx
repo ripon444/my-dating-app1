@@ -70,8 +70,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   });
 
   // Login form state
-  const [email, setEmail] = useState('admin@love.com');
-  const [password, setPassword] = useState('Tanvir@123456789');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -140,10 +140,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     e.preventDefault();
     setLoginError('');
     setLogoutMessage('');
-    setLoginLoading(true);
 
-    const inputEmail = email.trim() || 'admin@love.com';
-    const inputPass = password.trim() || 'Tanvir@123456789';
+    const inputEmail = email.trim();
+    const inputPass = password.trim();
+
+    if (!inputEmail || !inputPass) {
+      setLoginError('Please enter your administrator email and password.');
+      return;
+    }
+
+    setLoginLoading(true);
 
     try {
       const res = await api.login(inputEmail, inputPass, 'ADMIN');
@@ -355,7 +361,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@love.com"
+                  placeholder="Enter admin email"
+                  autoComplete="username"
                   className="w-full bg-stone-950 border border-stone-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-500 transition"
                 />
               </div>
@@ -370,7 +377,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="Enter password"
+                    autoComplete="current-password"
                     className="w-full bg-stone-950 border border-stone-700/80 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-500 transition"
                   />
                   <button
@@ -392,6 +400,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                   value={secretKey}
                   onChange={(e) => setSecretKey(e.target.value)}
                   placeholder="Enter security key if bypassing password"
+                  autoComplete="off"
                   className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-xs text-stone-300 placeholder-stone-600 focus:outline-none focus:border-amber-500 transition"
                 />
               </div>
@@ -412,18 +421,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
               </button>
             </form>
 
-            <div className="pt-4 border-t border-stone-800/80 text-center space-y-1.5">
-              <p className="text-xs text-stone-200">
-                Admin Email: <span className="text-rose-400 font-mono font-semibold">admin@love.com</span>
-              </p>
-              <p className="text-xs text-stone-200">
-                Password: <span className="text-rose-400 font-mono font-semibold">Tanvir@123456789</span>
-              </p>
-              <p className="text-[11px] text-stone-400 pt-1 border-t border-stone-800/50">
-                Super Admin Email: <span className="text-amber-400 font-mono">tanvirahmadkst@gmail.com</span>
-              </p>
-              <p className="text-[10px] text-stone-500">
-                All administrator actions are logged and authorized under system security policies.
+            <div className="pt-4 border-t border-stone-800/80 text-center">
+              <p className="text-[11px] text-stone-500">
+                Restricted access. All administrative actions are logged and authorized under security policies.
               </p>
             </div>
 
