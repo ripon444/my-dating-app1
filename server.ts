@@ -2329,10 +2329,11 @@ app.post('/api/payments/create-invoice', async (req, res) => {
       ]
     );
 
-    // Determine absolute URLs
+    // Determine absolute URLs (prioritize APP_URL if configured)
+    const rawAppUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const host = req.get('host') || 'lovemeetly.com';
-    const baseUrl = `${proto}://${host}`;
+    const baseUrl = rawAppUrl || `${proto}://${host}`;
 
     const invoiceResult = await createNowPaymentsInvoice({
       orderId,
@@ -3027,9 +3028,10 @@ app.get('/api/admin/payments', requireAdmin, async (req, res) => {
 app.get('/api/admin/payments/settings', requireAdmin, async (req, res) => {
   try {
     const config = await getNowPaymentsConfig();
+    const rawAppUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const host = req.get('host') || 'lovemeetly.com';
-    const webhookUrl = `${proto}://${host}/api/payments/nowpayments-ipn`;
+    const webhookUrl = `${rawAppUrl || `${proto}://${host}`}/api/payments/nowpayments-ipn`;
 
     const mask = (str: string) => {
       if (!str) return '';
@@ -3045,8 +3047,8 @@ app.get('/api/admin/payments/settings', requireAdmin, async (req, res) => {
       isEnabled: config.isEnabled,
       payoutCurrency: config.payoutCurrency,
       webhookUrl,
-      apiKey: config.apiKey || '',
-      ipnSecret: config.ipnSecret || '',
+      apiKey: config.apiKey ? mask(config.apiKey) : '',
+      ipnSecret: config.ipnSecret ? mask(config.ipnSecret) : '',
       apiKeyMasked: mask(config.apiKey),
       ipnSecretMasked: mask(config.ipnSecret),
     });
@@ -3087,14 +3089,22 @@ app.post('/api/admin/payments/settings', requireAdmin, async (req, res) => {
       payoutCurrency: (payoutCurrency && String(payoutCurrency).trim().toUpperCase()) || current.payoutCurrency,
     });
 
+    const mask = (str: string) => {
+      if (!str) return '';
+      if (str.length <= 8) return '********';
+      return str.slice(0, 4) + '****************' + str.slice(-4);
+    };
+
     res.json({
       success: true,
       message: 'NOWPayments gateway configuration saved successfully!',
       isConfigured: Boolean(saved.apiKey),
       hasApiKey: Boolean(saved.apiKey),
       hasIpnSecret: Boolean(saved.ipnSecret),
-      apiKey: saved.apiKey,
-      ipnSecret: saved.ipnSecret,
+      apiKey: saved.apiKey ? mask(saved.apiKey) : '',
+      ipnSecret: saved.ipnSecret ? mask(saved.ipnSecret) : '',
+      apiKeyMasked: mask(saved.apiKey),
+      ipnSecretMasked: mask(saved.ipnSecret),
       isSandbox: saved.isSandbox,
       isEnabled: saved.isEnabled,
       payoutCurrency: saved.payoutCurrency,

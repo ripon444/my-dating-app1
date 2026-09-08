@@ -21,9 +21,17 @@ export async function getNowPaymentsConfig(): Promise<NowPaymentsConfig> {
     console.warn('[NOWPayments Config] Error reading payment_settings:', e);
   }
 
-  const apiKey = (dbRow?.api_key || process.env.NOWPAYMENTS_API_KEY || '').trim();
-  const ipnSecret = (dbRow?.ipn_secret || process.env.NOWPAYMENTS_IPN_SECRET || '').trim();
-  const isSandbox = dbRow?.is_sandbox !== undefined ? Boolean(dbRow.is_sandbox) : process.env.NOWPAYMENTS_SANDBOX === 'true';
+  const rawDbKey = (dbRow?.api_key || '').trim();
+  const envKey = (process.env.NOWPAYMENTS_API_KEY || '').trim();
+  const apiKey = (rawDbKey && !rawDbKey.includes('****')) ? rawDbKey : envKey;
+
+  const rawDbSecret = (dbRow?.ipn_secret || '').trim();
+  const envSecret = (process.env.NOWPAYMENTS_IPN_SECRET || '').trim();
+  const ipnSecret = (rawDbSecret && !rawDbSecret.includes('****')) ? rawDbSecret : envSecret;
+
+  const isSandbox = dbRow?.is_sandbox !== undefined 
+    ? Boolean(dbRow.is_sandbox) 
+    : (process.env.NOWPAYMENTS_SANDBOX === 'true' || process.env.NOWPAYMENTS_SANDBOX === '1');
   const isEnabled = dbRow?.is_enabled !== undefined ? Boolean(dbRow.is_enabled) : true;
   const payoutCurrency = (dbRow?.payout_currency || 'USDT').trim().toUpperCase();
 
