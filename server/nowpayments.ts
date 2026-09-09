@@ -177,6 +177,8 @@ export async function createNowPaymentsInvoice(params: {
     order_description: params.orderDescription,
     success_url: params.successUrl,
     cancel_url: params.cancelUrl,
+    is_fixed_rate: false,
+    is_fee_paid_by_user: false,
   };
 
   // Only include pay_currency if explicitly provided as a non-empty string.
