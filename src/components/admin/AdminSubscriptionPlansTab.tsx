@@ -420,6 +420,14 @@ export const AdminSubscriptionPlansTab: React.FC<AdminSubscriptionPlansTabProps>
                     placeholder="15"
                     className="w-full bg-stone-950 border border-stone-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-amber-500 font-mono"
                   />
+                  {priceUsdt > 0 && priceUsdt < 15 && (
+                    <div className="mt-1.5 p-2 rounded-lg bg-amber-950/60 border border-amber-800/80 text-amber-300 text-[11px] leading-tight flex items-start gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>NOWPayments Minimum Note:</strong> Amounts below 15 USDT (e.g. {priceUsdt} USDT) will fail on NOWPayments checkout with <em>"Crypto amount is less than minimal"</em> unless you enable <strong>Custody</strong> or set your payout wallet to <strong>USDT TRC-20</strong> in your NOWPayments dashboard. Recommended minimum is <strong>15 USDT</strong>.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

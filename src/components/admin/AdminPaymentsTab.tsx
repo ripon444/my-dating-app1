@@ -540,6 +540,20 @@ export const AdminPaymentsTab: React.FC<AdminPaymentsTabProps> = ({
               <p className="text-[10px] text-stone-500">
                 Recommended: <strong className="text-amber-400">usdttrc20</strong> (Tether on TRON network for ultra-low network fees).
               </p>
+              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-900/60 text-amber-300 text-[11px] leading-relaxed space-y-1 mt-2">
+                <div className="font-bold flex items-center gap-1.5 text-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Important Note on NOWPayments Minimum Amounts:</span>
+                </div>
+                <p>
+                  NOWPayments calculates minimum deposit amounts dynamically based on your outcome wallet. If your payout wallet in NOWPayments is set to <strong>BTC, ETH, or USDTERC20</strong>, the minimum payment threshold is approximately <strong>15 USDT</strong>. Creating payments below 15 USDT (e.g. 10 or 11 USDT) will fail on checkout with <em>&quot;Crypto amount is less than minimal&quot;</em>.
+                </p>
+                <p>
+                  To accept smaller amounts ($1–$10), either:
+                  1) Enable <strong>NOWPayments Custody</strong> in your NOWPayments dashboard, or
+                  2) Set your payout wallet to <strong>USDT TRC-20</strong> or <strong>USDT BSC</strong>.
+                </p>
+              </div>
             </div>
 
             {/* Save Button */}
