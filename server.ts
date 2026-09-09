@@ -3592,6 +3592,21 @@ async function start() {
       if (req.path.startsWith('/api') || req.path.startsWith('/server-api') || req.path.startsWith('/socket.io')) {
         return next();
       }
+      try {
+        if (fs.existsSync(distIndex)) {
+          let html = fs.readFileSync(distIndex, 'utf-8');
+          const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+          const host = req.get('host') || 'lovemeetly.com';
+          const origin = `${proto}://${host}`;
+          if (!host.includes('lovemeetly.com')) {
+            html = html.replace(/https:\/\/lovemeetly\.com/g, origin);
+          }
+          res.setHeader('Content-Type', 'text/html; charset=utf-8');
+          return res.send(html);
+        }
+      } catch {
+        // fallback
+      }
       res.sendFile(distIndex);
     });
   }
