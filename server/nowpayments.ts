@@ -155,15 +155,22 @@ export async function createNowPaymentsInvoice(params: {
     ? 'https://api-sandbox.nowpayments.io/v1'
     : 'https://api.nowpayments.io/v1';
 
-  // Subscription prices are denominated in USDT (Tether stablecoin) as configured in subscription plans.
-  // Passing price_currency="usdt" ensures NOWPayments bases the invoice in USDT directly.
-  // This prevents fiat-to-crypto internal conversion cuts (such as 10 USD -> 9.991984 USDT)
-  // which trigger NOWPayments' "Crypto amount is less than minimal" error on 10-14 USDT plans.
-  const rawCurrency = (params.currency || 'usdt').trim().toLowerCase();
-  const priceCurrency = rawCurrency;
+  // NOWPayments hosted invoices require a fiat currency for price_currency (e.g., 'usd' or 'eur').
+  // Passing 'usdt' causes NOWPayments checkout to fail with:
+  // "This currency is currently unavailable. Try it in 2 hours"
+  // 1 USDT = 1 USD, so 'usd' serves as the base fiat pricing currency.
+  const priceCurrency = 'usd';
+
+  // To prevent NOWPayments' internal fiat-to-crypto conversion haircut from dropping
+  // an exact 10.00 amount to 9.991984 (which fails NOWPayments' 10.00 minimal amount validation),
+  // add a small 0.5% buffer (or +0.05) if the plan price is right at the 10 threshold.
+  const baseAmount = Number(params.amount);
+  const bufferedAmount = (baseAmount >= 10 && baseAmount < 15)
+    ? Math.round((baseAmount + 0.05) * 100) / 100
+    : baseAmount;
 
   const requestBody: Record<string, any> = {
-    price_amount: Number(params.amount),
+    price_amount: bufferedAmount,
     price_currency: priceCurrency,
     ipn_callback_url: params.ipnCallbackUrl,
     order_id: params.orderId,
