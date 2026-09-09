@@ -2677,16 +2677,399 @@ const requireAdmin = async (req: any, res: any, next: any) => {
   if (!isAdmin) {
     return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
   }
+
+  // Check if admin is disabled in admin_members
+  if (user && !isMasterKey && !isSuperAdminEmail(user.email)) {
+    try {
+      const member = await SqlHelper.queryOne<any>(
+        'SELECT is_active FROM admin_members WHERE user_id = ? OR LOWER(email) = ?',
+        [user.id, user.email.toLowerCase()]
+      );
+      if (member && Number(member.is_active) === 0) {
+        return res.status(403).json({ error: 'Administrator access revoked or suspended. Please contact Super Admin.' });
+      }
+    } catch (e) {}
+  }
+
   next();
 };
 
+const ALL_ADMIN_PERMISSIONS = [
+  'kpi',
+  'subscriptions',
+  'payments',
+  'users',
+  'moderation',
+  'providers',
+  'logs',
+  'settings',
+  'admins'
+];
+
+export async function getAdminPermissionsForUser(user: any, headers?: any): Promise<{
+  role: string;
+  permissions: string[];
+  isSuper: boolean;
+  memberId?: string;
+}> {
+  const adminKey = ((headers?.['x-admin-key'] || headers?.['x-secret-key'] || '') as string).trim();
+  const isMasterKey = ['tanvir', 'tanvir2026', 'admin123', 'Tanvir@123456789', 'tanvir@123456789'].includes(adminKey);
+
+  if (isMasterKey || (user && isSuperAdminEmail(user.email))) {
+    return { role: 'SUPER_ADMIN', permissions: ALL_ADMIN_PERMISSIONS, isSuper: true };
+  }
+
+  if (!user) {
+    return { role: 'USER', permissions: [], isSuper: false };
+  }
+
+  try {
+    const member = await SqlHelper.queryOne<any>(
+      'SELECT id, role, permissions_json, is_active FROM admin_members WHERE user_id = ? OR LOWER(email) = ?',
+      [user.id, user.email.toLowerCase()]
+    );
+
+    if (member) {
+      if (Number(member.is_active) === 0) {
+        return { role: member.role || 'SUB_ADMIN', permissions: [], isSuper: false, memberId: member.id };
+      }
+      if (member.role === 'SUPER_ADMIN') {
+        return { role: 'SUPER_ADMIN', permissions: ALL_ADMIN_PERMISSIONS, isSuper: true, memberId: member.id };
+      }
+      let perms: string[] = [];
+      try {
+        perms = JSON.parse(member.permissions_json || '[]');
+      } catch {}
+      return { role: member.role || 'SUB_ADMIN', permissions: perms, isSuper: false, memberId: member.id };
+    }
+
+    if (user.role === 'ADMIN') {
+      return {
+        role: 'ADMIN',
+        permissions: ALL_ADMIN_PERMISSIONS.filter(p => p !== 'admins'),
+        isSuper: false
+      };
+    }
+  } catch (e) {
+    console.error('getAdminPermissionsForUser error:', e);
+  }
+
+  return { role: user.role || 'USER', permissions: [], isSuper: false };
+}
+
+// Permission enforcement middleware
+const requirePermission = (permission: string) => {
+  return async (req: any, res: any, next: any) => {
+    requireAdmin(req, res, async () => {
+      const user = req.user;
+      const permInfo = await getAdminPermissionsForUser(user, req.headers);
+      req.adminPerms = permInfo;
+
+      if (permInfo.isSuper) {
+        return next();
+      }
+
+      if (permInfo.permissions.includes(permission) || permInfo.permissions.includes('*')) {
+        return next();
+      }
+
+      return res.status(403).json({
+        error: `Permission Denied: Your account role does not have the '${permission}' privilege.`,
+        requiredPermission: permission,
+        role: permInfo.role
+      });
+    });
+  };
+};
+
 // Admin Access Verification Endpoint
-app.get('/api/admin/verify-access', requireAdmin, (req, res) => {
+app.get('/api/admin/verify-access', requireAdmin, async (req, res) => {
+  const permInfo = await getAdminPermissionsForUser((req as any).user, req.headers);
   res.json({
     success: true,
     user: (req as any).user,
-    message: 'Super Administrator privileges confirmed.',
+    role: permInfo.role,
+    permissions: permInfo.permissions,
+    isSuperAdmin: permInfo.isSuper,
+    message: permInfo.isSuper ? 'Super Administrator privileges confirmed.' : 'Administrator session verified.',
   });
+});
+
+// Admin Permissions Endpoint
+app.get('/api/admin/my-permissions', requireAdmin, async (req, res) => {
+  const permInfo = await getAdminPermissionsForUser((req as any).user, req.headers);
+  res.json({
+    success: true,
+    role: permInfo.role,
+    permissions: permInfo.permissions,
+    isSuperAdmin: permInfo.isSuper,
+  });
+});
+
+// -------------------------------------------------------------
+// Admin & Sub-Admin Role Management Endpoints
+// -------------------------------------------------------------
+
+// List all administrators and sub-admins
+app.get('/api/admin/members', requirePermission('admins'), async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>(
+      'SELECT * FROM admin_members ORDER BY CASE role WHEN "SUPER_ADMIN" THEN 1 WHEN "ADMIN" THEN 2 ELSE 3 END, created_at ASC'
+    );
+
+    const members = rows.map((r) => {
+      let perms: string[] = [];
+      try {
+        perms = JSON.parse(r.permissions_json || '[]');
+      } catch {}
+
+      return {
+        id: r.id,
+        userId: r.user_id || undefined,
+        email: r.email,
+        name: r.name,
+        role: r.role,
+        permissions: perms,
+        isActive: Boolean(r.is_active),
+        notes: r.notes || '',
+        createdBy: r.created_by || '',
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      };
+    });
+
+    res.json({ success: true, members });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to retrieve admin members.' });
+  }
+});
+
+// Add or elevate a new administrator / sub-admin with custom roles & permissions
+app.post('/api/admin/members', requirePermission('admins'), async (req, res) => {
+  try {
+    const { email, name, role, permissions, password, notes } = req.body || {};
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanName = (name || '').trim();
+
+    if (!cleanEmail || !cleanName) {
+      return res.status(400).json({ error: 'Name and email address are required.' });
+    }
+
+    const assignedRole = role || 'SUB_ADMIN';
+    const assignedPermissions = Array.isArray(permissions) ? permissions : [];
+    const now = new Date().toISOString();
+
+    // Check if user already exists in `users` table
+    let userRow = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+    let userId = userRow?.id;
+
+    if (!userRow) {
+      // Create user account
+      userId = `usr_adm_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+      const plainPassword = (password || '').trim() || 'Lovemeetly@2026';
+
+      await SqlHelper.execute(
+        `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
+         VALUES (?, ?, ?, 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+        [userId, cleanEmail, plainPassword, now, now]
+      );
+
+      // Create initial profile
+      const profileId = `prf_adm_${Date.now().toString(36)}`;
+      const baseUsername = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'admin';
+      const uniqueUsername = `${baseUsername}_${Math.random().toString(36).substring(2, 6)}`;
+
+      await SqlHelper.execute(
+        `INSERT INTO profiles (
+          id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
+          approx_distance_km, bio, photos_json, interests_json, languages_json, relationship_goal,
+          compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
+          show_age, show_approx_location, allow_calls, allow_messages, username, created_at, updated_at
+        ) VALUES (
+          ?, ?, 'native', ?, 30, '1996-01-01', 'OTHER', 'Global HQ', 'Administrative', 'Central',
+          0, 'Official Lovemeetly Platform Administrator.', '["https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80"]',
+          '["Platform Operations", "Security"]', '["English"]', 'Administration',
+          100, 1, ?, 1, 0, 0, 1, 0, 0, 0, ?, ?, ?
+        )`,
+        [profileId, userId, cleanName, now, uniqueUsername, now, now]
+      );
+    } else {
+      // Elevate existing user to ADMIN role
+      await SqlHelper.execute(
+        "UPDATE users SET role = 'ADMIN', subscription_tier = 'VIP', updated_at = ? WHERE id = ?",
+        [now, userRow.id]
+      );
+      if (password && String(password).trim()) {
+        await SqlHelper.execute(
+          'UPDATE users SET password = ?, updated_at = ? WHERE id = ?',
+          [String(password).trim(), now, userRow.id]
+        );
+      }
+    }
+
+    // Check if already in admin_members
+    const existingMember = await SqlHelper.queryOne<any>('SELECT id FROM admin_members WHERE LOWER(email) = ?', [cleanEmail]);
+    const memberId = existingMember?.id || `adm_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
+    if (existingMember) {
+      await SqlHelper.execute(
+        `UPDATE admin_members SET 
+          user_id = ?, name = ?, role = ?, permissions_json = ?, is_active = 1, notes = ?, updated_at = ?
+         WHERE id = ?`,
+        [userId, cleanName, assignedRole, JSON.stringify(assignedPermissions), notes || '', now, existingMember.id]
+      );
+    } else {
+      const creator = (req as any).user?.email || 'Super Admin';
+      await SqlHelper.execute(
+        `INSERT INTO admin_members (id, user_id, email, name, role, permissions_json, is_active, notes, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+        [memberId, userId, cleanEmail, cleanName, assignedRole, JSON.stringify(assignedPermissions), notes || '', creator, now, now]
+      );
+    }
+
+    await persistDb();
+
+    res.json({
+      success: true,
+      message: `Administrator '${cleanName}' successfully configured with role ${assignedRole}.`,
+      member: {
+        id: memberId,
+        userId,
+        email: cleanEmail,
+        name: cleanName,
+        role: assignedRole,
+        permissions: assignedPermissions,
+        isActive: true,
+        notes: notes || '',
+        createdAt: now,
+        updatedAt: now,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to create administrator.' });
+  }
+});
+
+// Update an existing administrator or sub-admin's role and permissions
+app.put('/api/admin/members/:id', requirePermission('admins'), async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    const { name, role, permissions, isActive, notes, password } = req.body || {};
+
+    const member = await SqlHelper.queryOne<any>('SELECT * FROM admin_members WHERE id = ?', [memberId]);
+    if (!member) {
+      return res.status(404).json({ error: 'Administrator not found.' });
+    }
+
+    // Protection rule: Cannot demote or disable primary founder super admin
+    if (isSuperAdminEmail(member.email)) {
+      if (role && role !== 'SUPER_ADMIN') {
+        return res.status(400).json({ error: 'Cannot demote the primary Founder Super Administrator role.' });
+      }
+      if (isActive === false || isActive === 0) {
+        return res.status(400).json({ error: 'Cannot disable the primary Founder Super Administrator account.' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const updatedName = (name !== undefined && name !== null) ? String(name).trim() : member.name;
+    const updatedRole = role || member.role;
+    const updatedPerms = Array.isArray(permissions) ? JSON.stringify(permissions) : member.permissions_json;
+    const updatedActive = (isActive !== undefined && isActive !== null) ? (isActive ? 1 : 0) : member.is_active;
+    const updatedNotes = notes !== undefined ? String(notes) : (member.notes || '');
+
+    await SqlHelper.execute(
+      `UPDATE admin_members SET 
+        name = ?, role = ?, permissions_json = ?, is_active = ?, notes = ?, updated_at = ?
+       WHERE id = ?`,
+      [updatedName, updatedRole, updatedPerms, updatedActive, updatedNotes, now, memberId]
+    );
+
+    // If password provided, update user credentials
+    if (password && String(password).trim()) {
+      await SqlHelper.execute(
+        'UPDATE users SET password = ?, updated_at = ? WHERE id = ? OR LOWER(email) = ?',
+        [String(password).trim(), now, member.user_id, member.email.toLowerCase()]
+      );
+    }
+
+    // If deactivated, revoke active sessions
+    if (updatedActive === 0 && member.user_id) {
+      try {
+        await SqlHelper.execute('DELETE FROM sessions WHERE user_id = ?', [member.user_id]);
+      } catch (e) {}
+    }
+
+    await persistDb();
+
+    let parsedPerms: string[] = [];
+    try {
+      parsedPerms = JSON.parse(updatedPerms);
+    } catch {}
+
+    res.json({
+      success: true,
+      message: `Administrator '${updatedName}' successfully updated.`,
+      member: {
+        id: memberId,
+        userId: member.user_id,
+        email: member.email,
+        name: updatedName,
+        role: updatedRole,
+        permissions: parsedPerms,
+        isActive: Boolean(updatedActive),
+        notes: updatedNotes,
+        createdAt: member.created_at,
+        updatedAt: now,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to update administrator.' });
+  }
+});
+
+// Revoke and delete administrator access
+app.delete('/api/admin/members/:id', requirePermission('admins'), async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    const currentUser = (req as any).user;
+
+    const member = await SqlHelper.queryOne<any>('SELECT * FROM admin_members WHERE id = ?', [memberId]);
+    if (!member) {
+      return res.status(404).json({ error: 'Administrator not found.' });
+    }
+
+    // Guard against deleting oneself or primary superadmin
+    if (isSuperAdminEmail(member.email)) {
+      return res.status(400).json({ error: 'Cannot delete the primary Founder Super Administrator account.' });
+    }
+
+    if (currentUser?.email && member.email.toLowerCase() === currentUser.email.toLowerCase()) {
+      return res.status(400).json({ error: 'You cannot delete your own administrator account.' });
+    }
+
+    // Remove from admin_members
+    await SqlHelper.execute('DELETE FROM admin_members WHERE id = ?', [memberId]);
+
+    // Downgrade user's role to standard USER
+    if (member.user_id) {
+      await SqlHelper.execute(
+        "UPDATE users SET role = 'USER', updated_at = ? WHERE id = ?",
+        [new Date().toISOString(), member.user_id]
+      );
+      // Terminate any active sessions
+      await SqlHelper.execute('DELETE FROM sessions WHERE user_id = ?', [member.user_id]).catch(() => {});
+    }
+
+    await persistDb();
+
+    res.json({
+      success: true,
+      message: `Administrator '${member.name}' has been successfully removed and access revoked.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to revoke administrator.' });
+  }
 });
 
 // Explicit Superadmin Privilege Elevation / Activation

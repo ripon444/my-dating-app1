@@ -41,6 +41,8 @@ import { safeStorage } from '../utils/storage';
 import { AdminSubscriptionPlansTab } from './admin/AdminSubscriptionPlansTab';
 import { AdminPaymentsTab } from './admin/AdminPaymentsTab';
 import { AdminUserSubscriptionModal } from './admin/AdminUserSubscriptionModal';
+import { AdminMembersTab } from './admin/AdminMembersTab';
+import { AdminPermission } from '../types';
 
 interface AdminPortalProps {
   onBackToSite: () => void;
@@ -79,7 +81,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [logoutMessage, setLogoutMessage] = useState('');
 
   // Admin Dashboard State
-  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'payments' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings'>('kpi');
+  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'payments' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings' | 'admins'>('kpi');
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [providers, setProviders] = useState<ExternalProvider[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
@@ -87,6 +89,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [isSyncing, setIsSyncing] = useState<Record<string, boolean>>({});
   const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // Admin Role & Permission State
+  const [adminPermissions, setAdminPermissions] = useState<AdminPermission[]>([
+    'kpi', 'subscriptions', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings', 'admins'
+  ]);
+  const [adminRole, setAdminRole] = useState<string>('SUPER_ADMIN');
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(true);
 
   // User subscription management state
   const [selectedUserForSub, setSelectedUserForSub] = useState<User | null>(null);
@@ -107,8 +116,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     if (!adminUser) return;
     setIsLoadingData(true);
     try {
-      // Ensure backend recognizes current admin session
-      await api.claimSuperAdmin('tanvir2026', adminUser.email).catch(() => {});
+      // Ensure backend recognizes current admin session if superadmin
+      if (
+        adminUser.email?.toLowerCase().includes('tanvir') ||
+        adminUser.email?.toLowerCase() === 'admin@love.com'
+      ) {
+        await api.claimSuperAdmin('tanvir2026', adminUser.email).catch(() => {});
+      }
+
+      // Check current admin permissions & role
+      const permRes = await api.getMyPermissions().catch(() => null);
+      if (permRes?.success) {
+        setAdminPermissions(permRes.permissions || []);
+        setAdminRole(permRes.role || 'ADMIN');
+        setIsSuperAdmin(Boolean(permRes.isSuperAdmin));
+      } else {
+        const isSuper =
+          adminUser.email?.toLowerCase().includes('tanvir') ||
+          adminUser.email?.toLowerCase() === 'admin@love.com';
+        setIsSuperAdmin(isSuper);
+        setAdminRole(isSuper ? 'SUPER_ADMIN' : 'ADMIN');
+      }
 
       const [analyticsData, providersData, reportsData, logsData, profilesData] = await Promise.all([
         api.getAdminAnalytics().catch(() => null),
@@ -465,8 +493,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-bold text-white font-serif">Lovemeetly Admin Center</h1>
-                <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-500/30">
-                  SUPER ADMIN
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    isSuperAdmin
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                  }`}
+                >
+                  {isSuperAdmin ? 'SUPER ADMIN' : (adminRole.replace('_', ' ') || 'ADMIN')}
                 </span>
               </div>
               <p className="text-[11px] text-stone-400">
@@ -532,33 +566,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
         {/* Tab Navigation */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-stone-800">
           {[
-            { id: 'kpi', label: 'Platform KPIs & Revenue', icon: BarChart3 },
-            { id: 'subscriptions', label: 'Subscription Plans', icon: Crown },
-            { id: 'payments', label: 'Payments & Billing', icon: Coins },
-            { id: 'users', label: `Users & Profiles (${profiles.length})`, icon: Users },
-            { id: 'moderation', label: `Moderation Queue (${reports.filter(r => r.status === 'PENDING').length})`, icon: AlertTriangle },
-            { id: 'providers', label: 'Partner Syndication Feeds', icon: Globe },
-            { id: 'logs', label: 'Sync Audit Logs', icon: Clock },
-            { id: 'settings', label: 'System Configuration', icon: Settings },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-2 ${
-                  isActive
-                    ? 'bg-gradient-to-r from-rose-600 to-indigo-600 text-white shadow-md'
-                    : 'text-stone-400 hover:text-stone-200 hover:bg-stone-900'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+            { id: 'kpi', label: 'Platform KPIs & Revenue', icon: BarChart3, perm: 'kpi' },
+            { id: 'subscriptions', label: 'Subscription Plans', icon: Crown, perm: 'subscriptions' },
+            { id: 'payments', label: 'Payments & Billing', icon: Coins, perm: 'payments' },
+            { id: 'users', label: `Users & Profiles (${profiles.length})`, icon: Users, perm: 'users' },
+            { id: 'moderation', label: `Moderation Queue (${reports.filter(r => r.status === 'PENDING').length})`, icon: AlertTriangle, perm: 'moderation' },
+            { id: 'providers', label: 'Partner Syndication Feeds', icon: Globe, perm: 'providers' },
+            { id: 'logs', label: 'Sync Audit Logs', icon: Clock, perm: 'logs' },
+            { id: 'settings', label: 'System Configuration', icon: Settings, perm: 'settings' },
+            { id: 'admins', label: 'Admins & Role Governance', icon: ShieldCheck, perm: 'admins' },
+          ]
+            .filter((tab) => isSuperAdmin || adminPermissions.includes(tab.perm as AdminPermission))
+            .map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-2 ${
+                    isActive
+                      ? 'bg-gradient-to-r from-rose-600 to-indigo-600 text-white shadow-md'
+                      : 'text-stone-400 hover:text-stone-200 hover:bg-stone-900'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
         </div>
 
         {/* ------------------------------------------------------------- */}
@@ -1141,6 +1178,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
               </button>
             </div>
           </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 7: ADMINS & ROLE GOVERNANCE */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'admins' && (
+          <AdminMembersTab
+            currentAdminEmail={adminUser.email}
+            isCurrentUserSuperAdmin={isSuperAdmin}
+          />
         )}
 
         {/* User Subscription Modal */}

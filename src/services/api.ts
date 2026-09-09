@@ -15,6 +15,8 @@ import {
   PaymentTransaction,
   PaymentSummaryStats,
   NowPaymentsSettings,
+  AdminMember,
+  AdminPermission,
 } from '../types';
 import { safeStorage } from '../utils/storage';
 import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
@@ -706,5 +708,66 @@ export const api = {
       body: JSON.stringify({ key, email }),
     });
     return res.json();
+  },
+
+  // Admin & Sub-Admin Role Management
+  async getMyPermissions(): Promise<{ success: boolean; role: string; permissions: AdminPermission[]; isSuperAdmin: boolean }> {
+    const res = await authFetch('/api/admin/my-permissions');
+    return res.json();
+  },
+
+  async adminGetMembers(): Promise<{ success: boolean; members: AdminMember[] }> {
+    const res = await authFetch('/api/admin/members');
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to fetch admin members');
+    return result;
+  },
+
+  async adminCreateMember(data: {
+    name: string;
+    email: string;
+    role: string;
+    permissions: AdminPermission[];
+    password?: string;
+    notes?: string;
+  }): Promise<{ success: boolean; member: AdminMember; message?: string }> {
+    const res = await authFetch('/api/admin/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to add administrator');
+    return result;
+  },
+
+  async adminUpdateMember(
+    id: string,
+    data: {
+      name?: string;
+      role?: string;
+      permissions?: AdminPermission[];
+      isActive?: boolean;
+      notes?: string;
+      password?: string;
+    }
+  ): Promise<{ success: boolean; member: AdminMember; message?: string }> {
+    const res = await authFetch(`/api/admin/members/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to update administrator');
+    return result;
+  },
+
+  async adminDeleteMember(id: string): Promise<{ success: boolean; message?: string }> {
+    const res = await authFetch(`/api/admin/members/${id}`, {
+      method: 'DELETE',
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to remove administrator');
+    return result;
   },
 };

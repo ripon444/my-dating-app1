@@ -471,3 +471,38 @@ export interface NowPaymentsSettings {
   apiKeyMasked?: string;
   ipnSecretMasked?: string;
 }
+
+export type AdminRole = 
+  | 'SUPER_ADMIN' 
+  | 'ADMIN' 
+  | 'SUB_ADMIN' 
+  | 'MODERATOR' 
+  | 'FINANCE' 
+  | 'SUPPORT';
+
+export type AdminPermission = 
+  | 'kpi' 
+  | 'subscriptions' 
+  | 'payments' 
+  | 'users' 
+  | 'moderation' 
+  | 'providers' 
+  | 'logs' 
+  | 'settings' 
+  | 'admins';
+
+export interface AdminMember {
+  id: string;
+  userId?: string;
+  email: string;
+  name: string;
+  role: AdminRole;
+  permissions: AdminPermission[];
+  isActive: boolean;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+

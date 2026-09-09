@@ -381,6 +381,21 @@ function initTables(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payment_transactions(order_id);
     CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payment_transactions(payment_id);
     CREATE INDEX IF NOT EXISTS idx_user_subs_user_id ON user_subscriptions(user_id);
+
+    CREATE TABLE IF NOT EXISTS admin_members (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'SUB_ADMIN',
+      permissions_json TEXT NOT NULL DEFAULT '[]',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      notes TEXT DEFAULT '',
+      created_by TEXT DEFAULT 'Super Admin',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_members_email ON admin_members(email);
   `);
 
   // Run safe schema migrations for existing databases
@@ -685,6 +700,71 @@ function initTables(db: Database) {
       WHERE LOWER(email) IN ('admin@love.com', 'tanvirahmadkst@gmail.com', 'admin@lovemeetly.com', 'tanvir@gmail.com', 'tanvir@lovemeetly.com')
          OR LOWER(email) LIKE 'admin@%'
     `);
+
+    // Ensure admin_members table exists in migrations
+    db.run(`
+      CREATE TABLE IF NOT EXISTS admin_members (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        email TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'SUB_ADMIN',
+        permissions_json TEXT NOT NULL DEFAULT '[]',
+        is_active INTEGER NOT NULL DEFAULT 1,
+        notes TEXT DEFAULT '',
+        created_by TEXT DEFAULT 'Super Admin',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_members_email ON admin_members(email);
+    `);
+
+    // Seed primary Super Admins in admin_members table
+    const fullPermissions = JSON.stringify([
+      'kpi',
+      'subscriptions',
+      'payments',
+      'users',
+      'moderation',
+      'providers',
+      'logs',
+      'settings',
+      'admins'
+    ]);
+
+    const adminMembersSeed = [
+      {
+        id: 'adm_tanvir_primary',
+        email: 'tanvirahmadkst@gmail.com',
+        name: 'Tanvir Ahmad (Founder & Owner)',
+        role: 'SUPER_ADMIN',
+        notes: 'Primary Platform Founder & Super Administrator',
+      },
+      {
+        id: 'adm_love_primary',
+        email: 'admin@love.com',
+        name: 'System Super Admin',
+        role: 'SUPER_ADMIN',
+        notes: 'Core System Super Administrator',
+      },
+    ];
+
+    for (const adm of adminMembersSeed) {
+      const existing = db.exec(`SELECT id FROM admin_members WHERE LOWER(email) = '${adm.email.toLowerCase()}'`);
+      if (!existing[0]?.values?.length) {
+        db.run(
+          `INSERT INTO admin_members (id, user_id, email, name, role, permissions_json, is_active, notes, created_by, created_at, updated_at)
+           VALUES (?, NULL, ?, ?, ?, ?, 1, ?, 'System Genesis', ?, ?)`,
+          [adm.id, adm.email.toLowerCase(), adm.name, adm.role, fullPermissions, adm.notes, now, now]
+        );
+      } else {
+        // Ensure role is SUPER_ADMIN with full permissions
+        db.run(
+          `UPDATE admin_members SET role = 'SUPER_ADMIN', permissions_json = ?, is_active = 1 WHERE LOWER(email) = ?`,
+          [fullPermissions, adm.email.toLowerCase()]
+        );
+      }
+    }
   } catch (err) {
     console.error('[SQL Database] Error setting up tanvir superadmin account:', err);
   }
