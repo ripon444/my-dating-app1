@@ -24,7 +24,8 @@ import {
   Clock,
   Settings,
   AlertTriangle,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 import { AdminMember, AdminPermission, AdminRole } from '../../types';
 import { api } from '../../services/api';
@@ -56,6 +57,13 @@ const PERMISSION_CONFIG: {
     color: 'text-amber-400 border-amber-500/30 bg-amber-500/10',
   },
   {
+    key: 'boosts',
+    label: 'Boost Packages & Pricing',
+    description: 'Configure profile boost tiers, multiplier badges, and crypto pricing.',
+    icon: Zap,
+    color: 'text-orange-400 border-orange-500/30 bg-orange-500/10',
+  },
+  {
     key: 'payments',
     label: 'Payments & Billing Ledger',
     description: 'View crypto transactions, NOWPayments logs, and payment gateways.',
@@ -75,6 +83,13 @@ const PERMISSION_CONFIG: {
     description: 'Investigate user reports, flagged messages, and safety complaints.',
     icon: AlertTriangle,
     color: 'text-rose-400 border-rose-500/30 bg-rose-500/10',
+  },
+  {
+    key: 'legal',
+    label: 'Privacy & Terms Editor',
+    description: 'Edit and publish platform Terms of Service, Privacy Policy, and Safety Tips.',
+    icon: FileText,
+    color: 'text-pink-400 border-pink-500/30 bg-pink-500/10',
   },
   {
     key: 'providers',
@@ -118,28 +133,28 @@ const ROLE_PRESETS: {
     title: 'Super Administrator',
     badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
     description: 'Absolute authority across all modules, payments, and admin staffing.',
-    defaultPermissions: ['kpi', 'subscriptions', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings', 'admins'],
+    defaultPermissions: ['kpi', 'subscriptions', 'boosts', 'payments', 'users', 'moderation', 'legal', 'providers', 'logs', 'settings', 'admins'],
   },
   {
     role: 'ADMIN',
     title: 'General Administrator',
     badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
     description: 'Full operational access across all platform modules (excluding admin staffing).',
-    defaultPermissions: ['kpi', 'subscriptions', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings'],
+    defaultPermissions: ['kpi', 'subscriptions', 'boosts', 'payments', 'users', 'moderation', 'legal', 'providers', 'logs', 'settings'],
   },
   {
     role: 'SUB_ADMIN',
     title: 'Sub-Admin / Manager',
     badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
     description: 'Customizable role tailored to your operations team requirements.',
-    defaultPermissions: ['users', 'moderation', 'logs'],
+    defaultPermissions: ['users', 'moderation', 'legal', 'logs'],
   },
   {
     role: 'FINANCE',
     title: 'Finance & Billing Lead',
     badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
     description: 'Access to revenue KPIs, subscription pricing plans, and payment logs.',
-    defaultPermissions: ['kpi', 'subscriptions', 'payments'],
+    defaultPermissions: ['kpi', 'subscriptions', 'boosts', 'payments'],
   },
   {
     role: 'MODERATOR',
@@ -153,7 +168,7 @@ const ROLE_PRESETS: {
     title: 'Customer Support',
     badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
     description: 'Read-only access to user profiles and support tickets.',
-    defaultPermissions: ['users', 'moderation'],
+    defaultPermissions: ['users', 'moderation', 'legal'],
   },
 ];
 

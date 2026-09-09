@@ -2430,76 +2430,111 @@ app.post('/api/payments/nowpayments-ipn', async (req, res) => {
       [newStatus, payAddress, cryptoCur, txHash, paymentId, JSON.stringify(payload), nowIso, tx.id]
     );
 
-    // Auto-activate subscription when status is 'finished'
+    // Auto-activate subscription or boost when status is 'finished'
     if (newStatus === 'finished') {
-      // Idempotency check: has this payment already activated a subscription?
-      const existingSub = await SqlHelper.queryOne<any>(
-        'SELECT id FROM user_subscriptions WHERE payment_id = ?',
-        [tx.id]
-      );
+      if (tx.plan_tier === 'BOOST') {
+        const boostPkg = await SqlHelper.queryOne<any>('SELECT * FROM boost_packages WHERE id = ?', [tx.plan_id]);
+        const durationMinutes = boostPkg ? Number(boostPkg.duration_minutes) : 60;
+        const currentProf = await SqlHelper.queryOne<any>('SELECT is_boosted, boost_expires_at FROM profiles WHERE user_id = ?', [tx.user_id]);
+        const nowMs = Date.now();
+        const baseMs = (currentProf?.is_boosted && currentProf?.boost_expires_at && new Date(currentProf.boost_expires_at).getTime() > nowMs)
+          ? new Date(currentProf.boost_expires_at).getTime()
+          : nowMs;
+        const boostExpiresAt = new Date(baseMs + durationMinutes * 60000).toISOString();
 
-      if (!existingSub) {
-        const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [tx.plan_id]);
-        const user = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [tx.user_id]);
+        await SqlHelper.execute(
+          'UPDATE profiles SET is_boosted = 1, boost_expires_at = ?, updated_at = ? WHERE user_id = ?',
+          [boostExpiresAt, nowIso, tx.user_id]
+        );
 
-        if (plan && user) {
-          const targetTier = plan.tier || 'VIP';
-          // If user currently has active VIP, stack/extend from existing expiration date!
-          const baseDate = (
-            user.subscription_expires_at &&
-            new Date(user.subscription_expires_at) > new Date() &&
-            user.subscription_tier === targetTier
-          )
-            ? new Date(user.subscription_expires_at)
-            : new Date();
+        await SqlHelper.execute(
+          'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
+          [nowIso, nowIso, tx.id]
+        );
 
-          const expiresAt = calculateExpirationDate(baseDate, plan.duration, plan.duration_unit).toISOString();
-          const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
-
-          // Record subscription
-          await SqlHelper.execute(
-            `INSERT INTO user_subscriptions (
-              id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
-            [subId, user.id, plan.id, plan.name, targetTier, nowIso, expiresAt, tx.id, nowIso, nowIso]
-          );
-
-          // Update user tier and expiration
-          await SqlHelper.execute(
-            'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
-            [targetTier, expiresAt, nowIso, user.id]
-          );
-
-          // Mark payment finished with completed_at
-          await SqlHelper.execute(
-            'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
-            [nowIso, nowIso, tx.id]
-          );
-
-          // Send in-app notification to user
-          const notifId = 'notif_' + Date.now().toString(36);
-          await SqlHelper.execute(
-            `INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at)
-             VALUES (?, ?, 'subscription', ?, ?, ?, 0, ?)`,
-            [
-              notifId,
-              user.id,
-              'VIP Subscription Activated! 👑',
-              `Your payment for ${plan.name} has been confirmed. Your VIP access is active until ${expiresAt.slice(0, 10)}. Enjoy all premium global features!`,
-              JSON.stringify({ planId: plan.id, tier: targetTier, expiresAt }),
-              nowIso,
-            ]
-          );
-
-          // Asynchronously sync
-          syncSingleUser(user.id).catch(() => {});
-          syncSinglePayment(tx.id).catch(() => {});
-          syncSingleSubscription(subId).catch(() => {});
-
-          console.log(`[NOWPayments IPN] VIP Plan ${plan.name} automatically activated for user ${user.id} until ${expiresAt}`);
-        }
+        const notifId = 'notif_' + Date.now().toString(36);
+        await SqlHelper.execute(
+          `INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at)
+           VALUES (?, ?, 'boost', ?, ?, ?, 0, ?)`,
+          [
+            notifId,
+            tx.user_id,
+            'Profile Boost Activated! ⚡',
+            `Your payment for ${tx.plan_name || 'Profile Boost'} is confirmed! Your profile is now boosted until ${new Date(boostExpiresAt).toLocaleTimeString()}.`,
+            JSON.stringify({ boostExpiresAt, durationMinutes }),
+            nowIso
+          ]
+        );
       } else {
-        console.log('[NOWPayments IPN] Payment already fulfilled for subscription ID:', existingSub.id);
+        // Idempotency check: has this payment already activated a subscription?
+        const existingSub = await SqlHelper.queryOne<any>(
+          'SELECT id FROM user_subscriptions WHERE payment_id = ?',
+          [tx.id]
+        );
+
+        if (!existingSub) {
+          const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [tx.plan_id]);
+          const user = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [tx.user_id]);
+
+          if (plan && user) {
+            const targetTier = plan.tier || 'VIP';
+            // If user currently has active VIP, stack/extend from existing expiration date!
+            const baseDate = (
+              user.subscription_expires_at &&
+              new Date(user.subscription_expires_at) > new Date() &&
+              user.subscription_tier === targetTier
+            )
+              ? new Date(user.subscription_expires_at)
+              : new Date();
+
+            const expiresAt = calculateExpirationDate(baseDate, plan.duration, plan.duration_unit).toISOString();
+            const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+
+            // Record subscription
+            await SqlHelper.execute(
+              `INSERT INTO user_subscriptions (
+                id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+              [subId, user.id, plan.id, plan.name, targetTier, nowIso, expiresAt, tx.id, nowIso, nowIso]
+            );
+
+            // Update user tier and expiration
+            await SqlHelper.execute(
+              'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+              [targetTier, expiresAt, nowIso, user.id]
+            );
+
+            // Mark payment finished with completed_at
+            await SqlHelper.execute(
+              'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
+              [nowIso, nowIso, tx.id]
+            );
+
+            // Send in-app notification to user
+            const notifId = 'notif_' + Date.now().toString(36);
+            await SqlHelper.execute(
+              `INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at)
+               VALUES (?, ?, 'subscription', ?, ?, ?, 0, ?)`,
+              [
+                notifId,
+                user.id,
+                'VIP Subscription Activated! 👑',
+                `Your payment for ${plan.name} has been confirmed. Your VIP access is active until ${expiresAt.slice(0, 10)}. Enjoy all premium global features!`,
+                JSON.stringify({ planId: plan.id, tier: targetTier, expiresAt }),
+                nowIso,
+              ]
+            );
+
+            // Asynchronously sync
+            syncSingleUser(user.id).catch(() => {});
+            syncSinglePayment(tx.id).catch(() => {});
+            syncSingleSubscription(subId).catch(() => {});
+
+            console.log(`[NOWPayments IPN] VIP Plan ${plan.name} automatically activated for user ${user.id} until ${expiresAt}`);
+          }
+        } else {
+          console.log('[NOWPayments IPN] Payment already fulfilled for subscription ID:', existingSub.id);
+        }
       }
     }
 
@@ -2541,46 +2576,67 @@ app.get('/api/payments/check-status/:orderId', async (req, res) => {
 
             // If finished, activate!
             if (liveStatus === 'finished') {
-              const existingSub = await SqlHelper.queryOne<any>(
-                'SELECT id FROM user_subscriptions WHERE payment_id = ?',
-                [tx.id]
-              );
-              if (!existingSub) {
-                const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [tx.plan_id]);
-                const freshUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
-                if (plan && freshUser) {
-                  const targetTier = plan.tier || 'VIP';
-                  const baseDate = (
-                    freshUser.subscription_expires_at &&
-                    new Date(freshUser.subscription_expires_at) > new Date() &&
-                    freshUser.subscription_tier === targetTier
-                  )
-                    ? new Date(freshUser.subscription_expires_at)
-                    : new Date();
+              if (tx.plan_tier === 'BOOST') {
+                const boostPkg = await SqlHelper.queryOne<any>('SELECT * FROM boost_packages WHERE id = ?', [tx.plan_id]);
+                const durationMinutes = boostPkg ? Number(boostPkg.duration_minutes) : 60;
+                const currentProf = await SqlHelper.queryOne<any>('SELECT is_boosted, boost_expires_at FROM profiles WHERE user_id = ?', [user.id]);
+                const nowMs = Date.now();
+                const baseMs = (currentProf?.is_boosted && currentProf?.boost_expires_at && new Date(currentProf.boost_expires_at).getTime() > nowMs)
+                  ? new Date(currentProf.boost_expires_at).getTime()
+                  : nowMs;
+                const boostExpiresAt = new Date(baseMs + durationMinutes * 60000).toISOString();
 
-                  const expiresAt = calculateExpirationDate(baseDate, plan.duration, plan.duration_unit).toISOString();
-                  const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+                await SqlHelper.execute(
+                  'UPDATE profiles SET is_boosted = 1, boost_expires_at = ?, updated_at = ? WHERE user_id = ?',
+                  [boostExpiresAt, nowIso, user.id]
+                );
 
-                  await SqlHelper.execute(
-                    `INSERT INTO user_subscriptions (
-                      id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
-                    [subId, freshUser.id, plan.id, plan.name, targetTier, nowIso, expiresAt, tx.id, nowIso, nowIso]
-                  );
+                await SqlHelper.execute(
+                  'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
+                  [nowIso, nowIso, tx.id]
+                );
+              } else {
+                const existingSub = await SqlHelper.queryOne<any>(
+                  'SELECT id FROM user_subscriptions WHERE payment_id = ?',
+                  [tx.id]
+                );
+                if (!existingSub) {
+                  const plan = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [tx.plan_id]);
+                  const freshUser = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [user.id]);
+                  if (plan && freshUser) {
+                    const targetTier = plan.tier || 'VIP';
+                    const baseDate = (
+                      freshUser.subscription_expires_at &&
+                      new Date(freshUser.subscription_expires_at) > new Date() &&
+                      freshUser.subscription_tier === targetTier
+                    )
+                      ? new Date(freshUser.subscription_expires_at)
+                      : new Date();
 
-                  await SqlHelper.execute(
-                    'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
-                    [targetTier, expiresAt, nowIso, freshUser.id]
-                  );
+                    const expiresAt = calculateExpirationDate(baseDate, plan.duration, plan.duration_unit).toISOString();
+                    const subId = 'sub_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
 
-                  await SqlHelper.execute(
-                    'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
-                    [nowIso, nowIso, tx.id]
-                  );
+                    await SqlHelper.execute(
+                      `INSERT INTO user_subscriptions (
+                        id, user_id, plan_id, plan_name, tier, status, started_at, expires_at, payment_id, created_at, updated_at
+                      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+                      [subId, freshUser.id, plan.id, plan.name, targetTier, nowIso, expiresAt, tx.id, nowIso, nowIso]
+                    );
 
-                  syncSingleUser(freshUser.id).catch(() => {});
-                  syncSinglePayment(tx.id).catch(() => {});
-                  syncSingleSubscription(subId).catch(() => {});
+                    await SqlHelper.execute(
+                      'UPDATE users SET subscription_tier = ?, subscription_expires_at = ?, updated_at = ? WHERE id = ?',
+                      [targetTier, expiresAt, nowIso, freshUser.id]
+                    );
+
+                    await SqlHelper.execute(
+                      'UPDATE payment_transactions SET completed_at = ?, updated_at = ? WHERE id = ?',
+                      [nowIso, nowIso, tx.id]
+                    );
+
+                    syncSingleUser(freshUser.id).catch(() => {});
+                    syncSinglePayment(tx.id).catch(() => {});
+                    syncSingleSubscription(subId).catch(() => {});
+                  }
                 }
               }
             }
@@ -2703,7 +2759,9 @@ const ALL_ADMIN_PERMISSIONS = [
   'providers',
   'logs',
   'settings',
-  'admins'
+  'admins',
+  'boosts',
+  'legal'
 ];
 
 export async function getAdminPermissionsForUser(user: any, headers?: any): Promise<{
@@ -3619,12 +3677,228 @@ app.get('/api/admin/users/:userId/subscription-history', requireAdmin, async (re
 });
 
 
+// ==========================================
+// BOOST PACKAGES & BOOST PAYMENT ENDPOINTS
+// ==========================================
+
+// Public / User: Get active Boost Packages
+app.get('/api/boosts/packages', async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>(
+      'SELECT * FROM boost_packages WHERE is_active = 1 ORDER BY display_order ASC, price ASC'
+    );
+    res.json({
+      success: true,
+      packages: rows.map((r: any) => ({
+        ...r,
+        duration_minutes: Number(r.duration_minutes),
+        price: Number(r.price),
+        is_popular: Boolean(r.is_popular),
+        is_active: Boolean(r.is_active),
+        display_order: Number(r.display_order),
+      }))
+    });
+  } catch (err: any) {
+    console.error('[Get Boost Packages Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch boost packages' });
+  }
+});
+
+// User: Create NOWPayments Crypto Invoice for Boost
+app.post('/api/boosts/create-invoice', async (req, res) => {
+  const user = (req as any).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+  const { packageId } = req.body;
+  if (!packageId) return res.status(400).json({ error: 'Boost package ID is required' });
+
+  try {
+    const pkg = await SqlHelper.queryOne<any>('SELECT * FROM boost_packages WHERE id = ?', [packageId]);
+    if (!pkg) return res.status(404).json({ error: 'Boost package not found' });
+    if (!pkg.is_active) return res.status(400).json({ error: 'This boost package is currently inactive' });
+
+    const config = await getNowPaymentsConfig();
+    if (!config.isEnabled) {
+      return res.status(400).json({ error: 'Online crypto payments are temporarily paused for maintenance.' });
+    }
+    if (!config.apiKey) {
+      return res.status(500).json({ error: 'NOWPayments API key is not configured yet. Please use Instant Test Pay or configure API key in Admin Settings.' });
+    }
+
+    const orderId = 'bst_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+    const payRowId = 'pay_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
+    const nowIso = new Date().toISOString();
+
+    const prof = await SqlHelper.queryOne<any>('SELECT name FROM profiles WHERE user_id = ?', [user.id]);
+    const userName = prof?.name || user.email.split('@')[0];
+
+    await SqlHelper.execute(
+      `INSERT INTO payment_transactions (
+        id, user_id, user_email, user_name, plan_id, plan_name, plan_tier, amount, currency,
+        order_id, payment_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'BOOST', ?, ?, ?, 'waiting', ?, ?)`,
+      [
+        payRowId,
+        user.id,
+        user.email,
+        userName,
+        pkg.id,
+        pkg.name,
+        Number(pkg.price),
+        pkg.currency || 'USDT',
+        orderId,
+        nowIso,
+        nowIso,
+      ]
+    );
+
+    const rawAppUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host') || 'lovemeetly.com';
+    const baseUrl = rawAppUrl || `${proto}://${host}`;
+
+    const invoiceResult = await createNowPaymentsInvoice({
+      orderId,
+      orderDescription: `Lovemeetly Profile Boost: ${pkg.name} (${pkg.duration_minutes}m) - User ${user.email}`,
+      amount: Number(pkg.price),
+      currency: pkg.currency || 'USDT',
+      successUrl: `${baseUrl}/?boost_status=success&order_id=${orderId}`,
+      cancelUrl: `${baseUrl}/?boost_status=cancelled&order_id=${orderId}`,
+      ipnCallbackUrl: `${baseUrl}/api/payments/nowpayments-ipn`,
+    });
+
+    if (!invoiceResult.success || !invoiceResult.invoiceUrl) {
+      await SqlHelper.execute(
+        "UPDATE payment_transactions SET payment_status = 'failed', updated_at = ? WHERE id = ?",
+        [new Date().toISOString(), payRowId]
+      );
+      return res.status(400).json({ error: invoiceResult.error || 'Could not initiate NOWPayments checkout.' });
+    }
+
+    await SqlHelper.execute(
+      'UPDATE payment_transactions SET payment_id = ?, updated_at = ? WHERE id = ?',
+      [invoiceResult.invoiceId || '', new Date().toISOString(), payRowId]
+    );
+
+    res.json({
+      success: true,
+      orderId,
+      invoiceUrl: invoiceResult.invoiceUrl,
+      invoiceId: invoiceResult.invoiceId,
+      amount: Number(pkg.price),
+      currency: pkg.currency || 'USDT',
+      packageName: pkg.name,
+    });
+  } catch (err: any) {
+    console.error('[Create Boost Invoice Error]:', err);
+    res.status(500).json({ error: err.message || 'Boost payment initiation failed.' });
+  }
+});
+
+// User: Complete / Activate Boost Payment (supports Instant Test Pay and Post-Payment Verification)
+app.post('/api/boosts/complete-payment', async (req, res) => {
+  const user = (req as any).user;
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+  const { packageId, orderId } = req.body;
+  if (!packageId) return res.status(400).json({ error: 'Boost package ID is required' });
+
+  try {
+    const pkg = await SqlHelper.queryOne<any>('SELECT * FROM boost_packages WHERE id = ?', [packageId]);
+    if (!pkg) return res.status(404).json({ error: 'Boost package not found' });
+
+    const nowIso = new Date().toISOString();
+    const prof = await SqlHelper.queryOne<any>('SELECT * FROM profiles WHERE user_id = ?', [user.id]);
+    const userName = prof?.name || user.email.split('@')[0];
+
+    let tx: any = null;
+    if (orderId) {
+      tx = await SqlHelper.queryOne<any>('SELECT * FROM payment_transactions WHERE order_id = ?', [orderId]);
+    }
+
+    if (!tx) {
+      const genOrderId = 'bst_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+      const payRowId = 'pay_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
+      await SqlHelper.execute(
+        `INSERT INTO payment_transactions (
+          id, user_id, user_email, user_name, plan_id, plan_name, plan_tier, amount, currency,
+          order_id, payment_status, completed_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'BOOST', ?, ?, ?, 'finished', ?, ?, ?)`,
+        [
+          payRowId,
+          user.id,
+          user.email,
+          userName,
+          pkg.id,
+          pkg.name,
+          Number(pkg.price),
+          pkg.currency || 'USDT',
+          genOrderId,
+          nowIso,
+          nowIso,
+          nowIso
+        ]
+      );
+      tx = await SqlHelper.queryOne<any>('SELECT * FROM payment_transactions WHERE id = ?', [payRowId]);
+    } else {
+      await SqlHelper.execute(
+        "UPDATE payment_transactions SET payment_status = 'finished', completed_at = ?, updated_at = ? WHERE id = ?",
+        [nowIso, nowIso, tx.id]
+      );
+    }
+
+    const durationMinutes = Number(pkg.duration_minutes) || 30;
+    const nowMs = Date.now();
+    const baseMs = (prof?.is_boosted && prof?.boost_expires_at && new Date(prof.boost_expires_at).getTime() > nowMs)
+      ? new Date(prof.boost_expires_at).getTime()
+      : nowMs;
+    const boostExpiresAt = new Date(baseMs + durationMinutes * 60000).toISOString();
+
+    await SqlHelper.execute(
+      'UPDATE profiles SET is_boosted = 1, boost_expires_at = ?, updated_at = ? WHERE user_id = ?',
+      [boostExpiresAt, nowIso, user.id]
+    );
+
+    const notifId = 'notif_' + Date.now().toString(36);
+    await SqlHelper.execute(
+      `INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at)
+       VALUES (?, ?, 'boost', ?, ?, ?, 0, ?)`,
+      [
+        notifId,
+        user.id,
+        'Profile Boost Activated! ⚡',
+        `Your profile is boosted with ${pkg.name} (${durationMinutes} mins) until ${new Date(boostExpiresAt).toLocaleTimeString()}! Enjoy 10x-25x more profile views.`,
+        JSON.stringify({ boostExpiresAt, durationMinutes, packageId: pkg.id }),
+        nowIso
+      ]
+    );
+
+    const updatedProf = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ?', [user.id]);
+    res.json({
+      success: true,
+      profile: formatProfileRow(updatedProf),
+      boostExpiresAt,
+      orderId: tx?.order_id,
+      packageName: pkg.name
+    });
+  } catch (err: any) {
+    console.error('[Complete Boost Payment Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to complete boost activation' });
+  }
+});
+
+// Legacy / Quick Boost (backward compatible)
 app.post('/api/boosts/purchase', async (req, res) => {
   const user = (req as any).user;
   if (!user) return res.status(401).json({ error: 'Authentication required' });
 
   const { durationMinutes = 30 } = req.body;
-  const boostExpiresAt = new Date(Date.now() + durationMinutes * 60000).toISOString();
+  const nowMs = Date.now();
+  const prof = await SqlHelper.queryOne<any>('SELECT is_boosted, boost_expires_at FROM profiles WHERE user_id = ?', [user.id]);
+  const baseMs = (prof?.is_boosted && prof?.boost_expires_at && new Date(prof.boost_expires_at).getTime() > nowMs)
+    ? new Date(prof.boost_expires_at).getTime()
+    : nowMs;
+  const boostExpiresAt = new Date(baseMs + durationMinutes * 60000).toISOString();
 
   await SqlHelper.execute(
     'UPDATE profiles SET is_boosted = 1, boost_expires_at = ? WHERE user_id = ?',
@@ -3637,6 +3911,221 @@ app.post('/api/boosts/purchase', async (req, res) => {
     profile: formatProfileRow(updatedProf),
     boostExpiresAt,
   });
+});
+
+// ==========================================
+// ADMIN: BOOST PACKAGES MANAGEMENT
+// ==========================================
+
+// Admin: Get all boost packages (including inactive)
+app.get('/api/admin/boost-packages', requireAdmin, async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>('SELECT * FROM boost_packages ORDER BY display_order ASC, created_at ASC');
+    res.json({
+      success: true,
+      packages: rows.map((r: any) => ({
+        ...r,
+        duration_minutes: Number(r.duration_minutes),
+        price: Number(r.price),
+        is_popular: Boolean(r.is_popular),
+        is_active: Boolean(r.is_active),
+        display_order: Number(r.display_order),
+      }))
+    });
+  } catch (err: any) {
+    console.error('[Admin Get Boost Packages Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch boost packages' });
+  }
+});
+
+// Admin: Create new boost package
+app.post('/api/admin/boost-packages', requireAdmin, async (req, res) => {
+  const { name, duration_minutes, multiplier, price, currency, description, is_popular, is_active, display_order } = req.body;
+  if (!name || !duration_minutes) {
+    return res.status(400).json({ error: 'Package name and duration in minutes are required' });
+  }
+
+  try {
+    const id = 'boost_' + Date.now().toString(36) + '_' + crypto.randomBytes(2).toString('hex');
+    const now = new Date().toISOString();
+    await SqlHelper.execute(
+      `INSERT INTO boost_packages (id, name, duration_minutes, multiplier, price, currency, description, is_popular, is_active, display_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        name.trim(),
+        Number(duration_minutes),
+        multiplier || '10x',
+        Number(price) || 0,
+        currency || 'USDT',
+        description || '',
+        is_popular ? 1 : 0,
+        is_active === false ? 0 : 1,
+        Number(display_order) || 0,
+        now,
+        now
+      ]
+    );
+
+    const created = await SqlHelper.queryOne<any>('SELECT * FROM boost_packages WHERE id = ?', [id]);
+    res.json({
+      success: true,
+      package: {
+        ...created,
+        duration_minutes: Number(created.duration_minutes),
+        price: Number(created.price),
+        is_popular: Boolean(created.is_popular),
+        is_active: Boolean(created.is_active),
+        display_order: Number(created.display_order),
+      }
+    });
+  } catch (err: any) {
+    console.error('[Admin Create Boost Package Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to create boost package' });
+  }
+});
+
+// Admin: Update boost package
+app.put('/api/admin/boost-packages/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, duration_minutes, multiplier, price, currency, description, is_popular, is_active, display_order } = req.body;
+
+  try {
+    const existing = await SqlHelper.queryOne<any>('SELECT id FROM boost_packages WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Boost package not found' });
+
+    const now = new Date().toISOString();
+    await SqlHelper.execute(
+      `UPDATE boost_packages SET
+        name = COALESCE(?, name),
+        duration_minutes = COALESCE(?, duration_minutes),
+        multiplier = COALESCE(?, multiplier),
+        price = COALESCE(?, price),
+        currency = COALESCE(?, currency),
+        description = COALESCE(?, description),
+        is_popular = COALESCE(?, is_popular),
+        is_active = COALESCE(?, is_active),
+        display_order = COALESCE(?, display_order),
+        updated_at = ?
+       WHERE id = ?`,
+      [
+        name !== undefined ? name.trim() : null,
+        duration_minutes !== undefined ? Number(duration_minutes) : null,
+        multiplier !== undefined ? multiplier : null,
+        price !== undefined ? Number(price) : null,
+        currency !== undefined ? currency : null,
+        description !== undefined ? description : null,
+        is_popular !== undefined ? (is_popular ? 1 : 0) : null,
+        is_active !== undefined ? (is_active ? 1 : 0) : null,
+        display_order !== undefined ? Number(display_order) : null,
+        now,
+        id
+      ]
+    );
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM boost_packages WHERE id = ?', [id]);
+    res.json({
+      success: true,
+      package: {
+        ...updated,
+        duration_minutes: Number(updated.duration_minutes),
+        price: Number(updated.price),
+        is_popular: Boolean(updated.is_popular),
+        is_active: Boolean(updated.is_active),
+        display_order: Number(updated.display_order),
+      }
+    });
+  } catch (err: any) {
+    console.error('[Admin Update Boost Package Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to update boost package' });
+  }
+});
+
+// Admin: Delete boost package
+app.delete('/api/admin/boost-packages/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const existing = await SqlHelper.queryOne<any>('SELECT id FROM boost_packages WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Boost package not found' });
+
+    await SqlHelper.execute('DELETE FROM boost_packages WHERE id = ?', [id]);
+    res.json({ success: true, deletedId: id });
+  } catch (err: any) {
+    console.error('[Admin Delete Boost Package Error]:', err);
+    res.status(500).json({ error: 'Failed to delete boost package' });
+  }
+});
+
+// ==========================================
+// LEGAL DOCUMENTS (TERMS, PRIVACY, GUIDELINES, SAFETY)
+// ==========================================
+
+// Public: Get all legal documents
+app.get('/api/legal/documents', async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>('SELECT * FROM legal_documents ORDER BY id ASC');
+    const documentsMap: Record<string, any> = {};
+    rows.forEach((r: any) => {
+      documentsMap[r.id] = r;
+    });
+    res.json({ success: true, documents: rows, map: documentsMap });
+  } catch (err: any) {
+    console.error('[Get Legal Documents Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch legal documents' });
+  }
+});
+
+// Admin: Get all legal documents
+app.get('/api/admin/legal/documents', requireAdmin, async (_req, res) => {
+  try {
+    const rows = await SqlHelper.queryAll<any>('SELECT * FROM legal_documents ORDER BY id ASC');
+    res.json({ success: true, documents: rows });
+  } catch (err: any) {
+    console.error('[Admin Get Legal Documents Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch legal documents' });
+  }
+});
+
+// Admin: Update or create legal document
+app.put('/api/admin/legal/documents/:id', requireAdmin, async (req, res) => {
+  const user = (req as any).user;
+  const { id } = req.params;
+  const { title, content, version } = req.body;
+
+  if (!content) {
+    return res.status(400).json({ error: 'Document content is required' });
+  }
+
+  try {
+    const existing = await SqlHelper.queryOne<any>('SELECT id FROM legal_documents WHERE id = ?', [id]);
+    const now = new Date().toISOString();
+    const updatedBy = user?.email || 'Platform Admin';
+
+    if (existing) {
+      await SqlHelper.execute(
+        `UPDATE legal_documents SET
+          title = COALESCE(?, title),
+          content = ?,
+          version = COALESCE(?, version),
+          last_updated_by = ?,
+          updated_at = ?
+         WHERE id = ?`,
+        [title || null, content, version || null, updatedBy, now, id]
+      );
+    } else {
+      await SqlHelper.execute(
+        `INSERT INTO legal_documents (id, title, category, content, version, last_updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, title || id, id, content, version || '1.0', updatedBy, now]
+      );
+    }
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM legal_documents WHERE id = ?', [id]);
+    res.json({ success: true, document: updated });
+  } catch (err: any) {
+    console.error('[Admin Update Legal Document Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to update legal document' });
+  }
 });
 
 // 10. Reports & Safety

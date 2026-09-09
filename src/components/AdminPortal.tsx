@@ -32,14 +32,18 @@ import {
   CheckCircle2,
   AlertCircle,
   Crown,
-  Coins
+  Coins,
+  Zap,
+  FileText
 } from 'lucide-react';
 import { AdminAnalytics, ExternalProvider, ExternalSyncLog, Report, User, Profile } from '../types';
 import { api, getStoredToken, setStoredToken } from '../services/api';
 import { Logo } from './Logo';
 import { safeStorage } from '../utils/storage';
 import { AdminSubscriptionPlansTab } from './admin/AdminSubscriptionPlansTab';
+import { AdminBoostPackagesTab } from './admin/AdminBoostPackagesTab';
 import { AdminPaymentsTab } from './admin/AdminPaymentsTab';
+import { AdminLegalDocumentsTab } from './admin/AdminLegalDocumentsTab';
 import { AdminUserSubscriptionModal } from './admin/AdminUserSubscriptionModal';
 import { AdminMembersTab } from './admin/AdminMembersTab';
 import { AdminPermission } from '../types';
@@ -81,7 +85,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [logoutMessage, setLogoutMessage] = useState('');
 
   // Admin Dashboard State
-  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'payments' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings' | 'admins'>('kpi');
+  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'boosts' | 'payments' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings' | 'legal' | 'admins'>('kpi');
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [providers, setProviders] = useState<ExternalProvider[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
@@ -92,7 +96,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
 
   // Admin Role & Permission State
   const [adminPermissions, setAdminPermissions] = useState<AdminPermission[]>([
-    'kpi', 'subscriptions', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings', 'admins'
+    'kpi', 'subscriptions', 'boosts', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings', 'legal', 'admins'
   ]);
   const [adminRole, setAdminRole] = useState<string>('SUPER_ADMIN');
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(true);
@@ -568,12 +572,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
           {[
             { id: 'kpi', label: 'Platform KPIs & Revenue', icon: BarChart3, perm: 'kpi' },
             { id: 'subscriptions', label: 'Subscription Plans', icon: Crown, perm: 'subscriptions' },
+            { id: 'boosts', label: 'Boost Packages & Pricing', icon: Zap, perm: 'boosts' },
             { id: 'payments', label: 'Payments & Billing', icon: Coins, perm: 'payments' },
             { id: 'users', label: `Users & Profiles (${profiles.length})`, icon: Users, perm: 'users' },
             { id: 'moderation', label: `Moderation Queue (${reports.filter(r => r.status === 'PENDING').length})`, icon: AlertTriangle, perm: 'moderation' },
             { id: 'providers', label: 'Partner Syndication Feeds', icon: Globe, perm: 'providers' },
             { id: 'logs', label: 'Sync Audit Logs', icon: Clock, perm: 'logs' },
             { id: 'settings', label: 'System Configuration', icon: Settings, perm: 'settings' },
+            { id: 'legal', label: 'Privacy & Terms Editor', icon: FileText, perm: 'legal' },
             { id: 'admins', label: 'Admins & Role Governance', icon: ShieldCheck, perm: 'admins' },
           ]
             .filter((tab) => isSuperAdmin || adminPermissions.includes(tab.perm as AdminPermission))
@@ -706,6 +712,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
         {/* ------------------------------------------------------------- */}
         {activeTab === 'subscriptions' && (
           <AdminSubscriptionPlansTab
+            onSuccessMessage={(msg) => {
+              setActionSuccessMsg(msg);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+            }}
+          />
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: BOOST PACKAGES & SPOTLIGHT MONETIZATION */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'boosts' && (
+          <AdminBoostPackagesTab
             onSuccessMessage={(msg) => {
               setActionSuccessMsg(msg);
               setTimeout(() => setActionSuccessMsg(''), 4000);
@@ -1178,6 +1196,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
               </button>
             </div>
           </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: LEGAL CONTENT, TERMS & PRIVACY EDITOR */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'legal' && (
+          <AdminLegalDocumentsTab
+            onSuccessMessage={(msg) => {
+              setActionSuccessMsg(msg);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+            }}
+          />
         )}
 
         {/* ------------------------------------------------------------- */}

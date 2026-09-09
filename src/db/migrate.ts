@@ -241,6 +241,45 @@ export async function initializePostgresTables() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS admin_members (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        email TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'SUB_ADMIN',
+        permissions_json TEXT NOT NULL DEFAULT '[]',
+        is_active INTEGER NOT NULL DEFAULT 1,
+        notes TEXT DEFAULT '',
+        created_by TEXT DEFAULT 'Super Admin',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS boost_packages (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        multiplier TEXT DEFAULT '10x',
+        price NUMERIC(10,2) NOT NULL DEFAULT 4.99,
+        currency TEXT DEFAULT 'USDT',
+        description TEXT DEFAULT '',
+        is_popular INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS legal_documents (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL,
+        content TEXT NOT NULL,
+        version TEXT DEFAULT '1.0',
+        last_updated_by TEXT DEFAULT 'Administrator',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payment_transactions(user_id);
       CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payment_transactions(order_id);
       CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payment_transactions(payment_id);

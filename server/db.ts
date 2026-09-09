@@ -396,6 +396,31 @@ function initTables(db: Database) {
       updated_at TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_members_email ON admin_members(email);
+
+    CREATE TABLE IF NOT EXISTS boost_packages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      duration_minutes INTEGER NOT NULL,
+      multiplier TEXT DEFAULT '10x',
+      price REAL NOT NULL DEFAULT 4.99,
+      currency TEXT DEFAULT 'USDT',
+      description TEXT DEFAULT '',
+      is_popular INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      display_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS legal_documents (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      version TEXT DEFAULT '1.0',
+      last_updated_by TEXT DEFAULT 'Administrator',
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Run safe schema migrations for existing databases
@@ -767,6 +792,249 @@ function initTables(db: Database) {
     }
   } catch (err) {
     console.error('[SQL Database] Error setting up tanvir superadmin account:', err);
+  }
+
+  // Ensure boost_packages and legal_documents tables exist in migrations
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS boost_packages (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        multiplier TEXT DEFAULT '10x',
+        price REAL NOT NULL DEFAULT 4.99,
+        currency TEXT DEFAULT 'USDT',
+        description TEXT DEFAULT '',
+        is_popular INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS legal_documents (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL,
+        content TEXT NOT NULL,
+        version TEXT DEFAULT '1.0',
+        last_updated_by TEXT DEFAULT 'Administrator',
+        updated_at TEXT NOT NULL
+      );
+    `);
+  } catch (e) {}
+
+  // Seed default Boost Packages if empty
+  try {
+    const boostRes = db.exec("SELECT COUNT(*) as count FROM boost_packages");
+    const boostCount = (boostRes[0]?.values[0]?.[0] as number) || 0;
+    if (boostCount === 0) {
+      const now = new Date().toISOString();
+      const defaultPackages = [
+        {
+          id: 'boost_30m',
+          name: '30 Minutes Flash Boost',
+          duration_minutes: 30,
+          multiplier: '10x',
+          price: 4.99,
+          currency: 'USDT',
+          description: 'Ideal for prime evening browsing peak & instant visibility',
+          is_popular: 0,
+          is_active: 1,
+          display_order: 1,
+        },
+        {
+          id: 'boost_1h',
+          name: '1 Hour Power Boost',
+          duration_minutes: 60,
+          multiplier: '15x',
+          price: 7.99,
+          currency: 'USDT',
+          description: 'Maximum engagement for active weekend dates & high replies',
+          is_popular: 1,
+          is_active: 1,
+          display_order: 2,
+        },
+        {
+          id: 'boost_24h',
+          name: '24 Hours Mega Boost',
+          duration_minutes: 1440,
+          multiplier: '25x',
+          price: 14.99,
+          currency: 'USDT',
+          description: 'All-day top spotlight across all global feeds & matches',
+          is_popular: 0,
+          is_active: 1,
+          display_order: 3,
+        },
+        {
+          id: 'boost_7d',
+          name: '7 Days Premier Spotlight',
+          duration_minutes: 10080,
+          multiplier: '50x',
+          price: 29.99,
+          currency: 'USDT',
+          description: 'Full week non-stop top discovery placement for serious daters',
+          is_popular: 0,
+          is_active: 1,
+          display_order: 4,
+        },
+      ];
+
+      for (const p of defaultPackages) {
+        db.run(
+          `INSERT INTO boost_packages (id, name, duration_minutes, multiplier, price, currency, description, is_popular, is_active, display_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [p.id, p.name, p.duration_minutes, p.multiplier, p.price, p.currency, p.description, p.is_popular, p.is_active, p.display_order, now, now]
+        );
+      }
+      console.log('[SQL Database] Default Boost Packages seeded successfully.');
+    }
+  } catch (err) {
+    console.warn('[SQL Database] Error seeding boost packages:', err);
+  }
+
+  // Seed default Legal Documents (Terms, Privacy, Guidelines, Safety) if empty
+  try {
+    const legalRes = db.exec("SELECT COUNT(*) as count FROM legal_documents");
+    const legalCount = (legalRes[0]?.values[0]?.[0] as number) || 0;
+    if (legalCount === 0) {
+      const now = new Date().toISOString();
+      const defaultDocs = [
+        {
+          id: 'terms',
+          title: 'Terms of Service',
+          category: 'terms',
+          version: '2026.1',
+          content: `# Lovemeetly Terms of Service
+
+**Effective Date:** January 2026  
+**Governing Platform:** Lovemeetly Global Dating
+
+Welcome to Lovemeetly. By accessing or using our application and associated services, you agree to comply with and be bound by these Terms of Service.
+
+---
+
+### 1. Eligibility Requirements
+- You must be at least 18 years of age to create an account or access Lovemeetly.
+- You affirm that you have never been convicted of a felony or sexual offense and are not registered as a sex offender.
+- You agree to abide by all local, national, and international laws while using the service.
+
+---
+
+### 2. User Accounts & Authenticity
+- You are solely responsible for maintaining the confidentiality of your credentials.
+- All photos and bio information uploaded must genuinely represent yourself. Impersonation, deception, or creating bot profiles is strictly forbidden and results in immediate termination.
+- Lovemeetly reserves the right to request live face verification or document verification to safeguard community members.
+
+---
+
+### 3. Profile Boosts & Subscriptions
+- **Profile Boost Service:** Profile Boosts place your profile at the forefront of the discovery feed for a specified duration (e.g. 30 Minutes, 1 Hour, 24 Hours, or 7 Days).
+- **Payment Terms:** Subscriptions and Profile Boosts are priced as shown and payable via supported cryptocurrency gateways (NOWPayments) or other active payment methods configured on the platform.
+- **Immediate Delivery & Non-Refundability:** Because profile visibility enhancements and VIP benefits are activated and delivered immediately upon payment receipt, purchases of Profile Boosts and active subscriptions are non-refundable.
+
+---
+
+### 4. Prohibited Conduct & Community Safety
+Users strictly agree NOT to:
+- Solicit money, cryptocurrency, wire transfers, or financial investments from other members.
+- Harass, stalk, intimidate, insult, or threaten any user.
+- Post sexually explicit, violent, obscene, or non-consensual media.
+- Use Lovemeetly for commercial advertising, solicitation, or paid companion services.
+
+Violations of these terms will trigger immediate account suspension, device ban, and potential referral to law enforcement agencies where applicable.
+
+---
+
+### 5. Limitation of Liability
+Lovemeetly is provided on an "AS IS" and "AS AVAILABLE" basis. While our moderation systems strive to maintain a high-trust environment, we do not conduct exhaustive criminal background checks on all users. You are solely responsible for your interactions and must exercise sound judgment and safety practices when meeting matches in person.`,
+        },
+        {
+          id: 'privacy',
+          title: 'Privacy Policy',
+          category: 'privacy',
+          version: '2026.1',
+          content: `# Lovemeetly Privacy Policy
+
+**Effective Date:** January 2026  
+**Compliance Standards:** GDPR, CCPA, and Global Data Protection Regulations
+
+At Lovemeetly, user privacy and data security are foundational. This Privacy Policy details how we handle, protect, and process your personal information.
+
+---
+
+### 1. Information We Collect
+- **Registration Data:** Account email, age, gender identity, dating preferences, and encrypted credentials.
+- **Profile Content:** Self-submitted photos, personal interests, biographical statements, lifestyle preferences, and language proficiencies.
+- **Approximate Location:** We process rough location data to calculate approximate distance (e.g. "Within 10 km" or "Dhaka Region"). **We NEVER share exact GPS coordinates with other users.**
+- **Private Communications:** In-app messages and WebRTC calls are encrypted in transit. We do not sell your private conversations to third-party advertisers.
+- **Transaction Records:** Payment order IDs, currency, and blockchain transaction hashes are logged to verify purchases. We never hold sensitive private wallet keys or banking cards on our servers.
+
+---
+
+### 2. How We Utilize Your Data
+- To generate compatibility ratings and suggest high-matching prospective partners.
+- To detect and prevent fraudulent bot activities, fake accounts, and spam syndication.
+- To deliver real-time notifications for likes, matches, and chat conversations.
+- To activate and manage purchased VIP privileges and Profile Boost durations.
+
+---
+
+### 3. Data Protection & Retention
+- All data transmission is secured using modern TLS 1.3 cryptographic protocols.
+- Access to backend administrative logs is restricted using strict role-based access control (RBAC).
+- You have the absolute right to delete your account and all associated profile data anytime via the Account Settings menu.
+
+---
+
+### 4. Contact Data Privacy Officer
+If you have any questions or require data export/erasure, contact our dedicated Data Protection Officer at **privacy@lovemeetly.com**.`,
+        },
+        {
+          id: 'guidelines',
+          title: 'Community Guidelines',
+          category: 'guidelines',
+          version: '2026.1',
+          content: `# Lovemeetly Community Guidelines
+
+Our mission is to create a welcoming, authentic, and respectful dating community. All members must adhere to the following principles:
+
+1. **Treat Everyone with Respect:** Rejection is a normal part of dating. Accept answers with grace and kindness.
+2. **Authentic Representation:** Only use authentic, recent photos of yourself. No celebrity pictures, anime avatars, or deceitful AI-generated deepfakes.
+3. **Zero Tolerance for Scams:** Never request financial assistance, emergency funds, or crypto investments from anyone you meet on Lovemeetly.
+4. **No Explicit or Unsolicited Content:** Unsolicited sexual imagery or abusive language results in an immediate and permanent ban.
+5. **Protect Your Personal Information:** Do not post phone numbers, home addresses, or social security details in public profile bios.
+6. **Report Violations:** Help keep Lovemeetly safe by reporting suspicious profiles using the in-app report button.`,
+        },
+        {
+          id: 'safety',
+          title: 'Dating Safety Tips',
+          category: 'safety',
+          version: '2026.1',
+          content: `# Top Dating Safety Tips
+
+Your personal safety always comes first. Follow these best practices when getting to know someone new:
+
+1. **Never Send Money or Share Financial Details:** Scammers often fabricate tragic emergencies to elicit sympathy and money. Never wire funds or send crypto to anyone met online.
+2. **Protect Sensitive Personal Information:** Do not share your home address, exact workplace, or daily routines until deep mutual trust is established.
+3. **Use In-App Video Calls First:** Verify your match's identity with an encrypted in-app video or voice call before agreeing to an in-person meeting.
+4. **Meet in Populated, Public Venues:** Always choose public spaces like cafes, restaurants, or museums for initial dates. Never meet in private residences or secluded locations.
+5. **Inform a Friend or Family Member:** Tell someone you trust where you are going, who you are meeting, and when you expect to return.
+6. **Manage Your Own Transportation:** Drive yourself or use a licensed ride-share service so you can leave at any time you feel uncomfortable.`,
+        },
+      ];
+
+      for (const doc of defaultDocs) {
+        db.run(
+          `INSERT INTO legal_documents (id, title, category, content, version, last_updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'Platform Legal Team', ?)`,
+          [doc.id, doc.title, doc.category, doc.content, doc.version, now]
+        );
+      }
+      console.log('[SQL Database] Default Legal Documents (Terms, Privacy, Guidelines, Safety) seeded successfully.');
+    }
+  } catch (err) {
+    console.warn('[SQL Database] Error seeding legal documents:', err);
   }
 
   // Seed rich collection of demo users & global profiles

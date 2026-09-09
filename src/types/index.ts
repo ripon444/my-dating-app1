@@ -489,7 +489,9 @@ export type AdminPermission =
   | 'providers' 
   | 'logs' 
   | 'settings' 
-  | 'admins';
+  | 'admins'
+  | 'boosts'
+  | 'legal';
 
 export interface AdminMember {
   id: string;
@@ -504,5 +506,30 @@ export interface AdminMember {
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
+}
+
+export interface BoostPackage {
+  id: string;
+  name: string;
+  duration_minutes: number;
+  multiplier: string;
+  price: number;
+  currency: string;
+  description: string;
+  is_popular: boolean;
+  is_active: boolean;
+  display_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface LegalDocument {
+  id: string; // 'terms' | 'privacy' | 'guidelines' | 'safety'
+  title: string;
+  category: string;
+  content: string;
+  version: string;
+  last_updated_by?: string;
+  updated_at?: string;
 }
 

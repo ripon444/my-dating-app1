@@ -17,6 +17,8 @@ import {
   NowPaymentsSettings,
   AdminMember,
   AdminPermission,
+  BoostPackage,
+  LegalDocument,
 } from '../types';
 import { safeStorage } from '../utils/storage';
 import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
@@ -524,6 +526,45 @@ export const api = {
     return res.json();
   },
 
+  async getBoostPackages(): Promise<{ success: boolean; packages: BoostPackage[] }> {
+    const res = await authFetch('/api/boosts/packages');
+    return res.json();
+  },
+
+  async createBoostInvoice(packageId: string): Promise<{
+    success: boolean;
+    orderId: string;
+    invoiceUrl: string;
+    invoiceId: string;
+    amount: number;
+    currency: string;
+    packageName: string;
+    error?: string;
+  }> {
+    const res = await authFetch('/api/boosts/create-invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId }),
+    });
+    return res.json();
+  },
+
+  async completeBoostPayment(packageId: string, orderId?: string): Promise<{
+    success: boolean;
+    profile: Profile;
+    boostExpiresAt: string;
+    orderId?: string;
+    packageName?: string;
+    error?: string;
+  }> {
+    const res = await authFetch('/api/boosts/complete-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId, orderId }),
+    });
+    return res.json();
+  },
+
   async purchaseBoost(durationMinutes: number): Promise<{ success: boolean; profile: Profile; boostExpiresAt: string }> {
     const res = await authFetch('/api/boosts/purchase', {
       method: 'POST',
@@ -768,6 +809,68 @@ export const api = {
     });
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || 'Failed to remove administrator');
+    return result;
+  },
+
+  // Legal Documents (Public & Admin)
+  async getLegalDocuments(): Promise<{ success: boolean; documents: LegalDocument[]; map?: Record<string, LegalDocument> }> {
+    const res = await authFetch('/api/legal/documents');
+    return res.json();
+  },
+
+  async getAdminLegalDocuments(): Promise<{ success: boolean; documents: LegalDocument[] }> {
+    const res = await authFetch('/api/admin/legal/documents');
+    return res.json();
+  },
+
+  async adminUpdateLegalDocument(
+    id: string,
+    data: { title?: string; content: string; version?: string }
+  ): Promise<{ success: boolean; document: LegalDocument }> {
+    const res = await authFetch(`/api/admin/legal/documents/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to update legal document');
+    return result;
+  },
+
+  // Admin: Boost Packages
+  async getAdminBoostPackages(): Promise<{ success: boolean; packages: BoostPackage[] }> {
+    const res = await authFetch('/api/admin/boost-packages');
+    return res.json();
+  },
+
+  async adminCreateBoostPackage(data: Partial<BoostPackage>): Promise<{ success: boolean; package: BoostPackage }> {
+    const res = await authFetch('/api/admin/boost-packages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to create boost package');
+    return result;
+  },
+
+  async adminUpdateBoostPackage(id: string, data: Partial<BoostPackage>): Promise<{ success: boolean; package: BoostPackage }> {
+    const res = await authFetch(`/api/admin/boost-packages/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to update boost package');
+    return result;
+  },
+
+  async adminDeleteBoostPackage(id: string): Promise<{ success: boolean; deletedId: string }> {
+    const res = await authFetch(`/api/admin/boost-packages/${id}`, {
+      method: 'DELETE',
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to delete boost package');
     return result;
   },
 };
