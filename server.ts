@@ -3573,6 +3573,86 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // -------------------------------------------------------------
+// Dynamic Open Graph / Social Preview Injection for Profiles
+// -------------------------------------------------------------
+async function injectProfileMeta(html: string, req: express.Request): Promise<string> {
+  let identifier = '';
+  const profileMatch = req.path.match(/^\/(?:profile|@)\/([^/?#]+)/i);
+  if (profileMatch && profileMatch[1]) {
+    identifier = decodeURIComponent(profileMatch[1]).trim();
+  } else if (req.query.profile && typeof req.query.profile === 'string') {
+    identifier = req.query.profile.trim();
+  } else if (req.query.username && typeof req.query.username === 'string') {
+    identifier = req.query.username.trim();
+  }
+
+  if (!identifier) return html;
+
+  try {
+    const row = await SqlHelper.queryOne<any>(
+      'SELECT name, age, city, country, bio, cover_photo, photos_json, username, id, user_id FROM profiles WHERE username = ? OR id = ? OR user_id = ? OR LOWER(username) = ? LIMIT 1',
+      [identifier, identifier, identifier, identifier.toLowerCase()]
+    );
+
+    if (row && row.name) {
+      const name = String(row.name).trim();
+      const ageStr = row.age ? `, ${row.age}` : '';
+      const location = [row.city, row.country].filter(Boolean).join(', ');
+      const locationStr = location ? ` from ${location}` : '';
+      const title = `${name}${ageStr} on Lovemeetly`;
+      const description = row.bio && String(row.bio).trim()
+        ? String(row.bio).trim().slice(0, 160)
+        : `Check out ${name}'s profile on Lovemeetly${locationStr}! Connect, chat, and meet verified singles worldwide.`;
+
+      // Find user photo
+      let photoUrl = '';
+      if (row.photos_json) {
+        try {
+          const photos = typeof row.photos_json === 'string' ? JSON.parse(row.photos_json) : row.photos_json;
+          if (Array.isArray(photos) && photos.length > 0 && typeof photos[0] === 'string' && photos[0].trim()) {
+            photoUrl = photos[0].trim();
+          }
+        } catch {}
+      }
+      if (!photoUrl && row.cover_photo && typeof row.cover_photo === 'string' && row.cover_photo.trim()) {
+        photoUrl = row.cover_photo.trim();
+      }
+
+      const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+      const host = req.get('host') || 'lovemeetly.com';
+      const origin = `${proto}://${host}`;
+
+      if (photoUrl && photoUrl.startsWith('/')) {
+        photoUrl = `${origin}${photoUrl}`;
+      }
+
+      const canonicalUrl = `${origin}/profile/${encodeURIComponent(row.username || row.id || identifier)}`;
+
+      if (photoUrl) {
+        html = html.replace(/<meta property="og:image" content="[^"]*"/i, `<meta property="og:image" content="${photoUrl}"`);
+        html = html.replace(/<meta property="og:image:secure_url" content="[^"]*"/i, `<meta property="og:image:secure_url" content="${photoUrl}"`);
+        html = html.replace(/<meta name="twitter:image" content="[^"]*"/i, `<meta name="twitter:image" content="${photoUrl}"`);
+      }
+
+      html = html.replace(/<title>[^<]*<\/title>/i, `<title>${title} - Lovemeetly</title>`);
+      html = html.replace(/<meta property="og:title" content="[^"]*"/i, `<meta property="og:title" content="${title}"`);
+      html = html.replace(/<meta name="twitter:title" content="[^"]*"/i, `<meta name="twitter:title" content="${title}"`);
+
+      html = html.replace(/<meta name="description" content="[^"]*"/i, `<meta name="description" content="${description}"`);
+      html = html.replace(/<meta property="og:description" content="[^"]*"/i, `<meta property="og:description" content="${description}"`);
+      html = html.replace(/<meta name="twitter:description" content="[^"]*"/i, `<meta name="twitter:description" content="${description}"`);
+
+      html = html.replace(/<meta property="og:url" content="[^"]*"/i, `<meta property="og:url" content="${canonicalUrl}"`);
+      html = html.replace(/<meta name="twitter:url" content="[^"]*"/i, `<meta name="twitter:url" content="${canonicalUrl}"`);
+    }
+  } catch (err) {
+    console.warn('[Profile Meta Injection Error]:', err);
+  }
+
+  return html;
+}
+
+// -------------------------------------------------------------
 // Vite Middleware / Static Serve & Immediate Server Startup
 // -------------------------------------------------------------
 async function start() {
@@ -3585,10 +3665,24 @@ async function start() {
       server: { middlewareMode: true },
       appType: 'spa',
     });
+
+    // Intercept profile URLs for dynamic OG preview in dev mode
+    app.get(['/profile/:id', '/@:id'], async (req, res, next) => {
+      try {
+        const rawIndex = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+        let html = await vite.transformIndexHtml(req.originalUrl, rawIndex);
+        html = await injectProfileMeta(html, req);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+      } catch (e) {
+        next(e);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     app.use(express.static(distPath));
-    app.get('*', (req, res, next) => {
+    app.get('*', async (req, res, next) => {
       if (req.path.startsWith('/api') || req.path.startsWith('/server-api') || req.path.startsWith('/socket.io')) {
         return next();
       }
@@ -3601,6 +3695,7 @@ async function start() {
           if (!host.includes('lovemeetly.com')) {
             html = html.replace(/https:\/\/lovemeetly\.com/g, origin);
           }
+          html = await injectProfileMeta(html, req);
           res.setHeader('Content-Type', 'text/html; charset=utf-8');
           return res.send(html);
         }
