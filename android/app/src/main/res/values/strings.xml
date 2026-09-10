@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lovemeetly</string>
+    <string name="title_activity_main">Lovemeetly</string>
+    <string name="package_name">com.lovemeetly.app</string>
+    <string name="custom_url_scheme">com.lovemeetly.app</string>
+</resources>

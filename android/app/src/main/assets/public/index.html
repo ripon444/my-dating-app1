@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" style="background-color: #0c0a09; color: #f5f5f4;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lovemeetly - Global Dating & Match Platform</title>
+    <meta name="description" content="Lovemeetly is a modern, secure global dating and partner platform featuring unified native & external partner profiles, real-time chat, WebRTC voice/video calling, and AI translation." />
+    <!-- Open Graph / Facebook Meta Tags -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Lovemeetly" />
+    <meta property="og:url" content="https://lovemeetly.com/" />
+    <meta property="og:title" content="Lovemeetly - Global Dating & Match Platform" />
+    <meta property="og:description" content="Connect with genuine singles worldwide. Safe, verified profiles, live video & audio calls, real-time translated chat, and premium global matchmaking." />
+    <meta property="og:image" content="https://lovemeetly.com/lovemeetly-banner.jpg" />
+    <meta property="og:image:secure_url" content="https://lovemeetly.com/lovemeetly-banner.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Lovemeetly - Global Dating & Match Platform" />
+
+    <!-- Twitter / X Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://lovemeetly.com/" />
+    <meta name="twitter:title" content="Lovemeetly - Global Dating & Match Platform" />
+    <meta name="twitter:description" content="Connect with genuine singles worldwide. Safe, verified profiles, live video & audio calls, real-time translated chat, and premium global matchmaking." />
+    <meta name="twitter:image" content="https://lovemeetly.com/lovemeetly-banner.jpg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/assets/index-BgvM-_UF.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B93erTfK.css">
+  </head>
+  <body class="bg-stone-900 text-stone-100 antialiased selection:bg-rose-500 selection:text-white" style="margin: 0; background-color: #0c0a09; color: #f5f5f4;">
+    <div id="root">
+      <div style="min-height: 100vh; background-color: #0c0a09; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f5f5f4;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
+          </svg>
+          <span style="font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">Love<span style="color: #f43f5e;">meetly</span></span>
+        </div>
+        <div style="width: 28px; height: 28px; border: 3px solid rgba(244, 63, 94, 0.2); border-top-color: #f43f5e; border-radius: 50%; animation: lm_spin 0.75s linear infinite;"></div>
+        <style>
+          @keyframes lm_spin { to { transform: rotate(360deg); } }
+        </style>
+      </div>
+    </div>
+    <script>
+      // Production Fallback:
+      // If root index.html is served directly by LiteSpeed/Apache in production
+      // and /src/main.tsx fails (e.g. 403 Forbidden or not compiled by Vite dev server),
+      // seamlessly load the compiled production assets from /dist/index.html
+      var __fallbackTriggered = false;
+      function __loadCompiledFallback() {
+        if (__fallbackTriggered || window.__LOVE_REACT_LOADED__) return;
+        __fallbackTriggered = true;
+        fetch('/dist/index.html')
+          .then(function(res) { return res.text(); })
+          .then(function(html) {
+            if (window.__LOVE_REACT_LOADED__) return;
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(html, 'text/html');
+
+            var links = doc.querySelectorAll('link[rel="stylesheet"]');
+            for (var i = 0; i < links.length; i++) {
+              var href = links[i].getAttribute('href');
+              if (href) {
+                var distHref = href.startsWith('/assets/') ? '/dist' + href : href;
+                if (!document.querySelector('link[href="' + href + '"]') && !document.querySelector('link[href="' + distHref + '"]')) {
+                  var newLink = document.createElement('link');
+                  newLink.rel = 'stylesheet';
+                  newLink.href = distHref;
+                  document.head.appendChild(newLink);
+                }
+              }
+            }
+
+            var scripts = doc.querySelectorAll('script[type="module"]');
+            for (var j = 0; j < scripts.length; j++) {
+              var src = scripts[j].getAttribute('src');
+              if (src) {
+                var distSrc = src.startsWith('/assets/') ? '/dist' + src : src;
+                if (!document.querySelector('script[src="' + src + '"]') && !document.querySelector('script[src="' + distSrc + '"]')) {
+                  var newScript = document.createElement('script');
+                  newScript.type = 'module';
+                  newScript.crossOrigin = 'anonymous';
+                  newScript.src = distSrc;
+                  document.body.appendChild(newScript);
+                }
+              }
+            }
+          })
+          .catch(function(err) {
+            console.warn('Fallback bundle load:', err);
+          });
+      }
+
+      setTimeout(function() {
+        if (!window.__LOVE_REACT_LOADED__) {
+          __loadCompiledFallback();
+        }
+      }, 400);
+    </script>
+  </body>
+</html>
+

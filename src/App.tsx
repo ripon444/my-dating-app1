@@ -48,6 +48,7 @@ import { PublicProfileView } from './components/PublicProfileView';
 import { UserSearchModal } from './components/UserSearchModal';
 import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
+import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api } from './services/api';
 import { getSocket } from './services/socket';
 import { FALLBACK_PROFILES } from './data/fallbackProfiles';
@@ -237,6 +238,66 @@ function MainApp() {
       setIsLoading(false);
     }
   };
+
+  // Capacitor Android Native Integrations (Back Button, Status Bar, Push Notifications)
+  useEffect(() => {
+    initializeCapacitorApp({
+      hasOpenModal: () => {
+        return Boolean(
+          isFiltersOpen ||
+          isMatchModalOpen ||
+          isProfileViewOpen ||
+          isProfileEditOpen ||
+          isSubscriptionOpen ||
+          isBoostOpen ||
+          isReportOpen ||
+          isPartnerDisclosureOpen ||
+          isLegalOpen ||
+          isAuthOpen ||
+          isUserSearchOpen ||
+          selectedPublicUserId ||
+          incomingCall
+        );
+      },
+      closeActiveModal: () => {
+        if (incomingCall) setIncomingCall(null);
+        else if (selectedPublicUserId) setSelectedPublicUserId(null);
+        else if (isProfileViewOpen) setIsProfileViewOpen(false);
+        else if (isProfileEditOpen) setIsProfileEditOpen(false);
+        else if (isUserSearchOpen) setIsUserSearchOpen(false);
+        else if (isFiltersOpen) setIsFiltersOpen(false);
+        else if (isMatchModalOpen) setIsMatchModalOpen(false);
+        else if (isSubscriptionOpen) setIsSubscriptionOpen(false);
+        else if (isBoostOpen) setIsBoostOpen(false);
+        else if (isReportOpen) setIsReportOpen(false);
+        else if (isPartnerDisclosureOpen) setIsPartnerDisclosureOpen(false);
+        else if (isLegalOpen) setIsLegalOpen(false);
+        else if (isAuthOpen) setIsAuthOpen(false);
+      },
+      canGoBack: () => {
+        return activeTab !== 'discover';
+      },
+      goBack: () => {
+        setActiveTab('discover');
+        setViewMode('grid');
+      },
+    });
+  }, [
+    isFiltersOpen,
+    isMatchModalOpen,
+    isProfileViewOpen,
+    isProfileEditOpen,
+    isSubscriptionOpen,
+    isBoostOpen,
+    isReportOpen,
+    isPartnerDisclosureOpen,
+    isLegalOpen,
+    isAuthOpen,
+    isUserSearchOpen,
+    selectedPublicUserId,
+    incomingCall,
+    activeTab,
+  ]);
 
   useEffect(() => {
     loadInitialData();

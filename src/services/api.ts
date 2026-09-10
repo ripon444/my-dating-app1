@@ -1,4 +1,5 @@
 // API Service Layer with Token-Based Session Storage
+import { Capacitor } from '@capacitor/core';
 import {
   Profile,
   User,
@@ -37,6 +38,31 @@ export function removeStoredToken() {
   safeStorage.removeItem(TOKEN_KEY);
 }
 
+export function getApiBaseUrl(): string {
+  // If explicitly configured via environment variable, prefer it
+  const metaEnv = (import.meta as any)?.env;
+  if (metaEnv?.VITE_API_BASE_URL) {
+    return (metaEnv.VITE_API_BASE_URL as string).replace(/\/$/, '');
+  }
+
+  // Detect if running inside Capacitor Android app or mobile native container
+  if (typeof window !== 'undefined') {
+    const isNative = Capacitor.isNativePlatform();
+    const isLocalhostOrCapacitor = 
+      window.location.protocol === 'capacitor:' || 
+      window.location.hostname === 'localhost' || 
+      window.location.hostname === '127.0.0.1';
+    
+    // In Capacitor Android webview, the origin is capacitor://localhost or https://localhost
+    // If not running in local Vite container dev server (port 3000), target the live cPanel backend
+    if (isNative || (isLocalhostOrCapacitor && window.location.port !== '3000')) {
+      return 'https://lovemeetly.com';
+    }
+  }
+
+  return '';
+}
+
 export async function safeJson<T = any>(res: Response, fallbackErrMsg = 'Request failed'): Promise<T> {
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
@@ -65,13 +91,22 @@ export async function safeJson<T = any>(res: Response, fallbackErrMsg = 'Request
 }
 
 export function resolveApiUrl(path: string): string {
-  if (path.startsWith('/api/')) {
-    return '/server-api/' + path.substring(5);
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
   }
-  if (path === '/api') {
-    return '/server-api';
+
+  let endpoint = path;
+  if (endpoint.startsWith('/api/')) {
+    endpoint = '/server-api/' + endpoint.substring(5);
+  } else if (endpoint === '/api') {
+    endpoint = '/server-api';
   }
-  return path;
+
+  const baseUrl = getApiBaseUrl();
+  if (baseUrl) {
+    return `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+  }
+  return endpoint;
 }
 
 async function authFetch(input: string, init?: RequestInit): Promise<Response> {
