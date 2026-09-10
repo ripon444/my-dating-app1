@@ -241,8 +241,8 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
         {isDropdownOpen && (
           <div className="absolute top-full left-0 right-0 mt-2 bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl z-50 overflow-hidden max-h-80 overflow-y-auto divide-y divide-stone-800/90 animate-in fade-in slide-in-from-top-1">
             <div className="px-4 py-2 bg-stone-950/90 text-[10px] font-bold text-stone-400 uppercase tracking-wider flex items-center justify-between">
-              <span className="flex items-center gap-1 text-blue-400">
-                <Sparkles className="w-3 h-3" /> Facebook-style Suggestions
+              <span className="flex items-center gap-1 text-rose-400">
+                <Sparkles className="w-3 h-3" /> Recommended Locations
               </span>
               <span className="text-stone-500">Click to select location</span>
             </div>

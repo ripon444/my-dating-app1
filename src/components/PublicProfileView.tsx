@@ -406,7 +406,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-4 border-rose-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-neutral-400 font-medium text-sm">Loading Facebook-style public profile...</p>
+        <p className="text-neutral-400 font-medium text-sm">Loading profile...</p>
       </div>
     );
   }
@@ -1116,7 +1116,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
             {tabListLoading ? (
               <div className="py-12 text-center text-neutral-400">
                 <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                <p className="text-xs">Loading followers from PostgreSQL...</p>
+                <p className="text-xs">Loading followers...</p>
               </div>
             ) : tabFollowersList.length === 0 ? (
               <div className="py-12 text-center text-neutral-500 space-y-2">
@@ -1164,7 +1164,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
             {tabListLoading ? (
               <div className="py-12 text-center text-neutral-400">
                 <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                <p className="text-xs">Loading following list from PostgreSQL...</p>
+                <p className="text-xs">Loading following list...</p>
               </div>
             ) : tabFollowingList.length === 0 ? (
               <div className="py-12 text-center text-neutral-500 space-y-2">

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
+  Home,
   Globe, 
   Flame, 
   Sparkles, 
@@ -14,6 +15,7 @@ import {
   Zap,
   Lock,
   Heart,
+  MessageCircle,
   Search,
   Users,
   Bell,
@@ -45,8 +47,10 @@ interface NavbarProps {
   onOpenUserSearch?: () => void;
   notifications?: any[];
   unreadNotificationsCount?: number;
+  unreadMessagesCount?: number;
   onSelectNotificationProfile?: (profileIdOrUserId: string) => void;
   onMarkAllNotificationsRead?: () => void;
+  onResetHome?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -68,8 +72,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenUserSearch,
   notifications = [],
   unreadNotificationsCount = 0,
+  unreadMessagesCount = 0,
   onSelectNotificationProfile,
   onMarkAllNotificationsRead,
+  onResetHome,
 }) => {
   const { currentLanguage, setLanguage, t } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -114,24 +120,40 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-stone-900/90 backdrop-blur-md border-b border-stone-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
-        {/* Brand Logo & Tagline */}
-        <div className="cursor-pointer" onClick={() => setActiveTab('discover')}>
+        {/* Brand Logo & Tagline (Click returns to Home Grid) */}
+        <div 
+          id="brand-logo-button"
+          className="cursor-pointer transition-transform active:scale-95 group select-none shrink-0" 
+          onClick={() => {
+            setActiveTab('discover');
+            setViewMode('grid');
+            if (setSearchQuery) setSearchQuery('');
+            if (onResetHome) onResetHome();
+          }}
+          title="Return to Home Feed"
+        >
           <Logo size="md" subtitle="Unified Global & Partner Dating" />
         </div>
 
-        {/* Center Quick Navigation (Desktop) */}
+        {/* Center Quick Navigation (Desktop) with Facebook-style Home button */}
         <nav className="hidden md:flex items-center gap-1 bg-stone-800/60 p-1 rounded-xl border border-stone-700/50">
           <button
-            onClick={() => setActiveTab('discover')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            onClick={() => {
+              setActiveTab('discover');
+              setViewMode('grid');
+              if (onResetHome) onResetHome();
+            }}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'discover'
                 ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
                 : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
             }`}
+            title="Facebook-style Home Feed"
           >
-            {t('discover')}
+            <Home className="w-4 h-4" />
+            <span>Home</span>
           </button>
           <button
             onClick={() => setActiveTab('matches')}
@@ -251,6 +273,25 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
+          {/* Mobile Messenger Quick Button (Facebook-style header) */}
+          <button
+            id="btn-nav-messages-mobile"
+            type="button"
+            onClick={() => {
+              setActiveTab('messages');
+              soundManager.unlock();
+            }}
+            className="md:hidden relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer"
+            title="Messages & Chats"
+          >
+            <MessageCircle className="w-4 h-4 text-stone-300" />
+            {unreadMessagesCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-900/50">
+                {unreadMessagesCount > 9 ? '9+' : unreadMessagesCount}
+              </span>
+            )}
+          </button>
+
           {/* Real-time Notifications Bell */}
           <div className="relative shrink-0" ref={notifRef}>
             <button
@@ -260,7 +301,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 soundManager.unlock();
               }}
               className="relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer"
-              title="Notifications & Activity (FB Chime Sound Alert)"
+              title="Notifications & Activity"
             >
               <Bell className="w-4 h-4 text-stone-300" />
               {unreadNotificationsCount > 0 && (

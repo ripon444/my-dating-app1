@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  Home,
   Flame, 
   Heart, 
   MessageCircle, 
@@ -21,6 +22,8 @@ interface SidebarProps {
   user: User | null;
   profile?: Profile | null;
   onOpenLegal: (tab: string) => void;
+  setViewMode?: (mode: 'swipe' | 'grid') => void;
+  onGoHome?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -31,11 +34,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   user,
   profile,
   onOpenLegal,
+  setViewMode,
+  onGoHome,
 }) => {
   const { t } = useTranslation();
 
+  const handleNavClick = (id: string) => {
+    if (id === 'discover') {
+      setActiveTab('discover');
+      if (setViewMode) setViewMode('grid');
+      if (onGoHome) onGoHome();
+    } else {
+      setActiveTab(id);
+    }
+  };
+
   const navItems = [
-    { id: 'discover', label: t('discover'), icon: Flame, badge: undefined },
+    { id: 'discover', label: 'Home', icon: Home, badge: undefined },
     { id: 'matches', label: t('matches'), icon: Heart, badge: matchesCount > 0 ? matchesCount : undefined },
     { id: 'messages', label: t('messages'), icon: MessageCircle, badge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined },
     { id: 'calls', label: t('calls'), icon: PhoneCall, badge: undefined },
@@ -59,8 +74,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                onClick={() => handleNavClick(item.id)}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
                   isActive
                     ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-md shadow-rose-900/20'
                     : 'text-stone-300 hover:bg-stone-800/80 hover:text-white'
@@ -100,14 +115,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <button
             onClick={() => onOpenLegal('disclosure')}
-            className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition flex items-center gap-2"
+            className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition flex items-center gap-2 cursor-pointer"
           >
             <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
             <span>{t('disclosure')}</span>
           </button>
           <button
             onClick={() => onOpenLegal('guidelines')}
-            className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition flex items-center gap-2"
+            className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition flex items-center gap-2 cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
             <span>{t('guidelines')}</span>
@@ -118,8 +133,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </aside>
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-stone-900/95 backdrop-blur-md border-t border-stone-800 px-2 py-1.5 flex items-center justify-around shadow-2xl">
+      {/* Facebook-style Mobile App Bottom Navigation Bar */}
+      <nav 
+        id="mobile-bottom-navigation"
+        aria-label="Mobile Navigation"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-stone-950/95 backdrop-blur-xl border-t border-stone-800/80 px-1 py-1 flex items-center justify-around shadow-2xl safe-area-pb"
+      >
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -129,15 +148,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center justify-center gap-1 py-1 px-2.5 rounded-xl text-[10px] font-medium transition min-w-[56px] ${
-                isActive ? 'text-rose-500 font-bold' : 'text-stone-400 hover:text-stone-200'
+              onClick={() => handleNavClick(item.id)}
+              className={`relative flex-1 flex flex-col items-center justify-center py-1.5 px-1 transition-all cursor-pointer select-none ${
+                isActive 
+                  ? 'text-rose-500 font-semibold' 
+                  : 'text-stone-400 hover:text-stone-200'
               }`}
             >
+              {/* Facebook-style Active Top Indicator Bar */}
+              {isActive && (
+                <span className="absolute -top-1 left-3 right-3 h-0.5 bg-rose-500 rounded-full shadow-[0_1px_6px_rgba(244,63,94,0.7)]" />
+              )}
+
               {isProfile && userAvatar ? (
-                <div className={`relative w-7 h-7 rounded-full overflow-hidden border-2 transition ${
+                <div className={`relative w-7 h-7 rounded-full overflow-hidden border-2 transition-transform ${
                   isActive
-                    ? 'border-rose-500 ring-2 ring-rose-500/40 scale-110 shadow-md shadow-rose-900/40'
+                    ? 'border-rose-500 ring-2 ring-rose-500/40 scale-105 shadow-md shadow-rose-900/40'
                     : 'border-stone-600'
                 }`}>
                   <img
@@ -149,20 +175,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 border border-stone-900" />
                 </div>
               ) : isProfile && user ? (
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition ${
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-transform ${
                   isActive
-                    ? 'bg-rose-500 text-white ring-2 ring-rose-500/40 scale-110'
+                    ? 'bg-rose-500 text-white ring-2 ring-rose-500/40 scale-105'
                     : 'bg-stone-800 text-stone-300 border border-stone-700'
                 }`}>
                   {(profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
                 </div>
               ) : (
-                <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
+                <div className="relative">
+                  <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110 text-rose-500' : 'text-stone-300'}`} />
+                  {item.badge !== undefined && (
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center shadow-md shadow-rose-950/60 border border-stone-950 animate-pulse">
+                      {item.badge > 9 ? '9+' : item.badge}
+                    </span>
+                  )}
+                </div>
               )}
-              <span className="truncate max-w-[58px]">{item.label}</span>
-              {item.badge !== undefined && (
-                <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-              )}
+              <span className={`text-[10px] mt-0.5 tracking-tight truncate max-w-[60px] ${isActive ? 'text-rose-400 font-semibold' : 'text-stone-400'}`}>
+                {item.label}
+              </span>
             </button>
           );
         })}

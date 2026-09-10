@@ -111,7 +111,7 @@ function MainApp() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [activeTab, setActiveTab] = useState<string>('discover');
-  const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('swipe');
+  const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('grid');
 
   // Discovery State
   const [discoverProfiles, setDiscoverProfiles] = useState<Profile[]>(() => FALLBACK_PROFILES);
@@ -622,10 +622,17 @@ function MainApp() {
         onOpenUserSearch={() => setIsUserSearchOpen(true)}
         notifications={notifications}
         unreadNotificationsCount={notifications.filter((n) => !n.is_read).length}
+        unreadMessagesCount={conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0)}
         onSelectNotificationProfile={(profileOrUserId) => {
           setSelectedPublicUserId(profileOrUserId);
         }}
         onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        onResetHome={() => {
+          setSelectedPublicUserId(null);
+          setActiveTab('discover');
+          setViewMode('grid');
+          setSearchQuery('');
+        }}
       />
 
       {/* Main App Layout */}
@@ -640,6 +647,13 @@ function MainApp() {
           user={currentUser}
           profile={currentProfile}
           onOpenLegal={handleOpenLegalModal}
+          setViewMode={setViewMode}
+          onGoHome={() => {
+            setSelectedPublicUserId(null);
+            setActiveTab('discover');
+            setViewMode('grid');
+            setSearchQuery('');
+          }}
         />
 
         {/* Content View Container */}

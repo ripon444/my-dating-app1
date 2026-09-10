@@ -78,7 +78,7 @@ const GridCardItem: React.FC<{
       <div 
         className="relative h-80 w-full overflow-hidden bg-stone-950 cursor-pointer"
         onClick={() => onViewDetails(profile)}
-        title="Click to view full Facebook profile"
+        title="Click to view full profile"
       >
         <img
           src={photo}
@@ -137,7 +137,7 @@ const GridCardItem: React.FC<{
           <button
             onClick={(e) => { e.stopPropagation(); onViewDetails(profile); }}
             className="p-2 rounded-xl bg-white/20 hover:bg-rose-600 text-white backdrop-blur-md transition cursor-pointer"
-            title="View Full Facebook Profile"
+            title="View Full Profile"
           >
             <Info className="w-4 h-4" />
           </button>

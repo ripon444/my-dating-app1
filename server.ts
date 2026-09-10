@@ -174,8 +174,22 @@ export function formatProfileRow(row: any): any {
     region: row.region,
     approx_distance_km: Number(row.approx_distance_km) || 15,
     bio: row.bio || '',
-    cover_photo: row.cover_photo || '',
-    photos: typeof row.photos_json === 'string' ? JSON.parse(row.photos_json || '[]') : (Array.isArray(row.photos) ? row.photos : []),
+    cover_photo: row.cover_photo || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1600&q=80',
+    photos: (() => {
+      const parsed = typeof row.photos_json === 'string' ? JSON.parse(row.photos_json || '[]') : (Array.isArray(row.photos) ? row.photos : []);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]) {
+        return parsed;
+      }
+      return row.gender === 'FEMALE'
+        ? [
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80',
+            'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=1000&q=80',
+          ]
+        : [
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=1000&q=80',
+            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=1000&q=80',
+          ];
+    })(),
     interests: typeof row.interests_json === 'string' ? JSON.parse(row.interests_json || '[]') : (Array.isArray(row.interests) ? row.interests : []),
     languages: typeof row.languages_json === 'string' ? JSON.parse(row.languages_json || '[]') : (Array.isArray(row.languages) ? row.languages : []),
     relationship_goal: row.relationship_goal || 'Long-term relationship',
@@ -514,16 +528,29 @@ app.post('/api/auth/register', async (req, res) => {
       [newUserId, cleanEmail, password.trim(), initialRole, initialTier, now, now]
     );
 
-    const defaultPhoto = gender === 'FEMALE'
-      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'
-      : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=1000&q=80';
+    const femaleDemoPhotos = [
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80',
+      'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=1000&q=80',
+      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=1000&q=80',
+    ];
+    const maleDemoPhotos = [
+      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=1000&q=80',
+      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=1000&q=80',
+      'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=1000&q=80',
+    ];
+    const otherDemoPhotos = [
+      'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=1000&q=80',
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80',
+    ];
+    const assignedPhotos = gender === 'FEMALE' ? femaleDemoPhotos : (gender === 'OTHER' ? otherDemoPhotos : maleDemoPhotos);
+    const defaultCover = 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1600&q=80';
 
     const userCountry = (country || 'United States').trim();
     const userCity = (city || 'New York').trim();
     const baseUsername = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'member';
     const uniqueUsername = `${baseUsername}_${uniqueHex.slice(0, 4)}`;
 
-    // SQL INSERT INTO profiles table with unique username and social defaults
+    // SQL INSERT INTO profiles table with unique username, demo photos and social defaults
     await SqlHelper.execute(
       `INSERT INTO profiles (
         id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
@@ -532,7 +559,7 @@ app.post('/api/auth/register', async (req, res) => {
         show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
       ) VALUES (
         ?, ?, 'native', ?, ?, ?, ?, ?, ?, 'Downtown',
-        15, 'Hello! I just joined Lovemeetly to connect with genuine people worldwide.', '', ?, '{}', '',
+        15, 'Hello! I just joined Lovemeetly to connect with genuine people worldwide.', ?, ?, '{}', '',
         ?, '["Travel", "Music", "Food", "Culture"]', '["English"]', 'Long-term relationship',
         92, 0, ?, 1, 0, 1, 1, 1, 1, 1, ?, ?
       )`,
@@ -545,8 +572,9 @@ app.post('/api/auth/register', async (req, res) => {
         gender || 'MALE',
         userCountry,
         userCity,
+        defaultCover,
         uniqueUsername,
-        JSON.stringify([defaultPhoto]),
+        JSON.stringify(assignedPhotos),
         now,
         now,
         now,

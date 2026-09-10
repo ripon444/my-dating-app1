@@ -790,7 +790,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                       Unique Profile URL & Username
                     </div>
                     <div className="text-[10px] text-stone-400">
-                      Create your personalized Facebook-style shareable profile link
+                      Create your personalized shareable profile link
                     </div>
                   </div>
                 </div>

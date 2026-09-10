@@ -260,7 +260,7 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
               <button
                 onClick={() => onViewDetails(profile)}
                 className="p-2 rounded-full bg-white/10 hover:bg-rose-600 text-white backdrop-blur-md transition-all shadow-md cursor-pointer group"
-                title="View Full Facebook-style Profile"
+                title="View Full Profile"
               >
                 <Info className="w-5 h-5 group-hover:scale-110 transition-transform" />
               </button>

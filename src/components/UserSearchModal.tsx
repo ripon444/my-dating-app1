@@ -122,7 +122,7 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
           {loading ? (
             <div className="py-12 text-center text-neutral-400">
               <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-xs">Searching PostgreSQL user database...</p>
+              <p className="text-xs">Searching members...</p>
             </div>
           ) : query && results.length === 0 ? (
             <div className="py-12 text-center text-neutral-500 space-y-2">
