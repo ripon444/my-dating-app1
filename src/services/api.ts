@@ -215,6 +215,11 @@ export const api = {
     return res.json();
   },
 
+  async markAllNotificationsRead(): Promise<{ success: boolean }> {
+    const res = await authFetch('/api/notifications/read-all', { method: 'POST' });
+    return res.json();
+  },
+
   async login(email: string, password?: string, role?: string): Promise<{ success: boolean; user: User; profile: Profile; token?: string }> {
     const res = await authFetch('/api/auth/login', {
       method: 'POST',

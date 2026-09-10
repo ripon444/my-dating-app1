@@ -17,12 +17,14 @@ import {
   Search,
   Users,
   Bell,
-  X
+  X,
+  Volume2
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
 import { User, Profile } from '../types';
 import { Logo } from './Logo';
+import { soundManager } from '../utils/sound';
 
 interface NavbarProps {
   user: User | null;
@@ -44,6 +46,7 @@ interface NavbarProps {
   notifications?: any[];
   unreadNotificationsCount?: number;
   onSelectNotificationProfile?: (profileIdOrUserId: string) => void;
+  onMarkAllNotificationsRead?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -66,6 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   notifications = [],
   unreadNotificationsCount = 0,
   onSelectNotificationProfile,
+  onMarkAllNotificationsRead,
 }) => {
   const { currentLanguage, setLanguage, t } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -239,7 +243,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="btn-nav-find-members"
               type="button"
               onClick={onOpenUserSearch}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-stone-200 border border-neutral-700 text-xs font-semibold transition"
+              className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-stone-200 border border-neutral-700 text-xs font-semibold transition shrink-0"
               title="Find Registered Members"
             >
               <Users className="w-3.5 h-3.5 text-rose-400" />
@@ -248,39 +252,61 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* Real-time Notifications Bell */}
-          <div className="relative" ref={notifRef}>
+          <div className="relative shrink-0" ref={notifRef}>
             <button
               id="btn-nav-notifications"
-              onClick={() => setNotifMenuOpen(!notifMenuOpen)}
-              className="relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition"
-              title="Notifications"
+              onClick={() => {
+                setNotifMenuOpen(!notifMenuOpen);
+                soundManager.unlock();
+              }}
+              className="relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer"
+              title="Notifications & Activity (FB Chime Sound Alert)"
             >
               <Bell className="w-4 h-4 text-stone-300" />
               {unreadNotificationsCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-900/50">
                   {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
                 </span>
               )}
             </button>
 
             {notifMenuOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-800 py-2 z-50 overflow-hidden">
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-800 py-2.5 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
                 <div className="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
                   <div className="font-bold text-white text-xs flex items-center gap-1.5">
                     <Bell className="w-3.5 h-3.5 text-rose-500" />
                     <span>Notifications & Activity</span>
                   </div>
-                  <span className="text-[10px] text-neutral-400 font-medium">
-                    {notifications.length} updates
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => soundManager.playNotificationPop()}
+                      className="flex items-center gap-1 text-[10px] text-stone-300 hover:text-white bg-stone-800 hover:bg-stone-700 px-2 py-0.5 rounded-md border border-stone-700 transition cursor-pointer"
+                      title="Test Facebook-style notification sound"
+                    >
+                      <Volume2 className="w-3 h-3 text-rose-400" />
+                      <span>FB Chime</span>
+                    </button>
+                    {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
+                      <button
+                        type="button"
+                        onClick={onMarkAllNotificationsRead}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="max-h-72 overflow-y-auto divide-y divide-neutral-800/60">
+                <div className="max-h-80 overflow-y-auto divide-y divide-neutral-800/60">
                   {notifications.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-neutral-400 space-y-1">
-                      <Bell className="w-6 h-6 text-neutral-600 mx-auto" />
+                    <div className="p-6 text-center text-xs text-neutral-400 space-y-2">
+                      <Bell className="w-7 h-7 text-neutral-600 mx-auto" />
                       <p className="font-semibold text-neutral-300">All caught up!</p>
-                      <p className="text-[11px]">When someone follows you or sends a like, it will appear here.</p>
+                      <p className="text-[11px] text-neutral-400 max-w-xs mx-auto">
+                        Real-time updates, likes, matches, and follows will alert you here with Facebook-style notification chime sound.
+                      </p>
                     </div>
                   ) : (
                     notifications.map((notif) => (
@@ -293,17 +319,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                             onSelectNotificationProfile?.(targetId);
                           }
                         }}
-                        className={`p-3 text-xs hover:bg-neutral-800/80 cursor-pointer transition ${
+                        className={`p-3 text-xs hover:bg-neutral-800/80 cursor-pointer transition flex items-start gap-2.5 ${
                           !notif.is_read ? 'bg-rose-950/20' : ''
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="font-bold text-white">{notif.title}</span>
-                          <span className="text-[10px] text-neutral-500">
-                            {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                        <div className="mt-0.5 shrink-0">
+                          {!notif.is_read ? (
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block ring-2 ring-rose-500/20 animate-pulse" />
+                          ) : (
+                            <span className="w-2.5 h-2.5 rounded-full bg-stone-700 inline-block" />
+                          )}
                         </div>
-                        <p className="text-neutral-300 text-[11px] leading-relaxed">{notif.message}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 mb-0.5">
+                            <span className="font-bold text-white truncate">{notif.title}</span>
+                            <span className="text-[10px] text-neutral-500 shrink-0">
+                              {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-neutral-300 text-[11px] leading-relaxed">{notif.message}</p>
+                        </div>
                       </div>
                     ))
                   )}
@@ -314,7 +349,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Discovery View Switcher (Swipe vs Grid) */}
           {activeTab === 'discover' && (
-            <div className="hidden sm:flex items-center bg-stone-800 rounded-lg p-0.5 border border-stone-700">
+            <div className="hidden xl:flex items-center bg-stone-800 rounded-lg p-0.5 border border-stone-700 shrink-0">
               <button
                 onClick={() => setViewMode('swipe')}
                 className={`p-1.5 rounded-md text-xs transition ${
@@ -340,7 +375,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {activeTab === 'discover' && (
             <button
               onClick={onOpenFilters}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-medium transition"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-medium transition shrink-0"
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-rose-400" />
               <span className="hidden sm:inline">{t('filters')}</span>
@@ -350,7 +385,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Boost Button */}
           <button
             onClick={onOpenBoost}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition shadow-sm ${
+            className={`hidden sm:flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition shadow-sm shrink-0 ${
               profile?.is_boosted
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
                 : 'bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700'
@@ -358,13 +393,13 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="Boost Profile for 10x visibility"
           >
             <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden lg:inline">{profile?.is_boosted ? t('boostActive') : t('boostProfile')}</span>
+            <span className="hidden xl:inline">{profile?.is_boosted ? t('boostActive') : t('boostProfile')}</span>
           </button>
 
           {/* Subscription Tier Badge / Upgrade */}
           <button
             onClick={onOpenSubscription}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`hidden md:flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
               user?.subscriptionTier === 'VIP'
                 ? 'bg-gradient-to-r from-amber-500 to-amber-700 text-stone-900 font-bold shadow'
                 : user?.subscriptionTier === 'PREMIUM'
@@ -496,81 +531,150 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* User Profile Avatar / Menu */}
-          <div className="relative" ref={userRef}>
-            <button
-              onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-2 p-1 rounded-full bg-stone-800 hover:bg-stone-700 border border-stone-700 transition"
-            >
-              {profile?.photos?.[0] ? (
-                <img
-                  src={profile.photos[0]}
-                  alt={profile.name}
-                  className="w-7 h-7 rounded-full object-cover border border-rose-500/30"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-stone-700 flex items-center justify-center">
-                  <UserIcon className="w-4 h-4 text-stone-300" />
+          <div className="relative shrink-0" ref={userRef}>
+            {user ? (
+              <button
+                id="btn-nav-user-profile"
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center gap-2 p-1 pr-1.5 sm:pr-2.5 rounded-full bg-stone-800/90 hover:bg-stone-700 border border-stone-700 hover:border-rose-500/60 transition shadow-sm shrink-0 cursor-pointer group"
+                title={`${profile?.name || user?.email?.split('@')[0] || 'My Profile'} (${user?.subscriptionTier || 'Free'})`}
+              >
+                <div className="relative w-8 h-8 rounded-full overflow-hidden shrink-0 ring-2 ring-rose-500/50">
+                  {profile?.photos?.[0] ? (
+                    <img
+                      src={profile.photos[0]}
+                      alt={profile.name}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-xs">
+                      {(profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-stone-900" />
                 </div>
-              )}
-            </button>
+                <div className="hidden lg:flex flex-col text-left">
+                  <span className="text-xs font-bold text-stone-100 truncate max-w-[84px] leading-tight">
+                    {profile?.name || user?.email?.split('@')[0] || 'My Profile'}
+                  </span>
+                  <span className="text-[10px] text-rose-400 font-semibold leading-none">
+                    {user?.subscriptionTier || 'Member'}
+                  </span>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-200 transition shrink-0" />
+              </button>
+            ) : (
+              <button
+                id="btn-nav-signin"
+                onClick={onOpenAuth}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs shadow-md shadow-rose-900/30 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+              >
+                <UserIcon className="w-3.5 h-3.5" />
+                <span>Sign In</span>
+              </button>
+            )}
 
             {userMenuOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-stone-900 rounded-xl shadow-2xl border border-stone-700 py-2 z-50">
-                <div className="px-4 py-3 border-b border-stone-800">
-                  <div className="flex items-center gap-2">
-                    <div className="font-semibold text-stone-100 text-sm truncate">{profile?.name || 'Member'}</div>
-                    <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-[10px] font-semibold rounded">
-                      {t('memberBadge')}
-                    </span>
+              <div className="absolute right-0 mt-2 w-72 bg-stone-900 rounded-2xl shadow-2xl border border-stone-700 py-2.5 z-50 animate-in fade-in slide-in-from-top-2">
+                <div className="px-4 py-3 border-b border-stone-800 bg-stone-800/40 rounded-t-xl mb-1">
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-12 h-12 rounded-full overflow-hidden shrink-0 ring-2 ring-rose-500/50">
+                      {profile?.photos?.[0] ? (
+                        <img
+                          src={profile.photos[0]}
+                          alt={profile.name}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-base">
+                          {(profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-stone-100 text-sm truncate">
+                          {profile?.name || user?.email?.split('@')[0] || 'Member'}
+                        </span>
+                        <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 text-[9px] font-bold rounded uppercase tracking-wider">
+                          {user?.subscriptionTier || 'Free'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-stone-400 truncate">
+                        {user?.email || (profile?.username ? `@${profile.username}` : '')}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-stone-400 truncate">{user?.email}</div>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('profile');
+                      setUserMenuOpen(false);
+                    }}
+                    className="mt-3 w-full py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <UserIcon className="w-3.5 h-3.5 text-rose-400" />
+                    <span>View Public Profile</span>
+                  </button>
                 </div>
 
-                <div className="py-1">
+                <div className="py-1 px-1 space-y-0.5">
                   <button
                     onClick={() => {
                       onOpenProfile();
                       setUserMenuOpen(false);
                     }}
-                    className="w-full text-left px-4 py-2 text-xs text-stone-200 hover:bg-stone-800 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
                   >
-                    <UserIcon className="w-4 h-4 text-rose-400" />
-                    {t('profile')} & Preferences
+                    <UserIcon className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{t('profile')} & Preferences</span>
                   </button>
                   <button
                     onClick={() => {
                       onOpenSubscription();
                       setUserMenuOpen(false);
                     }}
-                    className="w-full text-left px-4 py-2 text-xs text-stone-200 hover:bg-stone-800 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
                   >
-                    <Crown className="w-4 h-4 text-amber-400" />
-                    Subscriptions ({user?.subscriptionTier})
+                    <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Subscriptions ({user?.subscriptionTier || 'Free'})</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      onOpenBoost();
+                      setUserMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
+                  >
+                    <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Boost Profile (10x Views)</span>
                   </button>
                   <button
                     onClick={() => {
                       onOpenLegal('disclosure');
                       setUserMenuOpen(false);
                     }}
-                    className="w-full text-left px-4 py-2 text-xs text-stone-200 hover:bg-stone-800 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
                   >
-                    <Shield className="w-4 h-4 text-sky-400" />
-                    {t('disclosure')}
+                    <Shield className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span>{t('disclosure')}</span>
                   </button>
                   <button
                     onClick={() => {
                       onOpenLegal('safety');
                       setUserMenuOpen(false);
                     }}
-                    className="w-full text-left px-4 py-2 text-xs text-stone-200 hover:bg-stone-800 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
                   >
-                    <Lock className="w-4 h-4 text-emerald-400" />
-                    {t('safety')}
+                    <Lock className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{t('safety')}</span>
                   </button>
                 </div>
 
-                <div className="border-t border-stone-800 pt-1 mt-1">
+                <div className="border-t border-stone-800 pt-1.5 mt-1 px-1">
                   <button
                     onClick={() => {
                       if (onLogout) {
@@ -580,10 +684,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       }
                       setUserMenuOpen(false);
                     }}
-                    className="w-full text-left px-4 py-2 text-xs text-rose-400 hover:bg-stone-800 font-medium flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-rose-400 hover:bg-rose-500/10 font-semibold flex items-center gap-2.5 transition cursor-pointer"
                   >
-                    <UserIcon className="w-4 h-4 text-rose-400" />
-                    {user ? 'Log Out' : 'Sign In / Register'}
+                    <UserIcon className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{user ? 'Log Out' : 'Sign In / Register'}</span>
                   </button>
                 </div>
               </div>

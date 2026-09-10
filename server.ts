@@ -1235,6 +1235,20 @@ app.get('/api/notifications', async (req, res) => {
   }
 });
 
+app.post('/api/notifications/read-all', async (req, res) => {
+  try {
+    const user = (req as any).user;
+    if (user) {
+      await db.update(pgNotifications)
+        .set({ isRead: 1 })
+        .where(eq(pgNotifications.userId, user.id));
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: true });
+  }
+});
+
 app.post('/api/notifications/:id/read', async (req, res) => {
   try {
     const user = (req as any).user;

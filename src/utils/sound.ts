@@ -142,6 +142,63 @@ class SoundManager {
       });
     } catch (e) {}
   }
+
+  // Authentic Facebook-Style Notification Pop / Chime (Glassy high chime ping)
+  public playNotificationPop() {
+    try {
+      this.unlock();
+      const ctx = this.getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+
+      // Note 1: 587.33 Hz (D5) - Warm pleasant strike
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, now);
+
+      gain1.gain.setValueAtTime(0, now);
+      gain1.gain.linearRampToValueAtTime(0.22, now + 0.015);
+      gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.4);
+
+      // Note 2: 880 Hz (A5) - High bright chime triggered 85ms after Note 1
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(880, now + 0.085);
+
+      gain2.gain.setValueAtTime(0, now + 0.085);
+      gain2.gain.linearRampToValueAtTime(0.26, now + 0.10);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.085);
+      osc2.stop(now + 0.7);
+
+      // Sparkle Harmonic: 1760 Hz (A6) subtle crystal overtone
+      const osc3 = ctx.createOscillator();
+      const gain3 = ctx.createGain();
+      osc3.type = 'triangle';
+      osc3.frequency.setValueAtTime(1760, now + 0.095);
+
+      gain3.gain.setValueAtTime(0, now + 0.095);
+      gain3.gain.linearRampToValueAtTime(0.07, now + 0.11);
+      gain3.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+
+      osc3.connect(gain3);
+      gain3.connect(ctx.destination);
+      osc3.start(now + 0.095);
+      osc3.stop(now + 0.4);
+    } catch (e) {
+      console.warn('Notification sound error:', e);
+    }
+  }
 }
 
 export const soundManager = new SoundManager();

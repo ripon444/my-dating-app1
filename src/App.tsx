@@ -299,8 +299,31 @@ function MainApp() {
     });
 
     socket.on('notification:new', (notif: any) => {
-      setNotifications((prev) => [notif, ...prev]);
+      setNotifications((prev) => {
+        if (prev.some((n) => n.id === notif.id)) return prev;
+        return [notif, ...prev];
+      });
+      soundManager.playNotificationPop();
     });
+
+    // Periodic notifications sync to ensure all-time updates even if socket fluctuates
+    const notifSyncInterval = setInterval(async () => {
+      if (currentUser?.id) {
+        try {
+          const res = await api.getNotifications();
+          if (res?.notifications) {
+            setNotifications((prev) => {
+              const prevIds = new Set(prev.map((n) => n.id));
+              const newlyReceived = res.notifications.filter((n: any) => !prevIds.has(n.id));
+              if (newlyReceived.length > 0 && newlyReceived.some((n: any) => !n.is_read)) {
+                soundManager.playNotificationPop();
+              }
+              return res.notifications;
+            });
+          }
+        } catch (err) {}
+      }
+    }, 15000);
 
     const handleUrlChange = () => {
       if (typeof window === 'undefined') return;
@@ -333,11 +356,14 @@ function MainApp() {
     window.addEventListener('hashchange', handleUrlChange);
 
     return () => {
+      clearInterval(notifSyncInterval);
+      socket.off('connect', emitUserJoin);
       socket.off('match:created');
       socket.off('call:incoming');
       socket.off('call:accepted');
       socket.off('call:rejected');
       socket.off('call:ended');
+      socket.off('notification:new');
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
     };
@@ -533,6 +559,13 @@ function MainApp() {
     setIsAuthOpen(true);
   };
 
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: 1 })));
+    } catch (e) {}
+  };
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans selection:bg-rose-500 selection:text-white">
       
@@ -559,6 +592,7 @@ function MainApp() {
         onSelectNotificationProfile={(profileOrUserId) => {
           setSelectedPublicUserId(profileOrUserId);
         }}
+        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
       />
 
       {/* Main App Layout */}
@@ -571,6 +605,7 @@ function MainApp() {
           matchesCount={matches.length}
           unreadMessagesCount={conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0)}
           user={currentUser}
+          profile={currentProfile}
           onOpenLegal={handleOpenLegalModal}
         />
 

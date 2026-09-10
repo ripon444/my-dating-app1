@@ -11,7 +11,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
-import { User } from '../types';
+import { User, Profile } from '../types';
 
 interface SidebarProps {
   activeTab: string;
@@ -19,6 +19,7 @@ interface SidebarProps {
   matchesCount: number;
   unreadMessagesCount: number;
   user: User | null;
+  profile?: Profile | null;
   onOpenLegal: (tab: string) => void;
 }
 
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   matchesCount,
   unreadMessagesCount,
   user,
+  profile,
   onOpenLegal,
 }) => {
   const { t } = useTranslation();
@@ -51,6 +53,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
+            const isProfile = item.id === 'profile';
+            const userAvatar = profile?.photos?.[0];
+
             return (
               <button
                 key={item.id}
@@ -62,7 +67,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <Icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-stone-400'}`} />
+                  {isProfile && userAvatar ? (
+                    <div className={`w-6 h-6 rounded-full overflow-hidden shrink-0 border transition ${
+                      isActive ? 'border-white shadow-sm' : 'border-stone-500'
+                    }`}>
+                      <img
+                        src={userAvatar}
+                        alt={profile?.name || 'Profile'}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  ) : (
+                    <Icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-stone-400'}`} />
+                  )}
                   <span>{item.label}</span>
                 </div>
                 {item.badge !== undefined && (
@@ -101,20 +119,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-stone-900/95 backdrop-blur-md border-t border-stone-800 px-3 py-2 flex items-center justify-around">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-stone-900/95 backdrop-blur-md border-t border-stone-800 px-2 py-1.5 flex items-center justify-around shadow-2xl">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
+          const isProfile = item.id === 'profile';
+          const userAvatar = profile?.photos?.[0];
+
           return (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center gap-1 p-2 rounded-xl text-[10px] font-medium transition ${
+              className={`relative flex flex-col items-center justify-center gap-1 py-1 px-2.5 rounded-xl text-[10px] font-medium transition min-w-[56px] ${
                 isActive ? 'text-rose-500 font-bold' : 'text-stone-400 hover:text-stone-200'
               }`}
             >
-              <Icon className="w-5 h-5" />
-              <span>{item.label}</span>
+              {isProfile && userAvatar ? (
+                <div className={`relative w-7 h-7 rounded-full overflow-hidden border-2 transition ${
+                  isActive
+                    ? 'border-rose-500 ring-2 ring-rose-500/40 scale-110 shadow-md shadow-rose-900/40'
+                    : 'border-stone-600'
+                }`}>
+                  <img
+                    src={userAvatar}
+                    alt={profile?.name || 'Profile'}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 border border-stone-900" />
+                </div>
+              ) : isProfile && user ? (
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition ${
+                  isActive
+                    ? 'bg-rose-500 text-white ring-2 ring-rose-500/40 scale-110'
+                    : 'bg-stone-800 text-stone-300 border border-stone-700'
+                }`}>
+                  {(profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
+                </div>
+              ) : (
+                <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
+              )}
+              <span className="truncate max-w-[58px]">{item.label}</span>
               {item.badge !== undefined && (
                 <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-rose-500 animate-ping" />
               )}
