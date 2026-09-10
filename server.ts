@@ -1055,17 +1055,32 @@ app.post('/api/users/:id/follow', async (req, res) => {
 
     // Emit Real-time Notification via Socket.IO
     if (followResult.notification) {
+      const notifId = followResult.notification.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const notifCreatedAt = new Date().toISOString();
       const socketPayload = {
+        id: notifId,
+        user_id: targetUserId,
         type: 'follow',
         title: 'New Follower! 👤',
         message: `${followResult.notification.followerName} started following your profile.`,
         data: {
           followerId,
           followerName: followResult.notification.followerName,
+          followerPhoto: followResult.notification.followerPhoto,
+          profileId: followerId,
+          userId: followerId,
         },
-        createdAt: new Date().toISOString(),
+        is_read: false,
+        created_at: notifCreatedAt,
       };
+
       io.to(`user_${targetUserId}`).emit('notification:new', socketPayload);
+      if (targetId && targetId !== targetUserId) {
+        io.to(`user_${targetId}`).emit('notification:new', socketPayload);
+      }
+      if (targetProfileRow?.id && targetProfileRow.id !== targetUserId) {
+        io.to(`user_${targetProfileRow.id}`).emit('notification:new', socketPayload);
+      }
     }
 
     // Broadcast follow:update to all connected clients
@@ -1205,28 +1220,66 @@ app.post('/api/users/:id/unblock', async (req, res) => {
   }
 });
 
-// User Notifications (including Follow notifications)
+// User Notifications (including Follow, Like, and Match notifications)
 app.get('/api/notifications', async (req, res) => {
   try {
     const user = (req as any).user;
     if (!user) return res.json({ notifications: [] });
 
-    // Fetch from PostgreSQL
-    const notifs = await db.select().from(pgNotifications)
-      .where(eq(pgNotifications.userId, user.id))
-      .orderBy(desc(pgNotifications.createdAt))
-      .limit(50);
+    // Fetch from SQLite (local instant cache)
+    const sqliteNotifs = await SqlHelper.queryAll<any>(
+      'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+      [user.id]
+    ).catch(() => []);
 
-    const formatted = notifs.map(n => ({
-      id: n.id,
-      user_id: n.userId,
-      type: n.type as any,
-      title: n.title,
-      message: n.message,
-      data: n.dataJson ? JSON.parse(n.dataJson) : {},
-      is_read: Boolean(n.isRead),
-      created_at: n.createdAt?.toISOString() || new Date().toISOString(),
-    }));
+    // Fetch from PostgreSQL (Cloud SQL persistent)
+    let pgNotifs: any[] = [];
+    try {
+      pgNotifs = await db.select().from(pgNotifications)
+        .where(eq(pgNotifications.userId, user.id))
+        .orderBy(desc(pgNotifications.createdAt))
+        .limit(50);
+    } catch (pgErr) {}
+
+    const combinedMap = new Map<string, any>();
+
+    for (const sn of sqliteNotifs) {
+      let data = {};
+      try {
+        data = typeof sn.data_json === 'string' ? JSON.parse(sn.data_json) : (sn.data_json || {});
+      } catch {}
+      combinedMap.set(sn.id, {
+        id: sn.id,
+        user_id: sn.user_id,
+        type: sn.type || 'follow',
+        title: sn.title,
+        message: sn.message,
+        data,
+        is_read: Boolean(sn.is_read),
+        created_at: sn.created_at || new Date().toISOString(),
+      });
+    }
+
+    for (const pn of pgNotifs) {
+      let data = {};
+      try {
+        data = pn.dataJson ? (typeof pn.dataJson === 'string' ? JSON.parse(pn.dataJson) : pn.dataJson) : {};
+      } catch {}
+      combinedMap.set(pn.id, {
+        id: pn.id,
+        user_id: pn.userId,
+        type: (pn.type as any) || 'follow',
+        title: pn.title,
+        message: pn.message,
+        data,
+        is_read: Boolean(pn.isRead),
+        created_at: pn.createdAt?.toISOString() || new Date().toISOString(),
+      });
+    }
+
+    const formatted = Array.from(combinedMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
 
     res.json({ notifications: formatted });
   } catch (error) {
@@ -1239,9 +1292,15 @@ app.post('/api/notifications/read-all', async (req, res) => {
   try {
     const user = (req as any).user;
     if (user) {
-      await db.update(pgNotifications)
-        .set({ isRead: 1 })
-        .where(eq(pgNotifications.userId, user.id));
+      try {
+        await db.update(pgNotifications)
+          .set({ isRead: 1 })
+          .where(eq(pgNotifications.userId, user.id));
+      } catch {}
+      await SqlHelper.execute(
+        'UPDATE notifications SET is_read = 1 WHERE user_id = ?',
+        [user.id]
+      ).catch(() => {});
     }
     res.json({ success: true });
   } catch (error) {
@@ -1253,9 +1312,15 @@ app.post('/api/notifications/:id/read', async (req, res) => {
   try {
     const user = (req as any).user;
     if (user) {
-      await db.update(pgNotifications)
-        .set({ isRead: 1 })
-        .where(eq(pgNotifications.id, req.params.id));
+      try {
+        await db.update(pgNotifications)
+          .set({ isRead: 1 })
+          .where(eq(pgNotifications.id, req.params.id));
+      } catch {}
+      await SqlHelper.execute(
+        'UPDATE notifications SET is_read = 1 WHERE id = ?',
+        [req.params.id]
+      ).catch(() => {});
     }
     res.json({ success: true });
   } catch (error) {
@@ -1583,10 +1648,24 @@ app.post('/api/likes', async (req, res) => {
   let isMatch = false;
   let matchData: any = null;
 
+  // Resolve sender profile info for notification
+  const senderProfRow = await SqlHelper.queryOne<any>(
+    'SELECT * FROM profiles WHERE user_id = ? OR id = ?',
+    [user.id, user.id]
+  ).catch(() => null);
+  const senderName = senderProfRow?.name || user.email?.split('@')[0] || 'Someone';
+  let senderPhoto: string | null = null;
+  try {
+    if (senderProfRow?.photos_json) {
+      senderPhoto = JSON.parse(senderProfRow.photos_json)[0];
+    }
+  } catch {}
+
+  const targetUserId = targetProfile?.user_id || (targetProfileRow as any)?.user_id || receiver_id;
+
   if (targetProfile && (mutual || targetProfile.id === 'prf_nat_01' || targetProfile.id === 'prf_nat_02')) {
     isMatch = true;
     const matchId = 'mtc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-    const targetUserId = targetProfile.user_id || targetProfile.id;
 
     // Insert Match into SQL database
     await SqlHelper.execute(
@@ -1610,6 +1689,91 @@ app.post('/api/likes', async (req, res) => {
     // Emit real-time match event
     io.to(`user_${targetUserId}`).emit('match:created', matchData);
     io.emit('match:created', matchData);
+
+    // Create Match notification for target user
+    const notifId = 'notif_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    const notifData = JSON.stringify({
+      matchId,
+      conversationId: convId,
+      userId: user.id,
+      profileId: senderProfRow?.id || user.id,
+      name: senderName,
+      photo: senderPhoto,
+    });
+    await SqlHelper.execute(
+      'INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
+      [notifId, targetUserId, 'match', "It's a Match! 🎉", `You and ${senderName} liked each other!`, notifData, now]
+    ).catch(() => {});
+
+    io.to(`user_${targetUserId}`).emit('notification:new', {
+      id: notifId,
+      user_id: targetUserId,
+      type: 'match',
+      title: "It's a Match! 🎉",
+      message: `You and ${senderName} liked each other!`,
+      data: {
+        matchId,
+        conversationId: convId,
+        userId: user.id,
+        profileId: senderProfRow?.id || user.id,
+        name: senderName,
+        photo: senderPhoto,
+      },
+      is_read: false,
+      created_at: now,
+    });
+  } else {
+    // Like / Super Like notification for target user
+    const notifId = 'notif_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    const notifTitle = is_super_like ? 'Super Like! ⭐' : 'New Like! ❤️';
+    const notifMessage = is_super_like ? `${senderName} super liked your profile!` : `${senderName} liked your profile.`;
+    const notifData = JSON.stringify({
+      userId: user.id,
+      profileId: senderProfRow?.id || user.id,
+      name: senderName,
+      photo: senderPhoto,
+      isSuperLike: Boolean(is_super_like),
+    });
+
+    await SqlHelper.execute(
+      'INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
+      [notifId, targetUserId, is_super_like ? 'super_like' : 'like', notifTitle, notifMessage, notifData, now]
+    ).catch(() => {});
+
+    io.to(`user_${targetUserId}`).emit('notification:new', {
+      id: notifId,
+      user_id: targetUserId,
+      type: is_super_like ? 'super_like' : 'like',
+      title: notifTitle,
+      message: notifMessage,
+      data: {
+        userId: user.id,
+        profileId: senderProfRow?.id || user.id,
+        name: senderName,
+        photo: senderPhoto,
+        isSuperLike: Boolean(is_super_like),
+      },
+      is_read: false,
+      created_at: now,
+    });
+    if (receiver_id !== targetUserId) {
+      io.to(`user_${receiver_id}`).emit('notification:new', {
+        id: notifId,
+        user_id: receiver_id,
+        type: is_super_like ? 'super_like' : 'like',
+        title: notifTitle,
+        message: notifMessage,
+        data: {
+          userId: user.id,
+          profileId: senderProfRow?.id || user.id,
+          name: senderName,
+          photo: senderPhoto,
+          isSuperLike: Boolean(is_super_like),
+        },
+        is_read: false,
+        created_at: now,
+      });
+    }
   }
 
   res.json({

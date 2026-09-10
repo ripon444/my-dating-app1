@@ -218,7 +218,7 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
 
         {/* Footer */}
         <div className="p-3 bg-neutral-950 border-t border-neutral-800 text-center text-[11px] text-neutral-500">
-          Showing real registered users stored in Cloud SQL PostgreSQL
+          Showing verified registered members
         </div>
       </motion.div>
     </div>

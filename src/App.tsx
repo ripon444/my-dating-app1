@@ -248,6 +248,16 @@ function MainApp() {
       const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
       if (myId) {
         socket.emit('user:join', { userId: myId });
+        socket.emit('user:online', { userId: myId });
+      }
+      if (currentUser?.id && currentUser.id !== myId) {
+        socket.emit('user:join', { userId: currentUser.id });
+      }
+      if (currentProfile?.user_id && currentProfile.user_id !== myId) {
+        socket.emit('user:join', { userId: currentProfile.user_id });
+      }
+      if (currentProfile?.id && currentProfile.id !== myId) {
+        socket.emit('user:join', { userId: currentProfile.id });
       }
     };
 
@@ -259,6 +269,29 @@ function MainApp() {
       setIsMatchModalOpen(true);
       api.getMatches().then((m) => setMatches(m.matches));
       api.getConversations().then((c) => setConversations(c.conversations));
+      api.getNotifications().then((n) => setNotifications(n.notifications)).catch(() => {});
+    });
+
+    socket.on('follow:update', (data: any) => {
+      const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+      const isMe = 
+        data?.targetUserId === myId || 
+        data?.targetUserId === currentProfile?.id || 
+        data?.targetUserId === currentProfile?.user_id ||
+        data?.followerId === myId;
+
+      if (isMe) {
+        api.getNotifications().then((res) => {
+          if (res?.notifications) {
+            setNotifications(res.notifications);
+          }
+        }).catch(() => {});
+        if (data?.targetUserId === myId || data?.targetUserId === currentProfile?.id || data?.targetUserId === currentProfile?.user_id) {
+          if (typeof data.followersCount === 'number') {
+            setCurrentProfile((prev) => prev ? { ...prev, followers_count: data.followersCount } : prev);
+          }
+        }
+      }
     });
 
     socket.on('call:incoming', (callData: Call) => {
@@ -306,7 +339,7 @@ function MainApp() {
       soundManager.playNotificationPop();
     });
 
-    // Periodic notifications sync to ensure all-time updates even if socket fluctuates
+    // Periodic notifications sync to ensure all-time live updates
     const notifSyncInterval = setInterval(async () => {
       if (currentUser?.id) {
         try {
@@ -323,7 +356,7 @@ function MainApp() {
           }
         } catch (err) {}
       }
-    }, 15000);
+    }, 8000);
 
     const handleUrlChange = () => {
       if (typeof window === 'undefined') return;

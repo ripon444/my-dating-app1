@@ -323,13 +323,33 @@ export async function followUser(followerId: string, followingId: string) {
       }
     }
 
-    // 4. Resolve follower name for notification
+    // 4. Resolve follower name and photo for notification
     let followerName = 'Someone';
     let followerPhoto: string | null = null;
-    const sqliteProfile = await SqlHelper.queryOne<any>('SELECT name, photos_json FROM profiles WHERE user_id = ?', [followerId]).catch(() => null);
+    const sqliteProfile = await SqlHelper.queryOne<any>(
+      'SELECT name, photos_json FROM profiles WHERE user_id = ? OR id = ?',
+      [followerId, followerId]
+    ).catch(() => null);
     if (sqliteProfile?.name) {
       followerName = sqliteProfile.name;
-      followerPhoto = sqliteProfile.photos_json ? JSON.parse(sqliteProfile.photos_json)[0] : null;
+      try {
+        followerPhoto = sqliteProfile.photos_json ? JSON.parse(sqliteProfile.photos_json)[0] : null;
+      } catch {}
+    } else {
+      const userRow = await SqlHelper.queryOne<any>('SELECT email FROM users WHERE id = ?', [followerId]).catch(() => null);
+      if (userRow?.email) {
+        followerName = userRow.email.split('@')[0];
+      }
+    }
+
+    // Resolve target following user id (if a profile id was passed)
+    let recipientUserId = followingId;
+    const targetProfileRow = await SqlHelper.queryOne<any>(
+      'SELECT user_id, id FROM profiles WHERE id = ? OR user_id = ?',
+      [followingId, followingId]
+    ).catch(() => null);
+    if (targetProfileRow?.user_id) {
+      recipientUserId = targetProfileRow.user_id;
     }
 
     // 5. Create notification for target user in SQLite & Postgres
@@ -339,11 +359,13 @@ export async function followUser(followerId: string, followingId: string) {
       followerId,
       followerName,
       followerPhoto,
+      userId: followerId,
+      profileId: sqliteProfile?.id || followerId,
     });
 
     await SqlHelper.execute(
       'INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
-      [notifId, followingId, 'follow', 'New Follower! 👤', `${followerName} started following your profile.`, dataJson, now]
+      [notifId, recipientUserId, 'follow', 'New Follower! 👤', `${followerName} started following your profile.`, dataJson, now]
     ).catch(() => {});
 
     if (pool) {
@@ -352,7 +374,7 @@ export async function followUser(followerId: string, followingId: string) {
         try {
           await client.query(
             'INSERT INTO notifications (id, user_id, type, title, message, data_json, is_read, created_at) VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())',
-            [notifId, followingId, 'follow', 'New Follower! 👤', `${followerName} started following your profile.`, dataJson]
+            [notifId, recipientUserId, 'follow', 'New Follower! 👤', `${followerName} started following your profile.`, dataJson]
           );
         } finally {
           client.release();
@@ -370,9 +392,10 @@ export async function followUser(followerId: string, followingId: string) {
       followingCount,
       notification: {
         id: notifId,
-        recipientUserId: followingId,
+        recipientUserId,
         followerId,
         followerName,
+        followerPhoto,
       }
     };
   } catch (error: any) {

@@ -18,7 +18,7 @@ import {
   Users,
   Bell,
   X,
-  Volume2
+  UserPlus
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
@@ -278,15 +278,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>Notifications & Activity</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => soundManager.playNotificationPop()}
-                      className="flex items-center gap-1 text-[10px] text-stone-300 hover:text-white bg-stone-800 hover:bg-stone-700 px-2 py-0.5 rounded-md border border-stone-700 transition cursor-pointer"
-                      title="Test Facebook-style notification sound"
-                    >
-                      <Volume2 className="w-3 h-3 text-rose-400" />
-                      <span>FB Chime</span>
-                    </button>
                     {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
                       <button
                         type="button"
@@ -305,42 +296,84 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <Bell className="w-7 h-7 text-neutral-600 mx-auto" />
                       <p className="font-semibold text-neutral-300">All caught up!</p>
                       <p className="text-[11px] text-neutral-400 max-w-xs mx-auto">
-                        Real-time updates, likes, matches, and follows will alert you here with Facebook-style notification chime sound.
+                        New followers, likes, matches, and messages will arrive here with live notification sound.
                       </p>
                     </div>
                   ) : (
-                    notifications.map((notif) => (
-                      <div
-                        key={notif.id}
-                        onClick={() => {
-                          setNotifMenuOpen(false);
-                          const targetId = notif.data?.followerId || notif.data?.userId || notif.user_id;
-                          if (targetId) {
-                            onSelectNotificationProfile?.(targetId);
-                          }
-                        }}
-                        className={`p-3 text-xs hover:bg-neutral-800/80 cursor-pointer transition flex items-start gap-2.5 ${
-                          !notif.is_read ? 'bg-rose-950/20' : ''
-                        }`}
-                      >
-                        <div className="mt-0.5 shrink-0">
-                          {!notif.is_read ? (
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block ring-2 ring-rose-500/20 animate-pulse" />
-                          ) : (
-                            <span className="w-2.5 h-2.5 rounded-full bg-stone-700 inline-block" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1 mb-0.5">
-                            <span className="font-bold text-white truncate">{notif.title}</span>
-                            <span className="text-[10px] text-neutral-500 shrink-0">
-                              {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                    notifications.map((notif) => {
+                      const avatarPhoto = notif.data?.followerPhoto || notif.data?.photo;
+                      const displayName = notif.data?.followerName || notif.data?.name || notif.title;
+                      const timeString = (() => {
+                        const rawTime = notif.created_at || (notif as any).createdAt;
+                        if (!rawTime) return 'Just now';
+                        const d = new Date(rawTime);
+                        if (isNaN(d.getTime())) return 'Just now';
+                        const diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+                        if (diffSec < 45) return 'Just now';
+                        const diffMin = Math.floor(diffSec / 60);
+                        if (diffMin < 60) return `${diffMin}m ago`;
+                        const diffHour = Math.floor(diffMin / 60);
+                        if (diffHour < 24) return `${diffHour}h ago`;
+                        const diffDay = Math.floor(diffHour / 24);
+                        if (diffDay === 1) return 'Yesterday';
+                        if (diffDay < 7) return `${diffDay}d ago`;
+                        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                      })();
+
+                      return (
+                        <div
+                          key={notif.id}
+                          onClick={() => {
+                            setNotifMenuOpen(false);
+                            const targetId = notif.data?.followerId || notif.data?.profileId || notif.data?.userId || notif.user_id;
+                            if (targetId) {
+                              onSelectNotificationProfile?.(targetId);
+                            }
+                          }}
+                          className={`p-3 text-xs hover:bg-neutral-800/80 cursor-pointer transition flex items-start gap-2.5 ${
+                            !notif.is_read ? 'bg-rose-950/20' : ''
+                          }`}
+                        >
+                          {/* Avatar or Icon */}
+                          <div className="relative shrink-0 mt-0.5">
+                            {avatarPhoto ? (
+                              <img
+                                src={avatarPhoto}
+                                alt={displayName}
+                                className="w-8 h-8 rounded-full object-cover ring-1 ring-neutral-700"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center text-rose-400">
+                                {notif.type === 'follow' ? (
+                                  <UserPlus className="w-4 h-4 text-rose-400" />
+                                ) : notif.type === 'like' || notif.type === 'super_like' ? (
+                                  <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
+                                ) : notif.type === 'match' ? (
+                                  <Sparkles className="w-4 h-4 text-amber-400" />
+                                ) : (
+                                  <Bell className="w-4 h-4 text-rose-400" />
+                                )}
+                              </div>
+                            )}
+                            {!notif.is_read && (
+                              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-neutral-900 animate-pulse" />
+                            )}
                           </div>
-                          <p className="text-neutral-300 text-[11px] leading-relaxed">{notif.message}</p>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <span className="font-bold text-white truncate text-xs">{notif.title}</span>
+                              <span className="text-[10px] text-rose-400/90 font-medium shrink-0">
+                                {timeString}
+                              </span>
+                            </div>
+                            <p className="text-neutral-300 text-[11px] leading-relaxed line-clamp-2">{notif.message}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

@@ -291,13 +291,6 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
               })
             )}
           </div>
-
-          {/* Footer */}
-          <div className="p-3.5 bg-neutral-950 border-t border-neutral-800 text-center">
-            <p className="text-[11px] text-neutral-500">
-              Relationships are stored in Cloud SQL PostgreSQL for maximum reliability.
-            </p>
-          </div>
         </motion.div>
       </div>
     </AnimatePresence>

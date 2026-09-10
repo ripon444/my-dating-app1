@@ -75,14 +75,16 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
     setIsFollowing(!prev);
     setFollowersCount(prev ? Math.max(0, prevCount - 1) : prevCount + 1);
 
+    const targetId = profile.user_id || profile.id;
+
     try {
-      if (profile.user_id) {
+      if (targetId) {
         if (prev) {
-          const res = await api.unfollowUser(profile.user_id);
+          const res = await api.unfollowUser(targetId);
           setFollowersCount(res.followersCount);
           setIsFollowing(false);
         } else {
-          const res = await api.followUser(profile.user_id);
+          const res = await api.followUser(targetId);
           setFollowersCount(res.followersCount);
           setIsFollowing(true);
         }
