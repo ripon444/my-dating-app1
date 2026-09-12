@@ -50,6 +50,7 @@ interface ProfileSettingsHubProps {
   onOpenBoost: () => void;
   onLogout: () => void;
   onUpdateProfile?: (data: Partial<Profile>) => Promise<any> | void;
+  initialSection?: string | null;
 }
 
 export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
@@ -61,6 +62,7 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
   onOpenBoost,
   onLogout,
   onUpdateProfile,
+  initialSection = null,
 }) => {
   const { t, currentLanguage, setLanguage } = useTranslation();
 
@@ -163,6 +165,35 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     const interval = setInterval(checkBoostTimer, 30000);
     return () => clearInterval(interval);
   }, [boostExpiresAt]);
+
+  // Scroll/open requested Settings Hub section (wired to existing slide-out menu).
+  // Accepts optional "#nonce" suffix so repeated menu selections re-trigger.
+  useEffect(() => {
+    const raw = initialSection || '';
+    const section = raw.includes('#') ? raw.split('#')[0] : raw;
+    if (!section) return;
+
+    if (section === 'blocked_users' || section === 'blocked') {
+      setActiveSection('blocked_users');
+      loadBlockedUsers();
+    } else if (section === 'sessions' || section === 'security') {
+      loadSessions();
+    }
+
+    const sectionId =
+      section === 'blocked_users' || section === 'blocked' || section === 'privacy'
+        ? 'section-settings'
+        : section === 'sessions'
+        ? 'section-security'
+        : section === 'search-settings'
+        ? 'section-settings'
+        : `section-${section}`;
+
+    const timer = window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [initialSection]);
 
   // Load Subscription & Payment info
   const loadSubscriptionData = async () => {

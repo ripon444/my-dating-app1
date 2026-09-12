@@ -28,6 +28,122 @@ import { User, Profile } from '../types';
 import { Logo } from './Logo';
 import { soundManager } from '../utils/sound';
 
+export function formatNotificationTime(rawTime?: string) {
+  if (!rawTime) return 'Just now';
+  const d = new Date(rawTime);
+  if (isNaN(d.getTime())) return 'Just now';
+  const diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (diffSec < 45) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay === 1) return 'Yesterday';
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+export const NotificationsPanel: React.FC<{
+  notifications?: any[];
+  unreadNotificationsCount?: number;
+  onSelectNotificationProfile?: (profileIdOrUserId: string) => void;
+  onMarkAllNotificationsRead?: () => void;
+  onItemClick?: () => void;
+  compact?: boolean;
+}> = ({
+  notifications = [],
+  unreadNotificationsCount = 0,
+  onSelectNotificationProfile,
+  onMarkAllNotificationsRead,
+  onItemClick,
+  compact = false,
+}) => (
+  <>
+    <div className="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+      <div className="font-bold text-white text-xs flex items-center gap-1.5">
+        <Bell className="w-3.5 h-3.5 text-rose-500" />
+        <span>Notifications & Activity</span>
+      </div>
+      {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
+        <button
+          type="button"
+          onClick={onMarkAllNotificationsRead}
+          className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+        >
+          Mark all read
+        </button>
+      )}
+    </div>
+    <div className={`${compact ? 'max-h-80' : 'max-h-[70vh]'} overflow-y-auto divide-y divide-neutral-800/60`}>
+      {notifications.length === 0 ? (
+        <div className="p-6 text-center text-xs text-neutral-400 space-y-2">
+          <Bell className="w-7 h-7 text-neutral-600 mx-auto" />
+          <p className="font-semibold text-neutral-300">All caught up!</p>
+          <p className="text-[11px] text-neutral-400 max-w-xs mx-auto">
+            New followers, likes, matches, and messages will arrive here with live notification sound.
+          </p>
+        </div>
+      ) : (
+        notifications.map((notif) => {
+          const avatarPhoto = notif.data?.followerPhoto || notif.data?.photo;
+          const displayName = notif.data?.followerName || notif.data?.name || notif.title;
+          const timeString = formatNotificationTime(notif.created_at || (notif as any).createdAt);
+
+          return (
+            <div
+              key={notif.id}
+              onClick={() => {
+                onItemClick?.();
+                const targetId = notif.data?.followerId || notif.data?.profileId || notif.data?.userId || notif.user_id;
+                if (targetId) {
+                  onSelectNotificationProfile?.(targetId);
+                }
+              }}
+              className={`p-3 text-xs hover:bg-neutral-800/80 cursor-pointer transition flex items-start gap-2.5 ${
+                !notif.is_read ? 'bg-rose-950/20' : ''
+              }`}
+            >
+              <div className="relative shrink-0 mt-0.5">
+                {avatarPhoto ? (
+                  <img
+                    src={avatarPhoto}
+                    alt={displayName}
+                    className="w-8 h-8 rounded-full object-cover ring-1 ring-neutral-700"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center text-rose-400">
+                    {notif.type === 'follow' ? (
+                      <UserPlus className="w-4 h-4 text-rose-400" />
+                    ) : notif.type === 'like' || notif.type === 'super_like' ? (
+                      <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
+                    ) : notif.type === 'match' ? (
+                      <Sparkles className="w-4 h-4 text-amber-400" />
+                    ) : (
+                      <Bell className="w-4 h-4 text-rose-400" />
+                    )}
+                  </div>
+                )}
+                {!notif.is_read && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-neutral-900 animate-pulse" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-1 mb-0.5">
+                  <span className="font-bold text-white truncate text-xs">{notif.title}</span>
+                  <span className="text-[10px] text-rose-400/90 font-medium shrink-0">{timeString}</span>
+                </div>
+                <p className="text-neutral-300 text-[11px] leading-relaxed line-clamp-2">{notif.message}</p>
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  </>
+);
+
 interface NavbarProps {
   user: User | null;
   profile: Profile | null;
@@ -120,33 +236,39 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full bg-stone-900/95 backdrop-blur-md border-b border-stone-800 safe-area-pt">
-      <div className="w-full max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-2">
+      <div className="w-full max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-1 sm:gap-2 overflow-x-clip min-w-0">
         
         {/* Brand Logo & Tagline (Click returns to Home Grid) */}
         <div 
           id="brand-logo-button"
-          className="cursor-pointer transition-transform active:scale-95 group select-none shrink-0" 
+          className="cursor-pointer transition-transform active:scale-95 group select-none shrink-0 min-w-0" 
           onClick={() => {
-            setActiveTab('discover');
+            setActiveTab('home');
             setViewMode('grid');
             if (setSearchQuery) setSearchQuery('');
             if (onResetHome) onResetHome();
           }}
           title="Return to Home Feed"
         >
-          <Logo size="md" subtitle="Unified Global & Partner Dating" />
+          {/* Compact branding on narrow phones to preserve header room; full branding on sm+ */}
+          <div className="sm:hidden">
+            <Logo size="sm" />
+          </div>
+          <div className="hidden sm:block">
+            <Logo size="md" subtitle="Unified Global & Partner Dating" />
+          </div>
         </div>
 
         {/* Center Quick Navigation (Desktop) with Facebook-style Home button */}
         <nav className="hidden md:flex items-center gap-1 bg-stone-800/60 p-1 rounded-xl border border-stone-700/50">
           <button
             onClick={() => {
-              setActiveTab('discover');
+              setActiveTab('home');
               setViewMode('grid');
               if (onResetHome) onResetHome();
             }}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'discover'
+              activeTab === 'home' || activeTab === 'discover'
                 ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
                 : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
             }`}
@@ -201,7 +323,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Right Tools: View Toggle, Search, Filters, Boost, Subscription, Language, Profile */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0 shrink-0 ml-auto">
           
           {/* Search Button / Input */}
           {setSearchQuery && (
@@ -249,11 +371,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setIsSearchOpen(true);
                     if (activeTab !== 'discover') setActiveTab('discover');
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-medium transition cursor-pointer"
+                  className="flex items-center justify-center p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition cursor-pointer shrink-0 min-w-[36px] min-h-[36px] sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium"
                   title="Search Profiles"
+                  aria-label="Search Profiles"
                 >
-                  <Search className="w-3.5 h-3.5 text-rose-400" />
-                  <span className="hidden sm:inline">Search</span>
+                  <Search className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span className="hidden sm:inline whitespace-nowrap">Search</span>
                 </button>
               )}
             </div>
@@ -281,7 +404,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               setActiveTab('messages');
               soundManager.unlock();
             }}
-            className="md:hidden relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer"
+            aria-label="Messages"
+            className="md:hidden relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
             title="Messages & Chats"
           >
             <MessageCircle className="w-4 h-4 text-stone-300" />
@@ -300,8 +424,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 setNotifMenuOpen(!notifMenuOpen);
                 soundManager.unlock();
               }}
-              className="relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer"
+              className="relative p-2 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition shrink-0 cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
               title="Notifications & Activity"
+              aria-label="Notifications & Activity"
             >
               <Bell className="w-4 h-4 text-stone-300" />
               {unreadNotificationsCount > 0 && (
@@ -312,117 +437,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {notifMenuOpen && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-800 py-2.5 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                <div className="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
-                  <div className="font-bold text-white text-xs flex items-center gap-1.5">
-                    <Bell className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Notifications & Activity</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
-                      <button
-                        type="button"
-                        onClick={onMarkAllNotificationsRead}
-                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
-                      >
-                        Mark all read
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="max-h-80 overflow-y-auto divide-y divide-neutral-800/60">
-                  {notifications.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-neutral-400 space-y-2">
-                      <Bell className="w-7 h-7 text-neutral-600 mx-auto" />
-                      <p className="font-semibold text-neutral-300">All caught up!</p>
-                      <p className="text-[11px] text-neutral-400 max-w-xs mx-auto">
-                        New followers, likes, matches, and messages will arrive here with live notification sound.
-                      </p>
-                    </div>
-                  ) : (
-                    notifications.map((notif) => {
-                      const avatarPhoto = notif.data?.followerPhoto || notif.data?.photo;
-                      const displayName = notif.data?.followerName || notif.data?.name || notif.title;
-                      const timeString = (() => {
-                        const rawTime = notif.created_at || (notif as any).createdAt;
-                        if (!rawTime) return 'Just now';
-                        const d = new Date(rawTime);
-                        if (isNaN(d.getTime())) return 'Just now';
-                        const diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-                        if (diffSec < 45) return 'Just now';
-                        const diffMin = Math.floor(diffSec / 60);
-                        if (diffMin < 60) return `${diffMin}m ago`;
-                        const diffHour = Math.floor(diffMin / 60);
-                        if (diffHour < 24) return `${diffHour}h ago`;
-                        const diffDay = Math.floor(diffHour / 24);
-                        if (diffDay === 1) return 'Yesterday';
-                        if (diffDay < 7) return `${diffDay}d ago`;
-                        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                      })();
-
-                      return (
-                        <div
-                          key={notif.id}
-                          onClick={() => {
-                            setNotifMenuOpen(false);
-                            const targetId = notif.data?.followerId || notif.data?.profileId || notif.data?.userId || notif.user_id;
-                            if (targetId) {
-                              onSelectNotificationProfile?.(targetId);
-                            }
-                          }}
-                          className={`p-3 text-xs hover:bg-neutral-800/80 cursor-pointer transition flex items-start gap-2.5 ${
-                            !notif.is_read ? 'bg-rose-950/20' : ''
-                          }`}
-                        >
-                          {/* Avatar or Icon */}
-                          <div className="relative shrink-0 mt-0.5">
-                            {avatarPhoto ? (
-                              <img
-                                src={avatarPhoto}
-                                alt={displayName}
-                                className="w-8 h-8 rounded-full object-cover ring-1 ring-neutral-700"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center text-rose-400">
-                                {notif.type === 'follow' ? (
-                                  <UserPlus className="w-4 h-4 text-rose-400" />
-                                ) : notif.type === 'like' || notif.type === 'super_like' ? (
-                                  <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
-                                ) : notif.type === 'match' ? (
-                                  <Sparkles className="w-4 h-4 text-amber-400" />
-                                ) : (
-                                  <Bell className="w-4 h-4 text-rose-400" />
-                                )}
-                              </div>
-                            )}
-                            {!notif.is_read && (
-                              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-neutral-900 animate-pulse" />
-                            )}
-                          </div>
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1 mb-0.5">
-                              <span className="font-bold text-white truncate text-xs">{notif.title}</span>
-                              <span className="text-[10px] text-rose-400/90 font-medium shrink-0">
-                                {timeString}
-                              </span>
-                            </div>
-                            <p className="text-neutral-300 text-[11px] leading-relaxed line-clamp-2">{notif.message}</p>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+              <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-1rem))] sm:w-96 max-w-[calc(100vw-1rem)] bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-800 py-2.5 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                <NotificationsPanel
+                  notifications={notifications}
+                  unreadNotificationsCount={unreadNotificationsCount}
+                  onSelectNotificationProfile={onSelectNotificationProfile}
+                  onMarkAllNotificationsRead={onMarkAllNotificationsRead}
+                  onItemClick={() => setNotifMenuOpen(false)}
+                  compact
+                />
               </div>
             )}
           </div>
 
           {/* Discovery View Switcher (Swipe vs Grid) */}
-          {activeTab === 'discover' && (
+          {(activeTab === 'discover' || activeTab === 'home') && (
             <div className="hidden xl:flex items-center bg-stone-800 rounded-lg p-0.5 border border-stone-700 shrink-0">
               <button
                 onClick={() => setViewMode('swipe')}
@@ -446,7 +475,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* Filters Button */}
-          {activeTab === 'discover' && (
+          {(activeTab === 'discover' || activeTab === 'home' || activeTab === 'search') && (
             <button
               onClick={onOpenFilters}
               className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-medium transition shrink-0"
@@ -456,10 +485,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Boost Button */}
+          {/* Boost Button (desktop only — mobile uses Profile → Settings & Privacy → Boost) */}
           <button
             onClick={onOpenBoost}
-            className={`hidden sm:flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition shadow-sm shrink-0 ${
+            className={`hidden md:flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition shadow-sm shrink-0 ${
               profile?.is_boosted
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
                 : 'bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700'
@@ -470,7 +499,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden xl:inline">{profile?.is_boosted ? t('boostActive') : t('boostProfile')}</span>
           </button>
 
-          {/* Subscription Tier Badge / Upgrade */}
+          {/* Subscription Tier Badge / Upgrade (desktop only — mobile uses Profile → Settings & Privacy → VIP / Subscription) */}
           <button
             onClick={onOpenSubscription}
             className={`hidden md:flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition shrink-0 ${
@@ -487,8 +516,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Language Switcher (World Languages) */}
-          <div className="relative" ref={langRef}>
+          {/* Language Switcher (desktop only — mobile uses Profile → Settings & Privacy → Language) */}
+          <div className="relative hidden md:block" ref={langRef}>
             <button
               onClick={() => {
                 setLangMenuOpen(!langMenuOpen);
@@ -504,7 +533,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {langMenuOpen && (
-              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-stone-900 rounded-2xl shadow-2xl border border-stone-700 p-2.5 z-50 animate-in fade-in slide-in-from-top-2">
+              <div className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1rem))] sm:w-80 max-w-[calc(100vw-1rem)] bg-stone-900 rounded-2xl shadow-2xl border border-stone-700 p-2.5 z-50 animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center justify-between pb-2 mb-2 border-b border-stone-800 px-1">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-stone-200">
                     <Globe className="w-3.5 h-3.5 text-rose-500" />
@@ -642,10 +671,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="btn-nav-signin"
                 onClick={onOpenAuth}
-                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs shadow-md shadow-rose-900/30 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+                aria-label="Sign In / Register"
+                title="Sign In / Register"
+                className="p-2 rounded-full bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white shadow-md shadow-rose-900/30 flex items-center justify-center shrink-0 transition cursor-pointer sm:px-3 sm:py-1.5 sm:rounded-xl sm:gap-1.5 sm:font-bold sm:text-xs min-w-[36px] min-h-[36px]"
               >
-                <UserIcon className="w-3.5 h-3.5" />
-                <span>Sign In</span>
+                <UserIcon className="w-4 h-4 shrink-0" />
+                {/* Full label only where it fits (sm+). On phones show icon-only so it never clips. */}
+                <span className="hidden sm:inline whitespace-nowrap">Sign In</span>
               </button>
             )}
 

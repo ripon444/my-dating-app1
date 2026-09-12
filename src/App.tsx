@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Flame, 
   Heart, 
@@ -22,11 +22,12 @@ import {
   Shield,
   Layers,
   Grid,
-  X
+  X,
+  Users
 } from 'lucide-react';
 import { useTranslation, LanguageProvider } from './i18n/LanguageContext';
-import { Navbar } from './components/Navbar';
-import { Sidebar } from './components/Sidebar';
+import { Navbar, NotificationsPanel } from './components/Navbar';
+import { Sidebar, ProfileMenuAction } from './components/Sidebar';
 import { DiscoveryCard } from './components/DiscoveryCard';
 import { DiscoveryGrid } from './components/DiscoveryGrid';
 import { FiltersModal } from './components/FiltersModal';
@@ -161,6 +162,12 @@ function MainApp() {
 
   // Social & Registered Users Search / Profile
   const [isUserSearchOpen, setIsUserSearchOpen] = useState(false);
+  // Mobile Notifications overlay reuses the existing desktop NotificationsPanel.
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  // Existing Facebook-style Profile Settings slide-out + deep section target.
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [profileSection, setProfileSection] = useState<string | null>(null);
+  const [profileSectionNonce, setProfileSectionNonce] = useState(0);
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -193,6 +200,42 @@ function MainApp() {
         window.history.pushState({}, '', '/');
       }
     }
+  };
+
+  // Map existing Sidebar PROFILE_MENU_ITEMS to existing ProfileSettingsHub sections.
+  // No new screens: 'vip'/'boost' reuse existing modals for immediate action.
+  const handleProfileMenuAction = (action: ProfileMenuAction) => {
+    if (action === 'logout') {
+      setIsProfileMenuOpen(false);
+      handleLogout();
+      return;
+    }
+    if (action === 'vip') {
+      setIsProfileMenuOpen(false);
+      setIsSubscriptionOpen(true);
+      return;
+    }
+    if (action === 'boost') {
+      setIsProfileMenuOpen(false);
+      setIsBoostOpen(true);
+      return;
+    }
+    const sectionMap: Record<Exclude<ProfileMenuAction, 'logout' | 'vip' | 'boost'>, string> = {
+      'search-settings': 'search-settings',
+      settings: 'settings',
+      language: 'language',
+      notifications: 'notifications',
+      privacy: 'privacy',
+      security: 'security',
+      blocked: 'blocked',
+      sessions: 'sessions',
+    };
+    setActiveTab('profile');
+    setIsViewingFullProfile(false);
+    setProfileSection(sectionMap[action]);
+    // Bump nonce so selecting the same menu item re-triggers Hub scroll/load.
+    setProfileSectionNonce((n) => n + 1);
+    setIsProfileMenuOpen(false);
   };
 
   // Initial Data Fetch
@@ -246,6 +289,7 @@ function MainApp() {
     initializeCapacitorApp({
       hasOpenModal: () => {
         return Boolean(
+          isNotificationsOpen ||
           isFiltersOpen ||
           isMatchModalOpen ||
           isProfileViewOpen ||
@@ -267,6 +311,7 @@ function MainApp() {
         else if (isProfileViewOpen) setIsProfileViewOpen(false);
         else if (isProfileEditOpen) setIsProfileEditOpen(false);
         else if (isUserSearchOpen) setIsUserSearchOpen(false);
+        else if (isNotificationsOpen) setIsNotificationsOpen(false);
         else if (isFiltersOpen) setIsFiltersOpen(false);
         else if (isMatchModalOpen) setIsMatchModalOpen(false);
         else if (isSubscriptionOpen) setIsSubscriptionOpen(false);
@@ -277,9 +322,28 @@ function MainApp() {
         else if (isAuthOpen) setIsAuthOpen(false);
       },
       canGoBack: () => {
-        return activeTab !== 'discover';
+        // Slide-out, hub sub-view, and secondary tabs all go back first.
+        return Boolean(
+          isProfileMenuOpen ||
+          isNotificationsOpen ||
+          (activeTab === 'profile' && (isViewingFullProfile || profileSection)) ||
+          (activeTab !== 'discover' && activeTab !== 'home')
+        );
       },
       goBack: () => {
+        if (isProfileMenuOpen) {
+          setIsProfileMenuOpen(false);
+          return;
+        }
+        if (isNotificationsOpen) {
+          setIsNotificationsOpen(false);
+          return;
+        }
+        if (activeTab === 'profile' && (isViewingFullProfile || profileSection)) {
+          setIsViewingFullProfile(false);
+          setProfileSection(null);
+          return;
+        }
         setActiveTab('discover');
         setViewMode('grid');
       },
@@ -296,10 +360,37 @@ function MainApp() {
     isLegalOpen,
     isAuthOpen,
     isUserSearchOpen,
+    isNotificationsOpen,
+    isProfileMenuOpen,
+    isViewingFullProfile,
+    profileSection,
     selectedPublicUserId,
     incomingCall,
     activeTab,
   ]);
+
+  // Lightweight URL state sync for existing state navigation (no router).
+  // Best-effort replaceState only: preserves refresh + back behavior, never adds history spam.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return;
+    // Never rewrite shareable public-profile or admin routes.
+    if (getProfileTargetFromUrl()) return;
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/tanvir' || path === '/admin' || path.endsWith('/tanvir') || path.endsWith('/admin')) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      params.set('tab', activeTab);
+      if (activeTab === 'profile' && profileSection) {
+        params.set('section', profileSection);
+      } else {
+        params.delete('section');
+      }
+      const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+      window.history.replaceState({}, '', next);
+    } catch {
+      // URL sync is best-effort only; state navigation remains source of truth.
+    }
+  }, [activeTab, profileSection]);
 
   useEffect(() => {
     loadInitialData();
@@ -717,9 +808,16 @@ function MainApp() {
         {/* Sidebar */}
         <Sidebar
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={(tab) => {
+            setActiveTab(tab);
+            if (tab === 'profile') {
+              setIsViewingFullProfile(false);
+              setProfileSection(null);
+            }
+          }}
           matchesCount={matches.length}
           unreadMessagesCount={conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0)}
+          unreadNotificationsCount={notifications.filter((n) => !n.is_read).length}
           user={currentUser}
           profile={currentProfile}
           onOpenLegal={handleOpenLegalModal}
@@ -730,6 +828,30 @@ function MainApp() {
             setViewMode('grid');
             setSearchQuery('');
           }}
+          isProfileMenuOpen={isProfileMenuOpen}
+          onOpenProfileMenu={() => {
+            setActiveTab('profile');
+            setIsViewingFullProfile(false);
+            setProfileSection(null);
+            setIsProfileMenuOpen(true);
+          }}
+          onCloseProfileMenu={() => setIsProfileMenuOpen(false)}
+          onProfileMenuAction={handleProfileMenuAction}
+          onSelectDiscover={() => {
+            setSelectedPublicUserId(null);
+            setSelectedPublicProfile(null);
+            setIsUserSearchOpen(false);
+            setIsNotificationsOpen(false);
+            setIsProfileMenuOpen(false);
+            setCurrentDeckIndex(0);
+            setActiveTab('discover');
+            setViewMode('grid');
+            setSearchQuery('');
+          }}
+          onOpenSearch={() => setIsUserSearchOpen(true)}
+          onOpenNotifications={() => setIsNotificationsOpen(true)}
+          isSearchOpen={isUserSearchOpen}
+          isNotificationsOpen={isNotificationsOpen}
         />
 
         {/* Content View Container */}
@@ -738,9 +860,31 @@ function MainApp() {
           {/* ========================================================================= */}
           {/* 1. DISCOVER TAB */}
           {/* ========================================================================= */}
-          {activeTab === 'discover' && (
+          {(activeTab === 'discover' || activeTab === 'home') && (
             <div className="space-y-3.5 sm:space-y-6 w-full">
-              
+              {/* Discover | Matches tabs: Matches reuses existing Matches view */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('discover')}
+                  className="px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow"
+                >
+                  Discover
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('matches')}
+                  className="px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 bg-stone-900 text-stone-300 border border-stone-800 hover:text-white"
+                >
+                  <Heart className="w-3.5 h-3.5 text-rose-400" />
+                  Matches
+                  {matches.length > 0 && (
+                    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {matches.length > 99 ? '99+' : matches.length}
+                    </span>
+                  )}
+                </button>
+              </div>
               {/* Profile Search & Filter Bar */}
               <div className="w-full bg-stone-900/80 p-2.5 sm:p-4 rounded-2xl border border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-3 shadow-md">
                 
@@ -1185,6 +1329,7 @@ function MainApp() {
                 />
               ) : (
                 <ProfileSettingsHub
+                  key={`profile-hub-${profileSection || 'main'}-${profileSectionNonce}`}
                   currentUser={currentUser}
                   currentProfile={currentProfile}
                   onViewProfile={() => setIsViewingFullProfile(true)}
@@ -1193,6 +1338,7 @@ function MainApp() {
                   onOpenBoost={() => setIsBoostOpen(true)}
                   onLogout={handleLogout}
                   onUpdateProfile={handleUpdateProfileData}
+                  initialSection={profileSection ? `${profileSection}#${profileSectionNonce}` : null}
                 />
               )
             ) : (
@@ -1354,6 +1500,48 @@ function MainApp() {
           handleOpenPublicProfile(user);
         }}
       />
+
+      {isNotificationsOpen && (
+        <div id="mobile-notifications-overlay" className="fixed inset-0 z-50 overflow-hidden">
+          <button
+            type="button"
+            aria-label="Close notifications"
+            onClick={() => setIsNotificationsOpen(false)}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notifications"
+            className="fixed top-0 right-0 bottom-0 h-[100dvh] w-[min(22rem,calc(100vw-3rem))] max-w-[calc(100vw-3rem)] overflow-y-auto overscroll-contain bg-stone-950 border-l border-stone-800 shadow-2xl flex flex-col safe-area-pt"
+          >
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-stone-800">
+              <span className="text-sm font-bold text-white">Notifications</span>
+              <button
+                type="button"
+                onClick={() => setIsNotificationsOpen(false)}
+                className="p-2 rounded-xl bg-stone-900 border border-stone-800 text-stone-300 hover:text-white cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <NotificationsPanel
+                notifications={notifications}
+                unreadNotificationsCount={notifications.filter((n) => !n.is_read).length}
+                onSelectNotificationProfile={(pid) => {
+                  setSelectedPublicUserId(pid);
+                  setIsNotificationsOpen(false);
+                }}
+                onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+                onItemClick={() => setIsNotificationsOpen(false)}
+                compact
+              />
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* 14. Facebook-Style Public Profile Modal (When viewing another member) */}
       {selectedPublicUserId && (

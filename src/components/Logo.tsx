@@ -23,7 +23,7 @@ export const Logo: React.FC<LogoProps> = ({
   const currentSize = sizeMap[size];
 
   return (
-    <div className={`flex items-center gap-3 select-none ${className}`}>
+    <div className={`flex items-center gap-1.5 sm:gap-3 select-none min-w-0 ${className}`}>
       <div
         className={`${currentSize.img} relative rounded-2xl overflow-hidden flex items-center justify-center p-0.5 bg-gradient-to-tr from-rose-600 via-pink-600 to-rose-400 shadow-md shadow-rose-600/25 shrink-0`}
       >
@@ -39,12 +39,12 @@ export const Logo: React.FC<LogoProps> = ({
       </div>
 
       {showText && (
-        <div className="flex flex-col">
-          <div className="flex items-center gap-1.5">
-            <span className={`font-bold ${currentSize.text} text-stone-100 tracking-tight font-serif`}>
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+            <span className={`font-bold ${currentSize.text} text-stone-100 tracking-tight font-serif whitespace-nowrap`}>
               Lovemeet<span className="text-rose-500 font-sans font-extrabold">ly</span>
             </span>
-            <span className="text-[9px] uppercase font-semibold px-2 py-0.5 bg-rose-500/15 text-rose-400 border border-rose-500/25 rounded-full tracking-wider">
+            <span className="hidden min-[380px]:inline text-[9px] uppercase font-semibold px-2 py-0.5 bg-rose-500/15 text-rose-400 border border-rose-500/25 rounded-full tracking-wider whitespace-nowrap">
               Global
             </span>
           </div>
