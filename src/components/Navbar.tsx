@@ -119,8 +119,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   });
 
   return (
-    <header className="sticky top-0 z-40 bg-stone-900/90 backdrop-blur-md border-b border-stone-800">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <header className="sticky top-0 z-40 w-full bg-stone-900/95 backdrop-blur-md border-b border-stone-800 safe-area-pt">
+      <div className="w-full max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-2">
         
         {/* Brand Logo & Tagline (Click returns to Home Grid) */}
         <div 

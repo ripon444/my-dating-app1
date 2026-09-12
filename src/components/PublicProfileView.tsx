@@ -453,7 +453,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
 
   return (
-    <div id="facebook-style-public-profile" className="max-w-5xl mx-auto pb-16 px-4 sm:px-6">
+    <div id="facebook-style-public-profile" className="w-full max-w-5xl mx-auto pb-20 px-1 sm:px-4 md:px-6">
       {/* Toast Notification */}
       <AnimatePresence>
         {toastMessage && (
@@ -559,9 +559,9 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
       </div>
 
       {/* Main Profile Header Card (Facebook Layout) */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl relative mb-6">
+      <div className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl relative mb-4 sm:mb-6">
         {/* Cover Photo Banner */}
-        <div className="relative h-48 sm:h-64 md:h-80 w-full overflow-hidden bg-neutral-950">
+        <div className="relative h-44 sm:h-64 md:h-80 w-full overflow-hidden bg-neutral-950">
           <img
             id="profile-cover-photo"
             src={defaultCover}
@@ -579,7 +579,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                 setCustomCoverUrl(profile.cover_photo || '');
                 setShowCoverEditModal(true);
               }}
-              className="absolute top-4 right-4 bg-black/60 hover:bg-black/80 backdrop-blur-md text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border border-white/20 shadow-md"
+              className="absolute top-3 right-3 sm:top-4 sm:right-4 bg-black/60 hover:bg-black/80 backdrop-blur-md text-white px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border border-white/20 shadow-md"
             >
               <Camera className="w-3.5 h-3.5" />
               <span>Edit Cover Photo</span>
@@ -588,8 +588,8 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
         </div>
 
         {/* Profile Avatar & Info Section */}
-        <div className="px-6 pb-6 pt-0 relative">
-          <div className="flex flex-col md:flex-row items-center md:items-end justify-between gap-4 -mt-20 md:-mt-24 mb-6">
+        <div className="px-3 sm:px-6 pb-4 sm:pb-6 pt-0 relative">
+          <div className="flex flex-col md:flex-row items-center md:items-end justify-between gap-3 sm:gap-4 -mt-16 sm:-mt-20 md:-mt-24 mb-4 sm:mb-6">
             {/* Avatar & Online status */}
             <div className="flex flex-col md:flex-row items-center md:items-end gap-5 text-center md:text-left">
               <div className="relative group">

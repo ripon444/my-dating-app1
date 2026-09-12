@@ -233,6 +233,12 @@ export const api = {
     return safeJson(res, 'Failed to unblock user');
   },
 
+  async getBlockedUsers(): Promise<{ blockedUsers: Array<{ id: string; blockedId: string; reason: string; createdAt: string; name: string; photo: string; city: string; country: string }> }> {
+    const res = await authFetch('/api/users/blocked');
+    if (!res.ok) return { blockedUsers: [] };
+    return res.json();
+  },
+
   async searchRealUsers(query: string): Promise<{ users: Profile[] }> {
     const res = await authFetch(`/api/users/search?q=${encodeURIComponent(query)}`);
     if (!res.ok) return { users: [] };
@@ -302,6 +308,21 @@ export const api = {
       body: JSON.stringify(params),
     });
     return safeJson<{ success: boolean; message: string }>(res, 'Failed to update password.');
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const res = await authFetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    return safeJson<{ success: boolean; message: string }>(res, 'Failed to change password.');
+  },
+
+  async getSessions(): Promise<{ sessions: Array<{ id: string; device: string; lastActive: string; isCurrent: boolean }> }> {
+    const res = await authFetch('/api/auth/sessions');
+    if (!res.ok) return { sessions: [] };
+    return res.json();
   },
 
   async logout(): Promise<{ success: boolean }> {

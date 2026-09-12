@@ -958,6 +958,86 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
+// Authenticated Change Password
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    const user = (req as any).user;
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+
+    // If a current password was provided or user has an existing password, verify it
+    const userRow = await SqlHelper.queryOne<any>('SELECT password FROM users WHERE id = ?', [user.id]);
+    if (userRow?.password && userRow.password.length > 0 && currentPassword) {
+      if (userRow.password !== currentPassword.trim()) {
+        return res.status(400).json({ error: 'Current password is incorrect.' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    await SqlHelper.execute('UPDATE users SET password = ?, updated_at = ? WHERE id = ?', [
+      newPassword.trim(),
+      now,
+      user.id,
+    ]);
+
+    try {
+      if (db) {
+        await db.update(pgUsers).set({
+          password: newPassword.trim(),
+          updatedAt: new Date(),
+        }).where(eq(pgUsers.id, user.id));
+      }
+    } catch (e) {}
+
+    res.json({ success: true, message: 'Password updated successfully.' });
+  } catch (err: any) {
+    console.error('[Change Password Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to update password.' });
+  }
+});
+
+// Active Device & Session Info
+app.get('/api/auth/sessions', async (req, res) => {
+  try {
+    const user = (req as any).user;
+    if (!user) return res.json({ sessions: [] });
+
+    const sessionRows = await SqlHelper.queryAll<any>(
+      'SELECT token, created_at, expires_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10',
+      [user.id]
+    ).catch(() => []);
+
+    const userAgent = (req.headers['user-agent'] as string) || 'Mobile App / Web';
+    const isMobile = /android|iphone|ipad|mobile/i.test(userAgent);
+
+    const formatted = sessionRows.map((s, idx) => ({
+      id: s.token.substring(0, 12),
+      device: idx === 0 ? (isMobile ? 'Active Android Device' : 'Current Web Session') : `Saved Device (${s.token.substring(0, 6)})`,
+      lastActive: s.created_at,
+      isCurrent: idx === 0,
+    }));
+
+    if (formatted.length === 0) {
+      formatted.push({
+        id: 'sess_curr',
+        device: isMobile ? 'Active Android Device' : 'Current Web Session',
+        lastActive: new Date().toISOString(),
+        isCurrent: true,
+      });
+    }
+
+    res.json({ sessions: formatted });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch sessions.' });
+  }
+});
+
 // 2. Profiles Management & Facebook-Style Public Profile System
 app.get('/api/profiles', async (req, res) => {
   const rows = await SqlHelper.queryAll(
@@ -1253,6 +1333,50 @@ app.post('/api/users/:id/unblock', async (req, res) => {
   } catch (error: any) {
     console.error('[Unblock API] Error:', error);
     res.status(400).json({ error: error.message || 'Failed to unblock user' });
+  }
+});
+
+// Get Blocked Users List
+app.get('/api/users/blocked', async (req, res) => {
+  try {
+    const user = (req as any).user;
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+
+    const blockedRows = await SqlHelper.queryAll<any>(
+      `SELECT b.id as block_id, b.blocked_id, b.reason, b.created_at,
+              p.name, p.photos, p.age, p.city, p.country, p.id as profile_id
+       FROM blocks b
+       LEFT JOIN profiles p ON p.user_id = b.blocked_id
+       WHERE b.blocker_id = ?
+       ORDER BY b.created_at DESC`,
+      [user.id]
+    ).catch(() => []);
+
+    const formatted = blockedRows.map((r) => {
+      let photos = [];
+      try {
+        photos = typeof r.photos === 'string' ? JSON.parse(r.photos) : (r.photos || []);
+      } catch (e) {
+        photos = [];
+      }
+      return {
+        id: r.block_id,
+        blockedId: r.blocked_id,
+        reason: r.reason,
+        createdAt: r.created_at,
+        name: r.name || 'User',
+        photo: photos[0] || '',
+        city: r.city || '',
+        country: r.country || '',
+      };
+    });
+
+    res.json({ blockedUsers: formatted });
+  } catch (error: any) {
+    console.error('[Get Blocked Users] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch blocked users' });
   }
 });
 

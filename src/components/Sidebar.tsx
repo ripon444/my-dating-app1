@@ -137,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav 
         id="mobile-bottom-navigation"
         aria-label="Mobile Navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-stone-950/95 backdrop-blur-xl border-t border-stone-800/80 px-1 py-1 flex items-center justify-around shadow-2xl safe-area-pb"
+        className="md:hidden fixed bottom-0 inset-x-0 w-full z-40 bg-stone-950/95 backdrop-blur-xl border-t border-stone-800/80 px-1 pt-1 pb-[max(env(safe-area-inset-bottom,0px),8px)] flex items-center justify-around shadow-2xl safe-area-pb"
       >
         {navItems.map((item) => {
           const Icon = item.icon;

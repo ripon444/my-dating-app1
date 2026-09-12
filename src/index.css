@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Safe area padding utilities for mobile notched phones & Android navigation bar */
+.safe-area-pt {
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+}
+
+.safe-area-pb {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}

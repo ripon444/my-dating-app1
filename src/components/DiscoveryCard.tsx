@@ -103,7 +103,7 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
       animate={{ scale: 1, opacity: 1, y: 0 }}
       exit={{ scale: 0.9, opacity: 0, y: -20 }}
       transition={{ duration: 0.25 }}
-      className="relative w-full max-w-md h-[680px] bg-stone-900 rounded-3xl overflow-hidden shadow-2xl border border-stone-800 flex flex-col justify-between select-none"
+      className="relative w-full sm:max-w-md md:max-w-lg h-[75vh] min-h-[520px] max-h-[720px] bg-stone-900 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-stone-800 flex flex-col justify-between select-none mx-auto"
     >
       {/* Background Image Carousel */}
       <div className="absolute inset-0 z-0 bg-stone-950">

@@ -45,6 +45,7 @@ import { AuthModal } from './components/AuthModal';
 import { AdminView } from './components/AdminView';
 import { AdminPortal } from './components/AdminPortal';
 import { PublicProfileView } from './components/PublicProfileView';
+import { ProfileSettingsHub } from './components/ProfileSettingsHub';
 import { UserSearchModal } from './components/UserSearchModal';
 import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
@@ -156,6 +157,7 @@ function MainApp() {
   const [legalInitialTab, setLegalInitialTab] = useState('terms');
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isViewingFullProfile, setIsViewingFullProfile] = useState(false);
 
   // Social & Registered Users Search / Profile
   const [isUserSearchOpen, setIsUserSearchOpen] = useState(false);
@@ -239,7 +241,7 @@ function MainApp() {
     }
   };
 
-  // Capacitor Android Native Integrations (Back Button, Status Bar, Push Notifications)
+  // Capacitor Android Native Integrations (Back Button, Status Bar)
   useEffect(() => {
     initializeCapacitorApp({
       hasOpenModal: () => {
@@ -650,7 +652,20 @@ function MainApp() {
     } catch (e) {}
     setCurrentUser(null);
     setCurrentProfile(null);
+    setIsViewingFullProfile(false);
+    setActiveTab('discover');
     setIsAuthOpen(true);
+  };
+
+  const handleUpdateProfileData = async (data: Partial<Profile>) => {
+    try {
+      const res = await api.updateProfile(data);
+      if (res?.profile) {
+        setCurrentProfile(res.profile);
+      }
+    } catch (e) {
+      console.warn('Failed to update profile data:', e);
+    }
   };
 
   const handleMarkAllNotificationsRead = async () => {
@@ -661,7 +676,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans selection:bg-rose-500 selection:text-white">
+    <div className="min-h-screen w-full bg-stone-950 text-stone-100 flex flex-col font-sans selection:bg-rose-500 selection:text-white overflow-x-hidden">
       
       {/* Header */}
       <Navbar
@@ -697,7 +712,7 @@ function MainApp() {
       />
 
       {/* Main App Layout */}
-      <div className="flex-1 flex max-w-7xl w-full mx-auto">
+      <div className="flex-1 flex w-full max-w-7xl mx-auto px-0 md:px-3 lg:px-6">
         
         {/* Sidebar */}
         <Sidebar
@@ -718,16 +733,16 @@ function MainApp() {
         />
 
         {/* Content View Container */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto pb-24 md:pb-8">
+        <main className="flex-1 w-full px-2.5 sm:px-4 md:px-6 lg:px-8 py-2.5 sm:py-6 overflow-y-auto pb-20 md:pb-8">
           
           {/* ========================================================================= */}
           {/* 1. DISCOVER TAB */}
           {/* ========================================================================= */}
           {activeTab === 'discover' && (
-            <div className="space-y-6">
+            <div className="space-y-3.5 sm:space-y-6 w-full">
               
               {/* Profile Search & Filter Bar */}
-              <div className="bg-stone-900/80 p-3 sm:p-4 rounded-2xl border border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
+              <div className="w-full bg-stone-900/80 p-2.5 sm:p-4 rounded-2xl border border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-3 shadow-md">
                 
                 {/* Search Input */}
                 <div className="relative w-full sm:w-80 flex items-center">
@@ -805,7 +820,7 @@ function MainApp() {
 
               {/* View Content: Swipe Deck or Grid */}
               {viewMode === 'swipe' ? (
-                <div className="flex items-center justify-center min-h-[680px]">
+                <div className="flex items-center justify-center w-full min-h-[520px] sm:min-h-[660px]">
                   {activeProfileInDeck ? (
                     <DiscoveryCard
                       key={activeProfileInDeck.id}
@@ -908,7 +923,7 @@ function MainApp() {
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 w-full">
                   {matches.map((match) => {
                     const prof = match.matched_profile;
                     if (!prof) return null;
@@ -916,7 +931,7 @@ function MainApp() {
                     return (
                       <div
                         key={match.id}
-                        className="p-4 rounded-3xl bg-stone-900 border border-stone-800 shadow-lg flex items-center justify-between gap-3 hover:border-rose-500/50 transition group"
+                        className="p-3 sm:p-4 rounded-2xl sm:rounded-3xl bg-stone-900 border border-stone-800 shadow-lg flex items-center justify-between gap-2.5 sm:gap-3 hover:border-rose-500/50 transition group"
                       >
                         <div
                           className="flex items-center gap-3 cursor-pointer flex-1"
@@ -983,18 +998,18 @@ function MainApp() {
           {/* 3. MESSAGES TAB */}
           {/* ========================================================================= */}
           {activeTab === 'messages' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-10rem)]">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
               
               {/* Conversations List */}
-              <div className={`bg-stone-900 rounded-3xl border border-stone-800 overflow-hidden flex flex-col shadow-xl ${
+              <div className={`bg-stone-900 rounded-2xl sm:rounded-3xl border border-stone-800 overflow-hidden flex flex-col shadow-xl ${
                 activeConversationId ? 'hidden md:flex' : 'flex'
               }`}>
-                <div className="p-4 border-b border-stone-800">
+                <div className="p-3 sm:p-4 border-b border-stone-800">
                   <h2 className="font-bold text-white text-base font-serif">{t('messages')}</h2>
                   <p className="text-xs text-stone-400">Encrypted instant chats with AI translation</p>
                 </div>
 
-                <div className="p-2 overflow-y-auto flex-1 space-y-1">
+                <div className="p-1.5 sm:p-2 overflow-y-auto flex-1 space-y-1">
                   {conversations.length === 0 ? (
                     <div className="p-8 text-center text-stone-500 text-xs">
                       No active conversations. Match with someone to start chatting!
@@ -1086,7 +1101,7 @@ function MainApp() {
           {/* 4. CALLS TAB */}
           {/* ========================================================================= */}
           {activeTab === 'calls' && (
-            <div className="space-y-6 max-w-4xl mx-auto">
+            <div className="space-y-4 sm:space-y-6 w-full max-w-4xl mx-auto">
               <div>
                 <h1 className="text-2xl font-bold text-white font-serif">{t('calls')}</h1>
                 <p className="text-xs text-stone-400">Encrypted WebRTC Voice & Video Call Log</p>
@@ -1149,23 +1164,37 @@ function MainApp() {
           )}
 
           {/* ========================================================================= */}
-          {/* 5. PROFILE TAB (Facebook-Style Profile with Cover, Posts, Photos & Tabs) */}
+          {/* 5. PROFILE TAB (Facebook-Style Profile & Settings Hub) */}
           {/* ========================================================================= */}
           {activeTab === 'profile' && (
             currentUser ? (
-              <PublicProfileView
-                profileIdOrUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
-                profileId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
-                currentUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
-                currentUser={currentUser}
-                currentUserProfile={currentProfile}
-                isOwnProfile={true}
-                onEditProfile={() => setIsProfileEditOpen(true)}
-                onManagePlan={() => setIsSubscriptionOpen(true)}
-                onBoostProfile={() => setIsBoostOpen(true)}
-                onStartChat={handleStartChat}
-                onStartCall={handleStartCall}
-              />
+              isViewingFullProfile ? (
+                <PublicProfileView
+                  profileIdOrUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
+                  profileId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
+                  currentUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
+                  currentUser={currentUser}
+                  currentUserProfile={currentProfile}
+                  isOwnProfile={true}
+                  onBack={() => setIsViewingFullProfile(false)}
+                  onEditProfile={() => setIsProfileEditOpen(true)}
+                  onManagePlan={() => setIsSubscriptionOpen(true)}
+                  onBoostProfile={() => setIsBoostOpen(true)}
+                  onStartChat={handleStartChat}
+                  onStartCall={handleStartCall}
+                />
+              ) : (
+                <ProfileSettingsHub
+                  currentUser={currentUser}
+                  currentProfile={currentProfile}
+                  onViewProfile={() => setIsViewingFullProfile(true)}
+                  onEditProfile={() => setIsProfileEditOpen(true)}
+                  onOpenSubscription={() => setIsSubscriptionOpen(true)}
+                  onOpenBoost={() => setIsBoostOpen(true)}
+                  onLogout={handleLogout}
+                  onUpdateProfile={handleUpdateProfileData}
+                />
+              )
             ) : (
               <div className="max-w-md mx-auto my-16 p-8 rounded-3xl bg-stone-900/90 border border-stone-800 text-center space-y-5 shadow-2xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
@@ -1328,11 +1357,11 @@ function MainApp() {
 
       {/* 14. Facebook-Style Public Profile Modal (When viewing another member) */}
       {selectedPublicUserId && (
-        <div id="public-profile-viewer-modal" className="fixed inset-0 z-50 overflow-y-auto bg-black/85 backdrop-blur-md p-2 sm:p-6 flex justify-center items-start">
-          <div className="w-full max-w-5xl relative my-2 sm:my-4">
+        <div id="public-profile-viewer-modal" className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-md p-0 sm:p-4 md:p-6 flex justify-center items-start safe-area-pt safe-area-pb">
+          <div className="w-full max-w-5xl relative my-0 sm:my-4">
             <button
               onClick={handleClosePublicProfile}
-              className="fixed top-4 right-4 z-50 px-4 py-2 rounded-full bg-black/80 hover:bg-black text-white text-xs font-bold border border-white/20 shadow-2xl flex items-center gap-1.5 transition cursor-pointer"
+              className="fixed top-3 right-3 sm:top-4 sm:right-4 z-50 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full bg-black/80 hover:bg-black text-white text-xs font-bold border border-white/20 shadow-2xl flex items-center gap-1.5 transition cursor-pointer"
             >
               <X className="w-4 h-4" />
               <span>Close Profile</span>

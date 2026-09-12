@@ -6,16 +6,16 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    cleartext: false, // Enforce HTTPS secure communication
+    cleartext: true, // Allow http fallback and avoid SSL certificate blocking on redirects
   },
   android: {
-    allowMixedContent: false,
+    allowMixedContent: true,
     captureInput: true,
-    webContentsDebuggingEnabled: false,
+    webContentsDebuggingEnabled: true, // Allows debugging via chrome://inspect
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 1800,
+      launchShowDuration: 1500,
       launchAutoHide: true,
       backgroundColor: '#0c0a09',
       androidScaleType: 'CENTER_CROP',
@@ -24,9 +24,6 @@ const config: CapacitorConfig = {
     StatusBar: {
       style: 'DARK',
       backgroundColor: '#0c0a09',
-    },
-    PushNotifications: {
-      presentationOptions: ['badge', 'sound', 'alert'],
     },
   },
 };
