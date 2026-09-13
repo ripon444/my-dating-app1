@@ -40,6 +40,55 @@ const STUN_ICE_SERVERS: RTCIceServer[] = [
   { urls: ['stun:stun.services.mozilla.com'] },
 ];
 
+// Memoized call timer that does not re-render the parent video stage
+const CallTimer: React.FC<{ isActive: boolean }> = React.memo(({ isActive }) => {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const interval = setInterval(() => {
+      setSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isActive]);
+
+  const mins = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return <span>{`${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`}</span>;
+});
+
+// Memoized audio visualizer that animates smoothly without triggering parent re-renders
+const AudioVisualizer: React.FC<{ isActive: boolean }> = React.memo(({ isActive }) => {
+  const [level, setLevel] = useState(50);
+
+  useEffect(() => {
+    if (!isActive) {
+      setLevel(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setLevel(Math.floor(Math.random() * 50) + 40);
+    }, 400);
+    return () => clearInterval(interval);
+  }, [isActive]);
+
+  if (!isActive) return null;
+
+  return (
+    <div className="flex items-center gap-1.5 h-8 mt-5">
+      {[40, 70, 95, 60, 30, 85, 50, 90, 45, 65, 80, 35].map((h, i) => (
+        <div
+          key={i}
+          className="w-1.5 bg-emerald-400 rounded-full transition-all duration-300 shadow-sm shadow-emerald-500/50"
+          style={{
+            height: `${Math.max(6, (h * level) / 100)}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+});
+
 export const CallOverlay: React.FC<CallOverlayProps> = ({
   call,
   currentUser,
@@ -65,11 +114,9 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [isSwappedView, setIsSwappedView] = useState(false);
-  const [seconds, setSeconds] = useState(0);
   const [isRemoteVideoOff, setIsRemoteVideoOff] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
-  const [audioMeterLevel, setAudioMeterLevel] = useState(45);
   const [mediaPermissionError, setMediaPermissionError] = useState<string | null>(null);
 
   // Element Refs
@@ -87,6 +134,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   const isCleaningUpRef = useRef<boolean>(false);
   const sendOfferRef = useRef<() => void>(() => {});
   const hasSentInitialOfferRef = useRef<boolean>(false);
+  const localMediaPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
   const onEndCallRef = useRef(onEndCall);
 
   useEffect(() => {
@@ -209,7 +257,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
 
     // C. Remote Track Reception (ontrack)
     pc.ontrack = (event) => {
-      console.log(`[WebRTC] ontrack received: kind=${event.track.kind}, id=${event.track.id}, streams=${event.streams.length}`);
+      console.log(`[WebRTC] ontrack received: kind=${event.track.kind}, id=${event.track.id}`);
       
       // Ensure track is active and enabled
       event.track.enabled = true;
@@ -226,31 +274,34 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         rStream.addTrack(event.track);
       }
 
-      // Attach to remote audio element
-      if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== rStream) {
-        remoteAudioRef.current.srcObject = rStream;
-        playMediaElement(remoteAudioRef.current);
-      }
-
-      // Attach to remote video element
-      if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== rStream) {
-        remoteVideoRef.current.srcObject = rStream;
+      // Attach to appropriate media element based on track kind
+      if (event.track.kind === 'video') {
+        setHasRemoteStream(true);
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== rStream) {
+          remoteVideoRef.current.srcObject = rStream;
+        }
         playMediaElement(remoteVideoRef.current);
+      } else if (event.track.kind === 'audio') {
+        if (call.type === 'voice') {
+          setHasRemoteStream(true);
+        }
+        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== rStream) {
+          remoteAudioRef.current.srcObject = rStream;
+        }
+        playMediaElement(remoteAudioRef.current);
       }
 
       event.track.onunmute = () => {
         console.log(`[WebRTC] Remote track unmuted: ${event.track.kind}`);
-        if (remoteVideoRef.current && remoteStreamRef.current) {
-          if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
+        if (event.track.kind === 'video') {
+          setHasRemoteStream(true);
+          if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
             remoteVideoRef.current.srcObject = remoteStreamRef.current;
           }
           playMediaElement(remoteVideoRef.current);
         }
       };
 
-      if (event.track.kind === 'video' || call.type === 'voice') {
-        setHasRemoteStream(true);
-      }
       setCallState('connected');
       soundManager.stopOutgoingRingtone();
     };
@@ -263,6 +314,14 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         console.log('[WebRTC] Already initiating offer, skipping');
         return;
       }
+
+      // Ensure local media is ready and tracks are attached before creating offer
+      if (localMediaPromiseRef.current) {
+        try {
+          await localMediaPromiseRef.current;
+        } catch (e) {}
+      }
+
       if (pc.signalingState !== 'stable') {
         console.log(`[WebRTC] Signaling state is not stable (${pc.signalingState}), skipping sendOffer`);
         return;
@@ -309,6 +368,17 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     const handleOffer = async (payload: any) => {
       if (payload?.callId !== call.id || isCaller || isCancelled) return;
       console.log('[WebRTC] Received webrtc:offer from caller');
+
+      // CRITICAL: Callee MUST wait for its local media (camera/mic) to initialize
+      // and add tracks to pc BEFORE creating the SDP answer, so video is bidirectional!
+      if (localMediaPromiseRef.current) {
+        try {
+          console.log('[WebRTC] Callee waiting for local camera/audio before answering offer...');
+          await localMediaPromiseRef.current;
+        } catch (e) {
+          console.warn('[WebRTC] Local media wait note:', e);
+        }
+      }
 
       try {
         const remoteDesc = new RTCSessionDescription(payload.offer);
@@ -431,7 +501,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     socket.on('call:peer-joined', handlePeerReady);
     socket.on('call:ended', handleCallEnded);
 
-    // F. Acquire Local Media (getUserMedia)
+    // F. Acquire Local Media (getUserMedia) with smooth, stable mobile & web constraints
     const initLocalMedia = async () => {
       let localStream: MediaStream | null = null;
       try {
@@ -444,21 +514,28 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
           },
           video: call.type === 'video' ? {
             facingMode: 'user',
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            frameRate: { ideal: 30 },
+            width: { ideal: 640, max: 1280 },
+            height: { ideal: 480, max: 720 },
+            frameRate: { ideal: 24, max: 30 },
           } : false,
         };
 
         try {
           localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          console.log('[WebRTC] getUserMedia succeeded with optimal constraints');
+          console.log('[WebRTC] getUserMedia succeeded with optimal smooth constraints');
         } catch (conErr) {
           console.warn('[WebRTC] Ideal constraints failed, falling back to standard getUserMedia:', conErr);
-          localStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: call.type === 'video',
-          });
+          try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: call.type === 'video' ? { facingMode: 'user' } : false,
+            });
+          } catch (fallbackErr) {
+            localStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: call.type === 'video',
+            });
+          }
           console.log('[WebRTC] getUserMedia fallback succeeded');
         }
       } catch (permErr: any) {
@@ -480,24 +557,27 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
 
       if (isCancelled || isCleaningUpRef.current) {
         if (localStream) localStream.getTracks().forEach((t) => t.stop());
-        return;
+        return null;
       }
 
       if (localStream) {
         localStreamRef.current = localStream;
 
-        // Attach to local video element
+        // Attach to local video element immediately
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
-          localVideoRef.current.muted = true; // prevent local feedback
+          localVideoRef.current.muted = true; // prevent local audio feedback
           playMediaElement(localVideoRef.current);
         }
 
-        // Add local tracks to RTCPeerConnection
+        // Add local tracks to RTCPeerConnection with motion hint for smooth playback
         localStream.getTracks().forEach((track) => {
           try {
             console.log(`[WebRTC] Adding local track: kind=${track.kind}, id=${track.id}`);
             track.enabled = true;
+            if (track.kind === 'video' && 'contentHint' in track) {
+              (track as any).contentHint = 'motion';
+            }
             pc.addTrack(track, localStream!);
           } catch (addErr) {
             console.error('[WebRTC] Error in addTrack:', addErr);
@@ -513,9 +593,9 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         isCaller,
       });
 
-      // If Callee, notify Caller that Callee is ready
+      // If Callee, notify Caller that Callee has camera/mic ready
       if (!isCaller) {
-        console.log('[WebRTC] Callee ready, emitting webrtc:ready');
+        console.log('[WebRTC] Callee ready with tracks, emitting webrtc:ready');
         socket.emit('webrtc:ready', {
           callId: call.id,
           userId: myUserId,
@@ -526,9 +606,11 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         hasSentInitialOfferRef.current = true;
         sendOffer();
       }
+
+      return localStream;
     };
 
-    initLocalMedia();
+    localMediaPromiseRef.current = initLocalMedia();
 
     // G. Cleanup on Unmount or Call End
     return () => {
@@ -598,22 +680,6 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     }
   }, [callState, hasRemoteStream, isRemoteVideoOff]);
 
-  // 3. Call Duration Timer & Dynamic Audio Level Animation
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (callState === 'connected') {
-      interval = setInterval(() => {
-        setSeconds((prev) => prev + 1);
-        if (!isMuted) {
-          setAudioMeterLevel(Math.floor(Math.random() * 50) + 40);
-        } else {
-          setAudioMeterLevel(0);
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [callState, isMuted]);
-
   // 4. Toggle Microphone Mute
   const toggleMute = () => {
     const nextMuted = !isMuted;
@@ -652,7 +718,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const newStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: nextFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { facingMode: nextFacingMode, width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 } },
           audio: false,
         });
         const newVideoTrack = newStream.getVideoTracks()[0];
@@ -702,14 +768,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     }
   };
 
-  // 9. Format Time (MM:SS)
-  const formatTime = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const rem = secs % 60;
-    return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
-  };
-
-  // 10. End Call Handler
+  // 9. End Call Handler
   const handleEnd = async () => {
     console.log('[WebRTC] Hanging up call...');
     soundManager.stopOutgoingRingtone();
@@ -779,7 +838,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
               {callState === 'connected' ? (
                 <span className="text-emerald-400 font-mono font-bold flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  {formatTime(seconds)}
+                  <CallTimer isActive={true} />
                 </span>
               ) : (
                 <span className="text-rose-400 font-medium flex items-center gap-1.5 animate-pulse">
@@ -884,20 +943,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                     )}
                   </div>
 
-                  {callState === 'connected' && (
-                    <div className="flex items-center gap-1.5 h-8 mt-5">
-                      {[40, 70, 95, 60, 30, 85, 50, 90, 45, 65, 80, 35].map((h, i) => (
-                        <div
-                          key={i}
-                          className="w-1.5 bg-emerald-400 rounded-full animate-pulse shadow-sm shadow-emerald-500/50"
-                          style={{
-                            height: `${Math.max(6, (h * audioMeterLevel) / 100)}px`,
-                            animationDelay: `${i * 0.08}s`,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  <AudioVisualizer isActive={callState === 'connected' && !isMuted} />
                 </div>
               )}
 
@@ -981,20 +1027,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
             </div>
 
             {/* Voice Activity Frequency Visualizer */}
-            {callState === 'connected' && (
-              <div className="flex items-center gap-1.5 h-8">
-                {[40, 70, 100, 60, 30, 80, 50, 90, 45, 65, 85, 35].map((h, i) => (
-                  <div
-                    key={i}
-                    className="w-1.5 bg-emerald-400 rounded-full animate-pulse"
-                    style={{
-                      height: `${Math.max(6, (h * (audioMeterLevel || 35)) / 100)}px`,
-                      animationDelay: `${i * 0.08}s`,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+            <AudioVisualizer isActive={callState === 'connected' && !isMuted} />
 
           </div>
         )}

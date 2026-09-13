@@ -77,8 +77,8 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     planExpiresAt?: string | null;
     paymentHistory: PaymentTransaction[];
   }>({
-    hasActiveSubscription: currentUser?.subscription_tier === 'VIP',
-    currentPlan: currentUser?.subscription_tier || 'FREE',
+    hasActiveSubscription: currentUser?.subscriptionTier === 'VIP',
+    currentPlan: currentUser?.subscriptionTier || 'FREE',
     paymentHistory: [],
   });
   const [isLoadingSub, setIsLoadingSub] = useState(false);
@@ -136,11 +136,11 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
 
   // Privacy Toggles
   const [privacySettings, setPrivacySettings] = useState(() => ({
-    isVisible: currentProfile?.is_visible !== 0,
-    showAge: currentProfile?.show_age !== 0,
-    showApproxLocation: currentProfile?.show_approx_location !== 0,
-    allowCalls: currentProfile?.allow_calls !== 0,
-    allowMessages: currentProfile?.allow_messages !== 0,
+    isVisible: currentProfile?.is_visible !== false,
+    showAge: currentProfile?.show_age !== false,
+    showApproxLocation: currentProfile?.show_approx_location !== false,
+    allowCalls: currentProfile?.allow_calls !== false,
+    allowMessages: currentProfile?.allow_messages !== false,
   }));
 
   // Calculate Boost Countdown
@@ -202,9 +202,9 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
       const res = await api.getMySubscriptionStatus();
       if (res) {
         setSubStatus({
-          hasActiveSubscription: res.hasActiveSubscription,
-          currentPlan: res.currentPlan || currentUser?.subscription_tier || 'FREE',
-          planExpiresAt: res.planExpiresAt,
+          hasActiveSubscription: Boolean(res.activeSubscription || res.tier === 'VIP' || res.tier === 'PREMIUM'),
+          currentPlan: res.tier || currentUser?.subscriptionTier || 'FREE',
+          planExpiresAt: res.expiresAt,
           paymentHistory: res.paymentHistory || [],
         });
       }
@@ -294,7 +294,7 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     setIsSendingReset(true);
     setResetMessage('');
     try {
-      await api.requestPasswordReset(currentUser.email);
+      await api.forgotPassword(currentUser.email);
       setResetMessage(`Reset verification code sent to ${currentUser.email}.`);
     } catch (err: any) {
       setResetMessage(err.message || 'Could not send reset code. Please try again.');
@@ -318,11 +318,11 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
 
     if (onUpdateProfile) {
       const payload: Partial<Profile> = {};
-      if (key === 'isVisible') payload.is_visible = nextVal ? 1 : 0;
-      if (key === 'showAge') payload.show_age = nextVal ? 1 : 0;
-      if (key === 'showApproxLocation') payload.show_approx_location = nextVal ? 1 : 0;
-      if (key === 'allowCalls') payload.allow_calls = nextVal ? 1 : 0;
-      if (key === 'allowMessages') payload.allow_messages = nextVal ? 1 : 0;
+      if (key === 'isVisible') payload.is_visible = nextVal;
+      if (key === 'showAge') payload.show_age = nextVal;
+      if (key === 'showApproxLocation') payload.show_approx_location = nextVal;
+      if (key === 'allowCalls') payload.allow_calls = nextVal;
+      if (key === 'allowMessages') payload.allow_messages = nextVal;
       onUpdateProfile(payload);
     }
   };
@@ -331,7 +331,7 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
   const userName = currentProfile?.name || currentUser?.email?.split('@')[0] || 'My Profile';
   const userAge = currentProfile?.age;
   const userCity = currentProfile?.city || currentProfile?.country;
-  const isVip = currentUser?.subscription_tier === 'VIP' || subStatus.hasActiveSubscription;
+  const isVip = currentUser?.subscriptionTier === 'VIP' || subStatus.hasActiveSubscription;
 
   return (
     <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 pb-24 sm:pb-28 space-y-4 sm:space-y-6">
@@ -507,27 +507,31 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
               </div>
             ) : (
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {subStatus.paymentHistory.map((tx) => (
-                  <div 
-                    key={tx.id} 
-                    className="p-3 rounded-xl bg-stone-950/70 border border-stone-800/80 flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <p className="font-semibold text-white">{tx.plan_name || 'VIP Subscription'}</p>
-                      <p className="text-stone-400 text-[11px]">
-                        {new Date(tx.created_at).toLocaleString()} • {tx.payment_method || 'Card / Crypto'}
-                      </p>
+                {subStatus.paymentHistory.map((tx) => {
+                  const statusText = (tx.paymentStatus || tx.payment_status || 'completed').toString().toUpperCase();
+                  const isSuccess = statusText === 'COMPLETED' || statusText === 'FINISHED' || statusText === 'CONFIRMED';
+                  return (
+                    <div 
+                      key={tx.id} 
+                      className="p-3 rounded-xl bg-stone-950/70 border border-stone-800/80 flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <p className="font-semibold text-white">{tx.plan_name || tx.planName || 'VIP Subscription'}</p>
+                        <p className="text-stone-400 text-[11px]">
+                          {tx.created_at || tx.createdAt ? new Date(tx.created_at || tx.createdAt!).toLocaleString() : 'Recent'} • {tx.cryptoCurrency || tx.currency || 'USD'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-emerald-400">${(tx.amount || 0).toFixed(2)}</p>
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          isSuccess ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                        }`}>
+                          {statusText}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-emerald-400">${(tx.amount || 0).toFixed(2)}</p>
-                      <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        tx.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                      }`}>
-                        {tx.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

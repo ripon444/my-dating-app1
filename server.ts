@@ -2261,7 +2261,6 @@ app.post('/api/calls', async (req, res) => {
           };
           io.to(`user_${user.id}`).emit('call:accepted', { callId, call: acceptedCall });
           io.to(`call_${callId}`).emit('call:accepted', { callId, call: acceptedCall });
-          io.emit('call:accepted', { callId, call: acceptedCall });
         }
       } catch (autoErr) {
         console.warn('Auto-accept check note:', autoErr);
@@ -2290,7 +2289,7 @@ app.post('/api/calls/:id/accept', async (req, res) => {
   };
 
   io.to(`user_${callRow?.caller_id}`).emit('call:accepted', { callId: req.params.id, call });
-  io.emit('call:accepted', { callId: req.params.id, call });
+  io.to(`call_${req.params.id}`).emit('call:accepted', { callId: req.params.id, call });
 
   res.json({ call });
 });
@@ -2325,7 +2324,7 @@ app.post('/api/calls/:id/end', async (req, res) => {
 
   io.to(`user_${callRow?.caller_id}`).emit('call:ended', { callId: req.params.id, duration });
   io.to(`user_${callRow?.receiver_id}`).emit('call:ended', { callId: req.params.id, duration });
-  io.emit('call:ended', { callId: req.params.id, duration });
+  io.to(`call_${req.params.id}`).emit('call:ended', { callId: req.params.id, duration });
 
   res.json({ success: true, duration });
 });

@@ -478,9 +478,10 @@ function MainApp() {
     });
 
     socket.on('call:ended', (data: any) => {
-      if (!data?.callId || (activeCall && activeCall.id === data.callId) || (incomingCall && incomingCall.id === data.callId)) {
-        setActiveCall(null);
-        setIncomingCall(null);
+      const endedCallId = data?.callId || data?.id;
+      if (endedCallId) {
+        setActiveCall((prev) => (prev && prev.id === endedCallId ? null : prev));
+        setIncomingCall((prev) => (prev && prev.id === endedCallId ? null : prev));
         api.getCallHistory().then((c) => setCallHistory(c.calls)).catch(() => {});
       }
     });
