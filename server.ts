@@ -2236,9 +2236,8 @@ app.post('/api/calls', async (req, res) => {
     created_at: now,
   };
 
-  // Emit to receiver's private socket room AND broadcast
+  // Emit only to receiver's private socket room
   io.to(`user_${targetUserId}`).emit('call:incoming', newCall);
-  io.emit('call:incoming', newCall);
 
   console.log(`[SQL Calls] Initiated call ${callId} from ${user.id} to ${targetUserId} (${type})`);
 
@@ -2302,8 +2301,10 @@ app.post('/api/calls/:id/reject', async (req, res) => {
   );
 
   const callRow = await SqlHelper.queryOne('SELECT * FROM calls WHERE id = ?', [req.params.id]);
-  io.to(`user_${callRow?.caller_id}`).emit('call:rejected', { callId: req.params.id });
-  io.emit('call:rejected', { callId: req.params.id });
+  if (callRow?.caller_id) {
+    io.to(`user_${callRow.caller_id}`).emit('call:rejected', { callId: req.params.id });
+  }
+  io.to(`call_${req.params.id}`).emit('call:rejected', { callId: req.params.id });
 
   res.json({ success: true });
 });

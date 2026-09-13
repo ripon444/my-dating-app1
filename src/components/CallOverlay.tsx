@@ -89,7 +89,7 @@ const AudioVisualizer: React.FC<{ isActive: boolean }> = React.memo(({ isActive 
   );
 });
 
-export const CallOverlay: React.FC<CallOverlayProps> = ({
+const CallOverlayComponent: React.FC<CallOverlayProps> = ({
   call,
   currentUser,
   currentUserProfile,
@@ -129,6 +129,9 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const localVideoStreamRef = useRef<MediaStream | null>(null);
+  const remoteVideoStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioStreamRef = useRef<MediaStream | null>(null);
   const iceCandidatesQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const isInitiatingOfferRef = useRef<boolean>(false);
   const isCleaningUpRef = useRef<boolean>(false);
@@ -262,44 +265,41 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       // Ensure track is active and enabled
       event.track.enabled = true;
 
-      // Get or create remote MediaStream
-      let rStream = remoteStreamRef.current;
-      if (!rStream) {
-        rStream = new MediaStream();
-        remoteStreamRef.current = rStream;
-      }
-
-      // Add track to remote stream if not already present
-      if (!rStream.getTracks().some((t) => t.id === event.track.id)) {
-        rStream.addTrack(event.track);
-      }
-
-      // Attach to appropriate media element based on track kind
+      // Handle video track: attach ONLY video track to <video> element
       if (event.track.kind === 'video') {
         setHasRemoteStream(true);
-        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== rStream) {
-          remoteVideoRef.current.srcObject = rStream;
+        let vStream = remoteVideoStreamRef.current;
+        if (!vStream) {
+          vStream = new MediaStream([event.track]);
+          remoteVideoStreamRef.current = vStream;
+        } else if (!vStream.getTracks().some((t) => t.id === event.track.id)) {
+          vStream.addTrack(event.track);
         }
-        playMediaElement(remoteVideoRef.current);
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== vStream) {
+          remoteVideoRef.current.srcObject = vStream;
+          remoteVideoRef.current.play().catch(() => {});
+        }
       } else if (event.track.kind === 'audio') {
         if (call.type === 'voice') {
           setHasRemoteStream(true);
         }
-        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== rStream) {
-          remoteAudioRef.current.srcObject = rStream;
+        // Handle audio track: attach ONLY audio track to <audio> element
+        let aStream = remoteAudioStreamRef.current;
+        if (!aStream) {
+          aStream = new MediaStream([event.track]);
+          remoteAudioStreamRef.current = aStream;
+        } else if (!aStream.getTracks().some((t) => t.id === event.track.id)) {
+          aStream.addTrack(event.track);
         }
-        playMediaElement(remoteAudioRef.current);
+        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== aStream) {
+          remoteAudioRef.current.srcObject = aStream;
+          remoteAudioRef.current.play().catch(() => {});
+        }
       }
 
       event.track.onunmute = () => {
         console.log(`[WebRTC] Remote track unmuted: ${event.track.kind}`);
-        if (event.track.kind === 'video') {
-          setHasRemoteStream(true);
-          if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
-            remoteVideoRef.current.srcObject = remoteStreamRef.current;
-          }
-          playMediaElement(remoteVideoRef.current);
-        }
+        event.track.enabled = true;
       };
 
       setCallState('connected');
@@ -563,11 +563,16 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       if (localStream) {
         localStreamRef.current = localStream;
 
-        // Attach to local video element immediately
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = localStream;
-          localVideoRef.current.muted = true; // prevent local audio feedback
-          playMediaElement(localVideoRef.current);
+        // Attach video tracks ONLY to local video element (avoid audio pipeline interference)
+        const videoTracks = localStream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          const videoStream = new MediaStream(videoTracks);
+          localVideoStreamRef.current = videoStream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = videoStream;
+            localVideoRef.current.muted = true;
+            localVideoRef.current.play().catch(() => {});
+          }
         }
 
         // Add local tracks to RTCPeerConnection with motion hint for smooth playback
@@ -635,20 +640,21 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       // Stop local tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => {
-          console.log(`[WebRTC] Stopping local track: ${t.kind}`);
           t.stop();
         });
         localStreamRef.current = null;
       }
+      localVideoStreamRef.current = null;
 
       // Stop remote tracks
       if (remoteStreamRef.current) {
         remoteStreamRef.current.getTracks().forEach((t) => {
-          console.log(`[WebRTC] Stopping remote track: ${t.kind}`);
           t.stop();
         });
         remoteStreamRef.current = null;
       }
+      remoteVideoStreamRef.current = null;
+      remoteAudioStreamRef.current = null;
 
       // Close RTCPeerConnection
       if (peerConnectionRef.current) {
@@ -661,24 +667,20 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     };
   }, [call.id, call.type, isCaller, myUserId, otherUserId]);
 
-  // Synchronize stream references on video elements to prevent flickering or freezing
+  // Synchronize stream references on video elements if not yet attached
   useEffect(() => {
-    if (localVideoRef.current && localStreamRef.current) {
-      if (localVideoRef.current.srcObject !== localStreamRef.current) {
-        localVideoRef.current.srcObject = localStreamRef.current;
-      }
-      playMediaElement(localVideoRef.current);
+    if (localVideoRef.current && localVideoStreamRef.current && !localVideoRef.current.srcObject) {
+      localVideoRef.current.srcObject = localVideoStreamRef.current;
+      localVideoRef.current.play().catch(() => {});
     }
-  }, [callState, isVideoOff, facingMode]);
+  }, [isVideoOff, facingMode]);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStreamRef.current) {
-      if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
-        remoteVideoRef.current.srcObject = remoteStreamRef.current;
-      }
-      playMediaElement(remoteVideoRef.current);
+    if (remoteVideoRef.current && remoteVideoStreamRef.current && !remoteVideoRef.current.srcObject) {
+      remoteVideoRef.current.srcObject = remoteVideoStreamRef.current;
+      remoteVideoRef.current.play().catch(() => {});
     }
-  }, [callState, hasRemoteStream, isRemoteVideoOff]);
+  }, [hasRemoteStream, isRemoteVideoOff]);
 
   // 4. Toggle Microphone Mute
   const toggleMute = () => {
@@ -724,12 +726,19 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         const newVideoTrack = newStream.getVideoTracks()[0];
 
         if (newVideoTrack && localStreamRef.current) {
-          const oldTrack = localStreamRef.current.getVideoTracks()[0];
-          if (oldTrack) {
-            oldTrack.stop();
-            localStreamRef.current.removeTrack(oldTrack);
-          }
+          const oldTracks = localStreamRef.current.getVideoTracks();
+          oldTracks.forEach((t) => {
+            t.stop();
+            localStreamRef.current?.removeTrack(t);
+          });
           localStreamRef.current.addTrack(newVideoTrack);
+
+          const newLocalVidStream = new MediaStream([newVideoTrack]);
+          localVideoStreamRef.current = newLocalVidStream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = newLocalVidStream;
+            localVideoRef.current.play().catch(() => {});
+          }
 
           if (peerConnectionRef.current) {
             const senders = peerConnectionRef.current.getSenders();
@@ -737,11 +746,6 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
             if (videoSender) {
               videoSender.replaceTrack(newVideoTrack);
             }
-          }
-
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = localStreamRef.current;
-            playMediaElement(localVideoRef.current);
           }
         }
       }
@@ -900,8 +904,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                 autoPlay
                 playsInline
                 muted={true}
-                onLoadedMetadata={(e) => playMediaElement(e.currentTarget)}
-                className={`w-full h-full object-cover ${hasRemoteStream && !isRemoteVideoOff ? 'opacity-100' : 'opacity-0 absolute inset-0 pointer-events-none'}`}
+                className={`w-full h-full object-cover pointer-events-none transition-opacity duration-200 ${hasRemoteStream && !isRemoteVideoOff ? 'opacity-100' : 'opacity-0 absolute inset-0'}`}
               />
 
               {/* Remote Avatar Screen when video is off or connecting */}
@@ -968,8 +971,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                 autoPlay
                 playsInline
                 muted={true}
-                onLoadedMetadata={(e) => playMediaElement(e.currentTarget)}
-                className={`w-full h-full object-cover ${isVideoOff ? 'opacity-0' : 'opacity-100'} ${facingMode === 'user' ? '-scale-x-100' : ''}`}
+                className={`w-full h-full object-cover transition-opacity duration-200 ${isVideoOff ? 'opacity-0' : 'opacity-100'} ${facingMode === 'user' ? '-scale-x-100' : ''}`}
               />
 
               {isVideoOff && (
@@ -990,7 +992,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
             {/* Live Indicator Overlay */}
             {callState === 'connected' && (
               <div className="absolute top-4 left-4 z-20 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-white text-xs font-medium flex items-center gap-2 shadow-lg pointer-events-none">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-500/50" />
                 <span>{targetName} (Live 2-Way HD)</span>
               </div>
             )}
@@ -1116,4 +1118,5 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   );
 };
 
+export const CallOverlay = React.memo(CallOverlayComponent);
 export default CallOverlay;
