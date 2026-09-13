@@ -136,9 +136,43 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
   const isInitiatingOfferRef = useRef<boolean>(false);
   const isCleaningUpRef = useRef<boolean>(false);
   const sendOfferRef = useRef<() => void>(() => {});
+  // Stable inline helper that never changes identity, so every trigger path
+  // (accepted-status effect, socket handlers, initLocalMedia dispatch) funnels
+  // through exactly one idempotent initial-offer gate.
+  const ensureInitialOfferRef = useRef<() => void>(() => {});
   const hasSentInitialOfferRef = useRef<boolean>(false);
+  // Tracks the RTCPeerConnection instance that the (one) initial offer already ran
+  // for. Initial offer initiations are keyed to the peer connection, not to wall time.
+  const hasSentInitialOfferForPcRef = useRef<RTCPeerConnection | null>(null);
+  // Local "peer ready" marker used to recover offer dispatch when webrtc:ready
+  // storm race and duplicate acks race each other (see ensureInitialOffer).
+  const havePeerSignaledRef = useRef<boolean>(false);
   const localMediaPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
   const onEndCallRef = useRef(onEndCall);
+
+  // Always point the inline helper at the live engine. Reading the refs in the
+  // closure (rather than state) keeps the function referentially stable.
+  ensureInitialOfferRef.current = () => {
+    if (isCleaningUpRef.current) return;
+    if (!isCaller) return;
+
+    // Collapse with local peer-ready + acceptance bookkeeping.
+    if (!havePeerSignaledRef.current && call.status !== 'accepted') return;
+    if (hasSentInitialOfferRef.current) return;
+    // Allow the first offer (null) or a retry on the same pc; block stale
+    // triggers that belong to a previous (already-torn-down) peer connection.
+    if (hasSentInitialOfferForPcRef.current !== null && hasSentInitialOfferForPcRef.current !== peerConnectionRef.current) return;
+    if (isInitiatingOfferRef.current) return;
+
+    const pc = peerConnectionRef.current;
+    if (!pc || pc.signalingState !== 'stable') return;
+
+    hasSentInitialOfferRef.current = true;
+    hasSentInitialOfferForPcRef.current = pc;
+    const sendFn = sendOfferRef.current;
+    if (typeof sendFn !== 'function') return;
+    sendFn();
+  };
 
   useEffect(() => {
     onEndCallRef.current = onEndCall;
@@ -173,14 +207,13 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
     };
   }, [isCaller, callState]);
 
-  // Handle call status accepted transition smoothly without tearing down WebRTC
+  // Handle call status accepted transition smoothly without tearing down WebRTC.
+  // The initial offer is dispatched through ensureInitialOffer(), which collapses
+  // duplicate acceptance/ready triggers into a single offer per RTCPeerConnection.
   useEffect(() => {
     if (call.status === 'accepted') {
       soundManager.stopOutgoingRingtone();
-      if (isCaller && peerConnectionRef.current && peerConnectionRef.current.signalingState === 'stable' && !hasSentInitialOfferRef.current) {
-        hasSentInitialOfferRef.current = true;
-        sendOfferRef.current();
-      }
+      ensureInitialOfferRef.current();
     }
   }, [call.status, isCaller]);
 
@@ -188,6 +221,7 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
   useEffect(() => {
     isCleaningUpRef.current = false;
     hasSentInitialOfferRef.current = false;
+    havePeerSignaledRef.current = false;
     const socket = getSocket();
     let isCancelled = false;
 
@@ -259,47 +293,62 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
     };
 
     // C. Remote Track Reception (ontrack)
-    pc.ontrack = (event) => {
-      console.log(`[WebRTC] ontrack received: kind=${event.track.kind}, id=${event.track.id}`);
-      
-      // Ensure track is active and enabled
-      event.track.enabled = true;
-
-      // Handle video track: attach ONLY video track to <video> element
-      if (event.track.kind === 'video') {
-        setHasRemoteStream(true);
+    // Deduplicate by remote track id so repeated renegotiation cannot rebuild the
+    // remote stream (which would visually re-mount the <video> element).
+    const attachRemoteTrack = (kind: string, track: MediaStreamTrack) => {
+      if (kind === 'video') {
         let vStream = remoteVideoStreamRef.current;
         if (!vStream) {
-          vStream = new MediaStream([event.track]);
+          vStream = new MediaStream([track]);
           remoteVideoStreamRef.current = vStream;
-        } else if (!vStream.getTracks().some((t) => t.id === event.track.id)) {
-          vStream.addTrack(event.track);
+        } else if (!vStream.getTracks().some((t) => t.id === track.id)) {
+          vStream.addTrack(track);
         }
         if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== vStream) {
           remoteVideoRef.current.srcObject = vStream;
-          remoteVideoRef.current.play().catch(() => {});
         }
-      } else if (event.track.kind === 'audio') {
-        if (call.type === 'voice') {
-          setHasRemoteStream(true);
-        }
-        // Handle audio track: attach ONLY audio track to <audio> element
+      } else if (kind === 'audio') {
         let aStream = remoteAudioStreamRef.current;
         if (!aStream) {
-          aStream = new MediaStream([event.track]);
+          aStream = new MediaStream([track]);
           remoteAudioStreamRef.current = aStream;
-        } else if (!aStream.getTracks().some((t) => t.id === event.track.id)) {
-          aStream.addTrack(event.track);
+        } else if (!aStream.getTracks().some((t) => t.id === track.id)) {
+          aStream.addTrack(track);
         }
         if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== aStream) {
           remoteAudioRef.current.srcObject = aStream;
-          remoteAudioRef.current.play().catch(() => {});
         }
       }
+    };
 
+    pc.ontrack = (event) => {
+      console.log(`[WebRTC] ontrack received: kind=${event.track.kind}, id=${event.track.id}`);
+
+      // Ensure track is active and enabled
+      event.track.enabled = true;
+      attachRemoteTrack(event.track.kind, event.track);
+
+      // A remote visual (video for video calls, audio for voice calls) means the
+      // call is live. Once true, hasRemoteStream is never reset during the call,
+      // so duplicate ontrack events cannot toggle the avatar/video opacity.
+      const isVisual = event.track.kind === 'video' || (event.track.kind === 'audio' && call.type === 'voice');
+      if (isVisual) setHasRemoteStream(true);
+
+      // Mute/unmute of a REMOTE track only reflects the remote user's media
+      // state. Never recreate the peer connection or re-acquire getUserMedia here.
+      event.track.onmute = () => {
+        console.log(`[WebRTC] Remote track muted: ${event.track.kind}, id=${event.track.id}`);
+        event.track.enabled = false;
+        if (event.track.kind === 'video') {
+          setIsRemoteVideoOff(true);
+        }
+      };
       event.track.onunmute = () => {
-        console.log(`[WebRTC] Remote track unmuted: ${event.track.kind}`);
+        console.log(`[WebRTC] Remote track unmuted: ${event.track.kind}, id=${event.track.id}`);
         event.track.enabled = true;
+        if (event.track.kind === 'video') {
+          setIsRemoteVideoOff(false);
+        }
       };
 
       setCallState('connected');
@@ -307,13 +356,20 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
     };
 
     // D. Function to Create and Dispatch SDP Offer (Caller)
-    const sendOffer = async (isRenegotiation = false) => {
+    const sendOffer = async () => {
       if (isCancelled || isCleaningUpRef.current) return;
       if (!isCaller) return;
+
+      // Offer generation is guarded by ensureInitialOfferRef (the only caller of
+      // sendOffer). This function must be fully re-entrant: if the guard ever
+      // lets two calls interleave, createOffer/setLocalDescription would raise and
+      // get logged. Clearing the in-flight flag via try/finally (not a 500 ms
+      // timeout) means a failure recovers immediately instead of racing.
       if (isInitiatingOfferRef.current) {
         console.log('[WebRTC] Already initiating offer, skipping');
         return;
       }
+      isInitiatingOfferRef.current = true;
 
       // Ensure local media is ready and tracks are attached before creating offer
       if (localMediaPromiseRef.current) {
@@ -328,9 +384,7 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       }
 
       try {
-        console.log(`[WebRTC] Creating SDP offer (renegotiation: ${isRenegotiation})...`);
-        isInitiatingOfferRef.current = true;
-
+        console.log('[WebRTC] Creating SDP offer...');
         const offer = await pc.createOffer({
           offerToReceiveAudio: true,
           offerToReceiveVideo: call.type === 'video',
@@ -357,16 +411,28 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       } catch (err) {
         console.error('[WebRTC] Error in sendOffer:', err);
       } finally {
-        setTimeout(() => {
-          isInitiatingOfferRef.current = false;
-        }, 500);
+        isInitiatingOfferRef.current = false;
       }
     };
     sendOfferRef.current = sendOffer;
 
     // E. Socket Signaling Event Handlers
     const handleOffer = async (payload: any) => {
+      // Duplicate tolerance: ignore offers that are not for this call, or that
+      // are echoed back to the caller (server relays to the whole call room).
       if (payload?.callId !== call.id || isCaller || isCancelled) return;
+
+      // The callee's answer handler fires once per offer. If we are already
+      // mid-negotiation or the offer has already been answered, drop the
+      // duplicate instead of rolling back a good connection.
+      if (pc.signalingState === 'have-local-answer' || pc.signalingState === 'closed') {
+        console.log('[WebRTC] Ignoring offer, already answered/closed:', pc.signalingState);
+        return;
+      }
+      if (pc.localDescription?.type === 'offer') {
+        console.warn('[WebRTC] Ignoring duplicate offer, local offer already set');
+        return;
+      }
       console.log('[WebRTC] Received webrtc:offer from caller');
 
       // CRITICAL: Callee MUST wait for its local media (camera/mic) to initialize
@@ -384,7 +450,7 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
         const remoteDesc = new RTCSessionDescription(payload.offer);
         console.log('[WebRTC] setRemoteDescription with offer, current state:', pc.signalingState);
 
-        if (pc.signalingState !== 'stable') {
+        if (pc.signalingState === 'have-remote-offer') {
           console.warn('[WebRTC] Signaling state not stable before setRemoteDescription, rolling back');
           await pc.setLocalDescription({ type: 'rollback' } as any);
         }
@@ -426,9 +492,15 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
           console.log('[WebRTC] Caller setRemoteDescription with answer');
           await pc.setRemoteDescription(remoteDesc);
           await flushQueuedIceCandidates();
+          // The offer has been consumed by an answer — reset the in-flight marker
+          // in case a follow-up signal was queued behind this answer.
+          isInitiatingOfferRef.current = false;
           setCallState('connected');
           soundManager.stopOutgoingRingtone();
           soundManager.playConnectedChime();
+        } else if (pc.signalingState === 'stable') {
+          // Ignore answers delivered after negotiation already completed.
+          console.log('[WebRTC] Ignoring answer, negotiation already stable');
         } else {
           console.warn('[WebRTC] Received answer but signaling state was:', pc.signalingState);
         }
@@ -460,9 +532,12 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       console.log('[WebRTC] Received peer ready signal');
       soundManager.stopOutgoingRingtone();
       setCallState('connected');
-      if (isCaller && pc.signalingState === 'stable' && !isInitiatingOfferRef.current && !hasSentInitialOfferRef.current) {
-        hasSentInitialOfferRef.current = true;
-        sendOffer();
+      // Any webrtc:ready / call:ready / call:peer-joined / webrtc:request-offer
+      // means the peer is signaling ready. All initial-offer initiations funnel
+      // through ensureInitialOfferRef so bursts of these events collapse.
+      if (isCaller) {
+        havePeerSignaledRef.current = true;
+        ensureInitialOfferRef.current();
       }
     };
 
@@ -470,9 +545,10 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       console.log('[WebRTC] Received call:accepted event');
       soundManager.stopOutgoingRingtone();
       setCallState('connected');
-      if (isCaller && pc.signalingState === 'stable' && !isInitiatingOfferRef.current && !hasSentInitialOfferRef.current) {
-        hasSentInitialOfferRef.current = true;
-        sendOffer();
+      if (isCaller) {
+        // Accepts can be delivered multiple times (REST + socket + room echoes).
+        // ensureInitialOfferRef is idempotent per peer connection.
+        ensureInitialOfferRef.current();
       }
     };
 
@@ -607,9 +683,11 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
           targetUserId: otherUserId,
         });
       } else if (call.status === 'accepted') {
+        // Auto-accepted calls (offline receiver) never send webrtc:ready, so the
+        // caller dispatches the initial offer directly. Idempotent regardless of
+        // how many accept signals raced ahead.
         console.log('[WebRTC] Caller initializing accepted call, dispatching offer');
-        hasSentInitialOfferRef.current = true;
-        sendOffer();
+        ensureInitialOfferRef.current();
       }
 
       return localStream;
@@ -646,13 +724,15 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       }
       localVideoStreamRef.current = null;
 
-      // Stop remote tracks
-      if (remoteStreamRef.current) {
-        remoteStreamRef.current.getTracks().forEach((t) => {
-          t.stop();
-        });
-        remoteStreamRef.current = null;
-      }
+      // Stop remote tracks (the engine keeps video/audio streams in the same
+      // vStream/aStream MediaStreams, which remoteStreamRef aliases).
+      const stopRemoteTracks = (ms: MediaStream | null) => {
+        if (ms) ms.getTracks().forEach((t) => t.stop());
+      };
+      stopRemoteTracks(remoteStreamRef.current);
+      stopRemoteTracks(remoteVideoStreamRef.current);
+      stopRemoteTracks(remoteAudioStreamRef.current);
+      remoteStreamRef.current = null;
       remoteVideoStreamRef.current = null;
       remoteAudioStreamRef.current = null;
 

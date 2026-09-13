@@ -464,13 +464,6 @@ function MainApp() {
       }
     });
 
-    socket.on('call:accepted', (data: any) => {
-      const callData = data?.call || data;
-      if (callData?.id && activeCall && activeCall.id === callData.id) {
-        setActiveCall((prev) => prev ? { ...prev, ...callData, status: 'accepted' } : callData);
-      }
-    });
-
     socket.on('call:rejected', (callData: Call) => {
       if (activeCall && activeCall.id === callData.id) {
         setActiveCall(null);
@@ -551,7 +544,6 @@ function MainApp() {
       socket.off('connect', emitUserJoin);
       socket.off('match:created');
       socket.off('call:incoming');
-      socket.off('call:accepted');
       socket.off('call:rejected');
       socket.off('call:ended');
       socket.off('notification:new');
