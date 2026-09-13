@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Flame, 
   Heart, 
@@ -678,6 +678,10 @@ function MainApp() {
     } catch (err) {}
     setIncomingCall(null);
   };
+
+  const handleEndActiveCall = useCallback(() => {
+    setActiveCall(null);
+  }, []);
 
   // Direct Message Handler from Profile Modal
   const handleStartChat = async (profileOrId: Profile | string) => {
@@ -1487,7 +1491,7 @@ function MainApp() {
           call={activeCall}
           currentUser={currentUser}
           currentUserProfile={currentProfile}
-          onEndCall={() => setActiveCall(null)}
+          onEndCall={handleEndActiveCall}
         />
       )}
 

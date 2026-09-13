@@ -4658,11 +4658,8 @@ io.on('connection', (socket) => {
   socket.on('call:ready', (payload) => {
     if (payload?.callId) {
       console.log(`[Socket WebRTC] Peer ready in call_${payload.callId}`);
-      socket.to(`call_${payload.callId}`).emit('call:ready', payload);
       socket.to(`call_${payload.callId}`).emit('webrtc:ready', payload);
-    }
-    if (payload?.targetUserId) {
-      socket.to(`user_${payload.targetUserId}`).emit('call:ready', payload);
+    } else if (payload?.targetUserId) {
       socket.to(`user_${payload.targetUserId}`).emit('webrtc:ready', payload);
     }
   });
@@ -4671,24 +4668,23 @@ io.on('connection', (socket) => {
     if (payload?.callId) {
       console.log(`[Socket WebRTC] webrtc:ready received for call_${payload.callId}`);
       socket.to(`call_${payload.callId}`).emit('webrtc:ready', payload);
-    }
-    if (payload?.targetUserId) {
+    } else if (payload?.targetUserId) {
       socket.to(`user_${payload.targetUserId}`).emit('webrtc:ready', payload);
     }
   });
 
   socket.on('call:request-offer', (payload) => {
     if (payload?.callId) {
-      socket.to(`call_${payload.callId}`).emit('call:request-offer', payload);
       socket.to(`call_${payload.callId}`).emit('webrtc:request-offer', payload);
+    } else if (payload?.caller_id) {
+      socket.to(`user_${payload.caller_id}`).emit('webrtc:request-offer', payload);
     }
   });
 
   socket.on('webrtc:request-offer', (payload) => {
     if (payload?.callId) {
       socket.to(`call_${payload.callId}`).emit('webrtc:request-offer', payload);
-    }
-    if (payload?.caller_id) {
+    } else if (payload?.caller_id) {
       socket.to(`user_${payload.caller_id}`).emit('webrtc:request-offer', payload);
     }
   });
@@ -4697,7 +4693,7 @@ io.on('connection', (socket) => {
     if (payload?.receiver_id) {
       socket.to(`user_${payload.receiver_id}`).emit('call:incoming', payload);
     }
-    if (payload?.call?.receiver_id) {
+    if (payload?.call?.receiver_id && payload.call.receiver_id !== payload.receiver_id) {
       socket.to(`user_${payload.call.receiver_id}`).emit('call:incoming', payload.call);
     }
   });
@@ -4705,8 +4701,7 @@ io.on('connection', (socket) => {
   socket.on('call:accept', (payload) => {
     if (payload?.caller_id) {
       socket.to(`user_${payload.caller_id}`).emit('call:accepted', payload);
-    }
-    if (payload?.callId) {
+    } else if (payload?.callId) {
       socket.to(`call_${payload.callId}`).emit('call:accepted', payload);
     }
   });
@@ -4714,8 +4709,7 @@ io.on('connection', (socket) => {
   socket.on('call:reject', (payload) => {
     if (payload?.caller_id) {
       socket.to(`user_${payload.caller_id}`).emit('call:rejected', payload);
-    }
-    if (payload?.callId) {
+    } else if (payload?.callId) {
       socket.to(`call_${payload.callId}`).emit('call:rejected', payload);
     }
   });
@@ -4740,8 +4734,7 @@ io.on('connection', (socket) => {
     if (payload?.callId) {
       console.log(`[Socket WebRTC] Relaying offer for call_${payload.callId}`);
       socket.to(`call_${payload.callId}`).emit('webrtc:offer', payload);
-    }
-    if (payload?.receiver_id) {
+    } else if (payload?.receiver_id) {
       socket.to(`user_${payload.receiver_id}`).emit('webrtc:offer', payload);
     }
   });
@@ -4750,8 +4743,7 @@ io.on('connection', (socket) => {
     if (payload?.callId) {
       console.log(`[Socket WebRTC] Relaying answer for call_${payload.callId}`);
       socket.to(`call_${payload.callId}`).emit('webrtc:answer', payload);
-    }
-    if (payload?.caller_id) {
+    } else if (payload?.caller_id) {
       socket.to(`user_${payload.caller_id}`).emit('webrtc:answer', payload);
     }
   });
@@ -4759,8 +4751,7 @@ io.on('connection', (socket) => {
   socket.on('webrtc:ice-candidate', (payload) => {
     if (payload?.callId) {
       socket.to(`call_${payload.callId}`).emit('webrtc:ice-candidate', payload);
-    }
-    if (payload?.target_user_id) {
+    } else if (payload?.target_user_id) {
       socket.to(`user_${payload.target_user_id}`).emit('webrtc:ice-candidate', payload);
     }
   });

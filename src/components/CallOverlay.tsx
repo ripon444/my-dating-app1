@@ -85,6 +85,13 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   const iceCandidatesQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const isInitiatingOfferRef = useRef<boolean>(false);
   const isCleaningUpRef = useRef<boolean>(false);
+  const sendOfferRef = useRef<() => void>(() => {});
+  const hasSentInitialOfferRef = useRef<boolean>(false);
+  const onEndCallRef = useRef(onEndCall);
+
+  useEffect(() => {
+    onEndCallRef.current = onEndCall;
+  }, [onEndCall]);
 
   // Helper to safely play media elements
   const playMediaElement = (el: HTMLVideoElement | HTMLAudioElement | null) => {
@@ -93,7 +100,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       const p = el.play();
       if (p && typeof p.then === 'function') {
         p.catch((err) => {
-          console.warn('[WebRTC] playMediaElement autoplay note:', err);
+          console.warn('[WebRTC] playMediaElement note:', err?.message || err);
         });
       }
     } catch (e) {
@@ -115,9 +122,21 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     };
   }, [isCaller, callState]);
 
+  // Handle call status accepted transition smoothly without tearing down WebRTC
+  useEffect(() => {
+    if (call.status === 'accepted') {
+      soundManager.stopOutgoingRingtone();
+      if (isCaller && peerConnectionRef.current && peerConnectionRef.current.signalingState === 'stable' && !hasSentInitialOfferRef.current) {
+        hasSentInitialOfferRef.current = true;
+        sendOfferRef.current();
+      }
+    }
+  }, [call.status, isCaller]);
+
   // 2. Core WebRTC Connection & Signaling Engine
   useEffect(() => {
     isCleaningUpRef.current = false;
+    hasSentInitialOfferRef.current = false;
     const socket = getSocket();
     let isCancelled = false;
 
@@ -208,18 +227,30 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       }
 
       // Attach to remote audio element
-      if (remoteAudioRef.current) {
+      if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== rStream) {
         remoteAudioRef.current.srcObject = rStream;
         playMediaElement(remoteAudioRef.current);
       }
 
       // Attach to remote video element
-      if (remoteVideoRef.current) {
+      if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== rStream) {
         remoteVideoRef.current.srcObject = rStream;
         playMediaElement(remoteVideoRef.current);
       }
 
-      setHasRemoteStream(true);
+      event.track.onunmute = () => {
+        console.log(`[WebRTC] Remote track unmuted: ${event.track.kind}`);
+        if (remoteVideoRef.current && remoteStreamRef.current) {
+          if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
+            remoteVideoRef.current.srcObject = remoteStreamRef.current;
+          }
+          playMediaElement(remoteVideoRef.current);
+        }
+      };
+
+      if (event.track.kind === 'video' || call.type === 'voice') {
+        setHasRemoteStream(true);
+      }
       setCallState('connected');
       soundManager.stopOutgoingRingtone();
     };
@@ -228,6 +259,14 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     const sendOffer = async (isRenegotiation = false) => {
       if (isCancelled || isCleaningUpRef.current) return;
       if (!isCaller) return;
+      if (isInitiatingOfferRef.current) {
+        console.log('[WebRTC] Already initiating offer, skipping');
+        return;
+      }
+      if (pc.signalingState !== 'stable') {
+        console.log(`[WebRTC] Signaling state is not stable (${pc.signalingState}), skipping sendOffer`);
+        return;
+      }
 
       try {
         console.log(`[WebRTC] Creating SDP offer (renegotiation: ${isRenegotiation})...`);
@@ -237,6 +276,11 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
           offerToReceiveAudio: true,
           offerToReceiveVideo: call.type === 'video',
         });
+
+        if (pc.signalingState !== 'stable') {
+          console.warn(`[WebRTC] Signaling state changed to ${pc.signalingState} during createOffer, aborting`);
+          return;
+        }
 
         console.log('[WebRTC] setLocalDescription with offer');
         await pc.setLocalDescription(offer);
@@ -254,9 +298,12 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       } catch (err) {
         console.error('[WebRTC] Error in sendOffer:', err);
       } finally {
-        isInitiatingOfferRef.current = false;
+        setTimeout(() => {
+          isInitiatingOfferRef.current = false;
+        }, 500);
       }
     };
+    sendOfferRef.current = sendOffer;
 
     // E. Socket Signaling Event Handlers
     const handleOffer = async (payload: any) => {
@@ -343,7 +390,8 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       console.log('[WebRTC] Received peer ready signal');
       soundManager.stopOutgoingRingtone();
       setCallState('connected');
-      if (isCaller) {
+      if (isCaller && pc.signalingState === 'stable' && !isInitiatingOfferRef.current && !hasSentInitialOfferRef.current) {
+        hasSentInitialOfferRef.current = true;
         sendOffer();
       }
     };
@@ -352,7 +400,8 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       console.log('[WebRTC] Received call:accepted event');
       soundManager.stopOutgoingRingtone();
       setCallState('connected');
-      if (isCaller) {
+      if (isCaller && pc.signalingState === 'stable' && !isInitiatingOfferRef.current && !hasSentInitialOfferRef.current) {
+        hasSentInitialOfferRef.current = true;
         sendOffer();
       }
     };
@@ -361,7 +410,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
       console.log('[WebRTC] Received call:ended event');
       soundManager.stopOutgoingRingtone();
       soundManager.playEndTone();
-      onEndCall();
+      onEndCallRef.current();
     };
 
     const handleMediaToggle = (payload: any) => {
@@ -474,6 +523,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         });
       } else if (call.status === 'accepted') {
         console.log('[WebRTC] Caller initializing accepted call, dispatching offer');
+        hasSentInitialOfferRef.current = true;
         sendOffer();
       }
     };
@@ -527,7 +577,26 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
 
       socket.emit('call:leave', { callId: call.id });
     };
-  }, [call.id, call.status, call.type, isCaller, myUserId, otherUserId, onEndCall]);
+  }, [call.id, call.type, isCaller, myUserId, otherUserId]);
+
+  // Synchronize stream references on video elements to prevent flickering or freezing
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      if (localVideoRef.current.srcObject !== localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      playMediaElement(localVideoRef.current);
+    }
+  }, [callState, isVideoOff, facingMode]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+      playMediaElement(remoteVideoRef.current);
+    }
+  }, [callState, hasRemoteStream, isRemoteVideoOff]);
 
   // 3. Call Duration Timer & Dynamic Audio Level Animation
   useEffect(() => {
@@ -772,6 +841,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                 autoPlay
                 playsInline
                 muted={true}
+                onLoadedMetadata={(e) => playMediaElement(e.currentTarget)}
                 className={`w-full h-full object-cover ${hasRemoteStream && !isRemoteVideoOff ? 'opacity-100' : 'opacity-0 absolute inset-0 pointer-events-none'}`}
               />
 
@@ -852,6 +922,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                 autoPlay
                 playsInline
                 muted={true}
+                onLoadedMetadata={(e) => playMediaElement(e.currentTarget)}
                 className={`w-full h-full object-cover ${isVideoOff ? 'opacity-0' : 'opacity-100'} ${facingMode === 'user' ? '-scale-x-100' : ''}`}
               />
 
