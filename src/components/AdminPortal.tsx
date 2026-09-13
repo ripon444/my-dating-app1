@@ -20,7 +20,6 @@ import {
   LogOut,
   ArrowLeft,
   Mail,
-  Key,
   Eye,
   EyeOff,
   Search,
@@ -53,32 +52,15 @@ interface AdminPortalProps {
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
-  // Auth state
-  const [adminUser, setAdminUser] = useState<User | null>(() => {
-    try {
-      const saved = safeStorage.getItem('dating_admin_session');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (
-          parsed &&
-          (parsed.role === 'ADMIN' ||
-            parsed.email?.toLowerCase().includes('tanvir') ||
-            parsed.email?.toLowerCase().includes('admin'))
-        ) {
-          if (parsed.token && !getStoredToken()) {
-            setStoredToken(parsed.token);
-          }
-          return parsed;
-        }
-      }
-    } catch (e) {}
-    return null;
-  });
+  // Auth state. A saved admin session is only a *candidate* — it is shown as
+  // logged-in only after the server re-verifies the session token and confirms
+  // the caller is an administrator (see verifySavedAdminSession below).
+  const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [sessionChecked, setSessionChecked] = useState<boolean>(false);
 
   // Login form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [secretKey, setSecretKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -120,26 +102,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     if (!adminUser) return;
     setIsLoadingData(true);
     try {
-      // Ensure backend recognizes current admin session if superadmin
-      if (
-        adminUser.email?.toLowerCase().includes('tanvir') ||
-        adminUser.email?.toLowerCase() === 'admin@love.com'
-      ) {
-        await api.claimSuperAdmin('tanvir2026', adminUser.email).catch(() => {});
-      }
-
-      // Check current admin permissions & role
+      // Check current admin permissions & role directly from the server.
       const permRes = await api.getMyPermissions().catch(() => null);
       if (permRes?.success) {
         setAdminPermissions(permRes.permissions || []);
         setAdminRole(permRes.role || 'ADMIN');
         setIsSuperAdmin(Boolean(permRes.isSuperAdmin));
       } else {
-        const isSuper =
-          adminUser.email?.toLowerCase().includes('tanvir') ||
-          adminUser.email?.toLowerCase() === 'admin@love.com';
-        setIsSuperAdmin(isSuper);
-        setAdminRole(isSuper ? 'SUPER_ADMIN' : 'ADMIN');
+        setAdminPermissions([]);
+        setAdminRole('ADMIN');
+        setIsSuperAdmin(false);
       }
 
       const [analyticsData, providersData, reportsData, logsData, profilesData] = await Promise.all([
@@ -161,13 +133,50 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     }
   };
 
+  // Verify a previously-saved admin session token against the server. The client
+  // never trusts localStorage-admin flags; only a server-approved admin session
+  // unlocks the portal.
+  const verifySavedAdminSession = async () => {
+    try {
+      const saved = safeStorage.getItem('dating_admin_session');
+      if (!saved) {
+        setSessionChecked(true);
+        return;
+      }
+      const parsed = JSON.parse(saved);
+      if (parsed?.token && !getStoredToken()) {
+        setStoredToken(parsed.token);
+      }
+
+      const permRes = await api.verifyAdminAccess().catch(() => null);
+      if (permRes?.success && permRes.user) {
+        setAdminUser(permRes.user);
+        safeStorage.setItem('dating_admin_session', JSON.stringify({ ...permRes.user, token: parsed?.token }));
+        return;
+      }
+      // Not a valid administrator session: discard the forged/stale flag.
+      safeStorage.removeItem('dating_admin_session');
+    } catch (e) {
+      safeStorage.removeItem('dating_admin_session');
+    } finally {
+      setSessionChecked(true);
+    }
+  };
+
+  useEffect(() => {
+    verifySavedAdminSession();
+  }, []);
+
   useEffect(() => {
     if (adminUser) {
       loadAdminData();
     }
   }, [adminUser]);
 
-  // Handle Admin Login
+  // Handle Admin Login. The server performs the sole authorization check: only a
+  // successful login whose account carries an ADMIN role in the database (or is on
+  // the server-side super-admin allowlist) is admitted. There are no client-side
+  // master keys, passwords, or fallback "offline admin" identities.
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -184,73 +193,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     setLoginLoading(true);
 
     try {
-      const res = await api.login(inputEmail, inputPass, 'ADMIN');
-      const isAuthAdmin = 
-        res.user.role === 'ADMIN' || 
-        inputEmail.toLowerCase() === 'admin@love.com' ||
-        inputEmail.toLowerCase().includes('admin') || 
-        inputEmail.toLowerCase().includes('tanvir') || 
-        inputEmail.toLowerCase() === 'tanvirahmadkst@gmail.com' ||
-        inputPass === 'Tanvir@123456789' ||
-        inputPass === 'tanvir@123456789' ||
-        inputPass === 'admin123' || 
-        inputPass === 'tanvir' || 
-        inputPass === 'tanvir2026' || 
-        secretKey === 'Tanvir@123456789' ||
-        secretKey === 'tanvir' || 
-        secretKey === 'tanvir2026';
+      const res = await api.login(inputEmail, inputPass);
+      if (!res.success || !res.user) {
+        setLoginError('Invalid administrator credentials. Please check your email and password.');
+        return;
+      }
 
-      if (isAuthAdmin) {
-        if (res.token) {
-          setStoredToken(res.token);
-        }
-        const verifiedAdmin: User = {
-          ...res.user,
-          role: 'ADMIN',
-          email: inputEmail,
-        };
-        setAdminUser(verifiedAdmin);
-        safeStorage.setItem('dating_admin_session', JSON.stringify({ ...verifiedAdmin, token: res.token }));
-        api.claimSuperAdmin('tanvir2026', inputEmail).catch(() => {});
-      } else {
+      // Only admit users the server actually considers administrators.
+      if (res.user.role !== 'ADMIN' && res.user.role !== 'SUPER_ADMIN') {
         setLoginError('Access denied: You do not have administrator permissions.');
+        return;
       }
+
+      if (res.token) {
+        setStoredToken(res.token);
+      }
+      setAdminUser(res.user);
+      safeStorage.setItem('dating_admin_session', JSON.stringify({ ...res.user, token: res.token }));
     } catch (err: any) {
-      const isMasterAttempt =
-        inputEmail.toLowerCase() === 'admin@love.com' ||
-        inputEmail.toLowerCase() === 'tanvirahmadkst@gmail.com' ||
-        inputEmail.toLowerCase().includes('admin') || 
-        inputEmail.toLowerCase().includes('tanvir') ||
-        inputPass === 'Tanvir@123456789' ||
-        inputPass === 'tanvir@123456789' ||
-        inputPass === 'admin123' ||
-        inputPass === 'tanvir' ||
-        inputPass === 'tanvir2026' ||
-        secretKey === 'Tanvir@123456789' ||
-        secretKey === 'tanvir' ||
-        secretKey === 'tanvir2026';
-
-      if (isMasterAttempt) {
-        try {
-          await api.claimSuperAdmin('tanvir2026', inputEmail);
-        } catch (e) {}
-
-        const fallbackAdmin: User = {
-          id: inputEmail.includes('tanvir') ? 'usr_admin_tanvir' : 'usr_admin_master',
-          email: inputEmail || 'tanvirahmadkst@gmail.com',
-          role: 'ADMIN',
-          isEmailVerified: true,
-          isAgeVerified: true,
-          isBanned: false,
-          subscriptionTier: 'VIP',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        setAdminUser(fallbackAdmin);
-        safeStorage.setItem('dating_admin_session', JSON.stringify(fallbackAdmin));
-      } else {
-        setLoginError('Invalid administrator credentials. Please check your email, password, or security key.');
-      }
+      setLoginError(err?.message || 'Invalid administrator credentials. Please check your email and password.');
     } finally {
       setLoginLoading(false);
     }
@@ -262,7 +223,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
     setAdminUser(null);
     setEmail('');
     setPassword('');
-    setSecretKey('');
     setLogoutMessage('You have been securely logged out from the Super Admin Panel.');
   };
 
@@ -316,6 +276,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
       console.error('Moderation action error:', err);
     }
   };
+
+  // -------------------------------------------------------------
+  // VIEW 0: SESSION VERIFICATION (restoring a saved admin session)
+  // -------------------------------------------------------------
+  if (!adminUser && !sessionChecked) {
+    return (
+      <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col items-center justify-center gap-3 selection:bg-rose-500 selection:text-white">
+        <Loader2 className="w-6 h-6 text-rose-500 animate-spin" />
+        <p className="text-xs font-mono text-stone-400">Verifying administrator session…</p>
+      </div>
+    );
+  }
 
   // -------------------------------------------------------------
   // VIEW 1: ADMIN LOGIN SCREEN (If not authenticated)
@@ -421,20 +393,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-stone-400 flex items-center gap-1.5">
-                  <Key className="w-3.5 h-3.5 text-amber-400" /> Master Security Key (Optional)
-                </label>
-                <input
-                  type="password"
-                  value={secretKey}
-                  onChange={(e) => setSecretKey(e.target.value)}
-                  placeholder="Enter security key if bypassing password"
-                  autoComplete="off"
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-xs text-stone-300 placeholder-stone-600 focus:outline-none focus:border-amber-500 transition"
-                />
               </div>
 
               <button

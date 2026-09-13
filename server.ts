@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { getSqlDb, SqlHelper, persistDb } from './server/db';
+import { hashPassword, isHashedPassword, verifyPassword } from './server/password.ts';
 import {
   getPublicProfileById,
   followUser,
@@ -56,7 +57,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-token', 'x-admin-key', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-token', 'X-Requested-With'],
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -223,6 +224,9 @@ export function formatProfileRow(row: any): any {
   };
 }
 
+// Server-side explicit super-admin allowlist. This is the ONLY source of truth
+// for super-admin status — never derived from a client-supplied role, password,
+// key, or an email-pattern guess like "admin@<anything>".
 export const ADMIN_EMAILS = [
   'admin@love.com',
   'tanvirahmadkst@gmail.com',
@@ -234,14 +238,7 @@ export const ADMIN_EMAILS = [
 export function isSuperAdminEmail(email?: string): boolean {
   if (!email) return false;
   const clean = email.trim().toLowerCase();
-  return (
-    ADMIN_EMAILS.includes(clean) ||
-    clean === 'admin' ||
-    clean === 'tanvir' ||
-    clean === 'admin@love.com' ||
-    clean.startsWith('admin@') ||
-    clean.includes('tanvirahmadkst')
-  );
+  return ADMIN_EMAILS.includes(clean);
 }
 
 export function formatUserRow(row: any): any {
@@ -292,13 +289,9 @@ app.use(async (req, res, next) => {
       if (session && session.user_id) {
         let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [session.user_id]);
         if (userRow && !userRow.is_banned) {
-          if (isSuperAdminEmail(userRow.email) && userRow.role !== 'ADMIN') {
-            try {
-              await SqlHelper.execute("UPDATE users SET role = 'ADMIN', subscription_tier = 'VIP' WHERE id = ?", [userRow.id]);
-              userRow.role = 'ADMIN';
-              userRow.subscription_tier = 'VIP';
-            } catch (e) {}
-          }
+          // Admin role is read-only here: resolved from the stored user row.
+          // Authorization is enforced by requireAdmin below; we never mutate the
+          // user's role based on an email address during a request.
           (req as any).user = formatUserRow(userRow);
           const profileRow = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ?', [userRow.id]);
           (req as any).profile = profileRow ? formatProfileRow(profileRow) : null;
@@ -324,134 +317,73 @@ app.get('/api/auth/me', (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password } = req.body;
     if (!email) {
       return res.status(400).json({ error: 'Email address is required.' });
     }
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = (password || '').trim();
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const loginKey = `${cleanEmail}_${clientIp}`;
 
-    // Query user record from SQLite database
-    let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE LOWER(email) = ?', [cleanEmail]);
-
-    // Handle Admin account login
-    const isAdminAttempt =
-      role === 'ADMIN' ||
-      cleanEmail === 'admin@love.com' ||
-      cleanEmail === 'admin' ||
-      cleanEmail === 'tanvir' ||
-      cleanEmail === 'tanvirahmadkst@gmail.com' ||
-      cleanEmail === 'tanvir@gmail.com' ||
-      cleanEmail === 'admin@lovemeetly.com' ||
-      isSuperAdminEmail(cleanEmail);
-
-    if (isAdminAttempt) {
-      if (!userRow) {
-        userRow = await SqlHelper.queryOne(
-          "SELECT * FROM users WHERE role = 'ADMIN' OR LOWER(email) = ? OR LOWER(email) = 'admin@love.com' OR LOWER(email) = 'tanvirahmadkst@gmail.com'",
-          [cleanEmail]
-        );
-      }
-
-      // If userRow still doesn't exist for admin@love.com, create it automatically
-      if (!userRow && (cleanEmail === 'admin@love.com' || cleanEmail === 'admin')) {
-        const adminId = 'usr_admin_love';
-        const now = new Date().toISOString();
-        await SqlHelper.execute(
-          `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-           VALUES (?, 'admin@love.com', 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-          [adminId, now, now]
-        );
-        // Also create a profile for admin@love.com
-        await SqlHelper.execute(
-          `INSERT OR IGNORE INTO profiles (
-            id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
-            approx_distance_km, bio, photos_json, interests_json, languages_json, relationship_goal,
-            compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
-            show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
-          ) VALUES (
-            'prf_admin_love', ?, 'native', 'Admin', 30, '1995-01-01', 'MALE', 'Global', 'HQ', 'Main',
-            0, 'Lovemeetly Administrator.', '["https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=1000&q=80"]',
-            '["Admin", "Platform", "Global"]', '["English"]', 'Administration',
-            100, 1, ?, 1, 0, 0, 1, 0, 0, 0, ?, ?
-          )`,
-          [adminId, now, now, now]
-        );
-        userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [adminId]);
-      }
-
-      // If userRow still doesn't exist for tanvirahmadkst@gmail.com, create it automatically
-      if (!userRow && (cleanEmail === 'tanvirahmadkst@gmail.com' || cleanEmail === 'tanvir')) {
-        const adminId = 'usr_admin_tanvir';
-        const now = new Date().toISOString();
-        await SqlHelper.execute(
-          `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-           VALUES (?, 'tanvirahmadkst@gmail.com', 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-          [adminId, now, now]
-        );
-        userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [adminId]);
-      }
-
-      if (userRow) {
-        const validMasterPasswords = [
-          'Tanvir@123456789',
-          'tanvir@123456789',
-          'tanvir2026',
-          'tanvir',
-          'admin123',
-          'InitialPassword123',
-          '123456789',
-        ];
-        const isMasterPass = validMasterPasswords.includes(cleanPass);
-        if (userRow.password !== cleanPass && !isMasterPass) {
-          return res.status(400).json({ error: 'Invalid admin credentials.' });
-        }
-
-        // Guarantee role is ADMIN and tier is VIP in database
-        if (userRow.role !== 'ADMIN' || userRow.subscription_tier !== 'VIP') {
-          await SqlHelper.execute(
-            "UPDATE users SET role = 'ADMIN', subscription_tier = 'VIP' WHERE id = ?",
-            [userRow.id]
-          );
-          userRow.role = 'ADMIN';
-          userRow.subscription_tier = 'VIP';
-        }
-
-        const user = formatUserRow(userRow);
-        const profileRow = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ?', [user.id]);
-        const profile = profileRow ? formatProfileRow(profileRow) : null;
-
-        // Generate unique cryptographic session token
-        const token = 'tok_' + Date.now().toString(36) + '_' + crypto.randomBytes(16).toString('hex');
-        const now = new Date().toISOString();
-        const expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
-        await SqlHelper.execute('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', [
-          token,
-          user.id,
-          now,
-          expiresAt,
-        ]);
-
-        return res.json({
-          success: true,
-          user,
-          profile,
-          token,
-        });
-      }
+    // Brute-force protection: per-account+IP failed-login throttling.
+    // Uses the same in-memory pattern as the password-reset limits.
+    const loginLimit = loginAttemptLimits.get(loginKey);
+    if (loginLimit?.blockedUntil && Date.now() < loginLimit.blockedUntil) {
+      const waitMinutes = Math.ceil((loginLimit.blockedUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        error: `Too many failed login attempts. For your security, please wait ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''} before trying again.`
+      });
     }
 
+    // Query user record from SQLite database
+    const userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+
     if (!userRow) {
+      // Record the failed attempt so unknown-email probing is throttled too.
+      recordLoginFailure(loginKey);
       return res.status(400).json({ error: 'No account found with this email. Please register first.' });
     }
 
-    if (userRow.password !== cleanPass) {
+    // Password verification is always performed server-side. The stored value
+    // may be a scrypt hash (new accounts) or a legacy plaintext value (older
+    // accounts). Legacy values are verified and then upgraded to a hash below.
+    if (!verifyPassword(cleanPass, userRow.password || '')) {
+      recordLoginFailure(loginKey);
       return res.status(400).json({ error: 'Invalid password. Please check your password and try again.' });
+    }
+
+    // Successful login clears throttling state for this account+IP.
+    if (loginLimit) {
+      loginAttemptLimits.delete(loginKey);
     }
 
     if (userRow.is_banned) {
       return res.status(403).json({ error: 'This account has been suspended.' });
+    }
+
+    // Gradual migration: if the stored password is still a legacy plaintext
+    // value, replace it with a secure scrypt hash immediately. The plaintext is
+    // never logged or returned; it only exists transiently in this request.
+    if (!isHashedPassword(userRow.password || '')) {
+      const nowMs = new Date().toISOString();
+      const hashed = hashPassword(cleanPass);
+      await SqlHelper.execute('UPDATE users SET password = ?, updated_at = ? WHERE id = ?', [
+        hashed,
+        nowMs,
+        userRow.id,
+      ]);
+      try {
+        if (db) {
+          await db.update(pgUsers).set({
+            password: hashed,
+            updatedAt: new Date(),
+          }).where(eq(pgUsers.id, userRow.id));
+        }
+      } catch (pgErr) {
+        console.warn('[Postgres Auth Sync Notice]: Could not sync upgraded password hash:', pgErr);
+      }
     }
 
     // Update profile online status in SQL database
@@ -527,13 +459,16 @@ app.post('/api/auth/register', async (req, res) => {
     const initialRole = isSuperAdminEmail(cleanEmail) ? 'ADMIN' : 'USER';
     const initialTier = isSuperAdminEmail(cleanEmail) ? 'VIP' : 'FREE';
 
+    // Hash the password BEFORE inserting. Plaintext is never persisted.
+    const passwordHash = hashPassword(password.trim());
+
     // SQL INSERT INTO users table
     await SqlHelper.execute(
       `INSERT INTO users (
         id, email, password, role, is_email_verified, is_age_verified, is_banned,
         subscription_tier, created_at, updated_at
       ) VALUES (?, ?, ?, ?, 1, 1, 0, ?, ?, ?)`,
-      [newUserId, cleanEmail, password.trim(), initialRole, initialTier, now, now]
+      [newUserId, cleanEmail, passwordHash, initialRole, initialTier, now, now]
     );
 
     const femaleDemoPhotos = [
@@ -653,6 +588,34 @@ interface VerifyAttemptLimit {
   blockedUntil?: number;
 }
 const verifyCodeLimits = new Map<string, VerifyAttemptLimit>();
+
+// Login brute-force protection. Tracks failed attempts per account+IP with a
+// temporary lockout. The account is never permanently locked; a successful
+// login clears the counter.
+interface LoginAttemptLimit {
+  failedAttempts: number;
+  blockedUntil?: number;
+  firstFailureTime: number;
+}
+const loginAttemptLimits = new Map<string, LoginAttemptLimit>();
+
+const MAX_LOGIN_FAILURES = 10;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_RETRY_WINDOW_MS = 60 * 60 * 1000; // 1 hour rolling window
+
+function recordLoginFailure(key: string): void {
+  const nowMs = Date.now();
+  const current = loginAttemptLimits.get(key);
+  if (!current || nowMs - current.firstFailureTime > LOGIN_RETRY_WINDOW_MS) {
+    loginAttemptLimits.set(key, { failedAttempts: 1, firstFailureTime: nowMs });
+    return;
+  }
+  current.failedAttempts += 1;
+  if (current.failedAttempts >= MAX_LOGIN_FAILURES && !current.blockedUntil) {
+    current.blockedUntil = nowMs + LOGIN_LOCKOUT_MS;
+  }
+  loginAttemptLimits.set(key, current);
+}
 
 // Password Reset Flows (Forgot Password, Verify Code, Update Password)
 app.post('/api/auth/forgot-password', async (req, res) => {
@@ -923,9 +886,10 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
     const now = new Date().toISOString();
 
-    // 1. Update password in SQLite
+    // 1. Hash the new password and update SQLite. Plaintext is never stored.
+    const newPasswordHash = hashPassword(newPassword.trim());
     await SqlHelper.execute('UPDATE users SET password = ?, updated_at = ? WHERE LOWER(email) = ?', [
-      newPassword.trim(),
+      newPasswordHash,
       now,
       cleanEmail,
     ]);
@@ -937,7 +901,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
     try {
       if (db) {
         await db.update(pgUsers).set({
-          password: newPassword.trim(),
+          password: newPasswordHash,
           updatedAt: new Date(),
         }).where(eq(pgUsers.email, cleanEmail));
         console.log(`[Postgres Auth Sync] Updated password for user: ${cleanEmail}`);
@@ -971,17 +935,21 @@ app.post('/api/auth/change-password', async (req, res) => {
       return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
     }
 
-    // If a current password was provided or user has an existing password, verify it
+    // Verify the current password server-side. A password change always
+    // requires the current password (hash or legacy plaintext) to match.
     const userRow = await SqlHelper.queryOne<any>('SELECT password FROM users WHERE id = ?', [user.id]);
-    if (userRow?.password && userRow.password.length > 0 && currentPassword) {
-      if (userRow.password !== currentPassword.trim()) {
-        return res.status(400).json({ error: 'Current password is incorrect.' });
-      }
+    if (!userRow?.password || userRow.password.length === 0) {
+      return res.status(400).json({ error: 'Current password is required.' });
+    }
+    if (!currentPassword || !verifyPassword(currentPassword.trim(), userRow.password)) {
+      return res.status(400).json({ error: 'Current password is incorrect.' });
     }
 
+    // Hash the new password before persisting. Plaintext is never stored.
+    const newPasswordHash = hashPassword(newPassword.trim());
     const now = new Date().toISOString();
     await SqlHelper.execute('UPDATE users SET password = ?, updated_at = ? WHERE id = ?', [
-      newPassword.trim(),
+      newPasswordHash,
       now,
       user.id,
     ]);
@@ -989,7 +957,7 @@ app.post('/api/auth/change-password', async (req, res) => {
     try {
       if (db) {
         await db.update(pgUsers).set({
-          password: newPassword.trim(),
+          password: newPasswordHash,
           updatedAt: new Date(),
         }).where(eq(pgUsers.id, user.id));
       }
@@ -3067,7 +3035,12 @@ app.post('/api/subscriptions/checkout', async (req, res) => {
 // ADMIN: Subscription Plans & Payment Management Routes
 // -------------------------------------------------------------
 
-// Admin Middleware Check
+// Admin Middleware Check.
+// Authorization is server-side ONLY: the request must carry a valid session for
+// an authenticated user, and that user must hold an admin role in the database
+// (users.role === 'ADMIN'), be an explicit super-admin email from the server-side
+// allowlist, or be an active member of the admin_members table. There is NO
+// alternative key/password bypass, and client-supplied roles are never trusted.
 const requireAdmin = async (req: any, res: any, next: any) => {
   let user = req.user;
 
@@ -3087,13 +3060,6 @@ const requireAdmin = async (req: any, res: any, next: any) => {
         if (session?.user_id) {
           let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [session.user_id]);
           if (userRow && !userRow.is_banned) {
-            if (isSuperAdminEmail(userRow.email) && userRow.role !== 'ADMIN') {
-              try {
-                await SqlHelper.execute("UPDATE users SET role = 'ADMIN', subscription_tier = 'VIP' WHERE id = ?", [userRow.id]);
-                userRow.role = 'ADMIN';
-                userRow.subscription_tier = 'VIP';
-              } catch (e) {}
-            }
             user = formatUserRow(userRow);
             req.user = user;
           }
@@ -3102,17 +3068,23 @@ const requireAdmin = async (req: any, res: any, next: any) => {
     }
   }
 
-  // Also check admin master key headers
-  const adminKey = (req.headers['x-admin-key'] || req.headers['x-secret-key'] || '') as string;
-  const isMasterKey = ['tanvir', 'tanvir2026', 'admin123', 'Tanvir@123456789', 'tanvir@123456789'].includes(adminKey.trim());
+  // 1) Reject unauthenticated requests outright — no master-key backdoor.
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized. Please sign in.' });
+  }
 
-  const isAdmin = isMasterKey || (user && (user.role === 'ADMIN' || isSuperAdminEmail(user.email)));
+  // 2) Verify the authenticated user's server-side admin status.
+  const isDbAdmin = user.role === 'ADMIN';
+  const isExplicitSuperAdmin = isSuperAdminEmail(user.email);
+  const isAdmin = isDbAdmin || isExplicitSuperAdmin;
+
   if (!isAdmin) {
+    // Normal (non-admin) authenticated users are rejected.
     return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
   }
 
-  // Check if admin is disabled in admin_members
-  if (user && !isMasterKey && !isSuperAdminEmail(user.email)) {
+  // 3) If the admin is tracked in admin_members and was deactivated, block.
+  if (!isExplicitSuperAdmin) {
     try {
       const member = await SqlHelper.queryOne<any>(
         'SELECT is_active FROM admin_members WHERE user_id = ? OR LOWER(email) = ?',
@@ -3141,16 +3113,13 @@ const ALL_ADMIN_PERMISSIONS = [
   'legal'
 ];
 
-export async function getAdminPermissionsForUser(user: any, headers?: any): Promise<{
+export async function getAdminPermissionsForUser(user: any): Promise<{
   role: string;
   permissions: string[];
   isSuper: boolean;
   memberId?: string;
 }> {
-  const adminKey = ((headers?.['x-admin-key'] || headers?.['x-secret-key'] || '') as string).trim();
-  const isMasterKey = ['tanvir', 'tanvir2026', 'admin123', 'Tanvir@123456789', 'tanvir@123456789'].includes(adminKey);
-
-  if (isMasterKey || (user && isSuperAdminEmail(user.email))) {
+  if (user && isSuperAdminEmail(user.email)) {
     return { role: 'SUPER_ADMIN', permissions: ALL_ADMIN_PERMISSIONS, isSuper: true };
   }
 
@@ -3197,7 +3166,7 @@ const requirePermission = (permission: string) => {
   return async (req: any, res: any, next: any) => {
     requireAdmin(req, res, async () => {
       const user = req.user;
-      const permInfo = await getAdminPermissionsForUser(user, req.headers);
+      const permInfo = await getAdminPermissionsForUser(user);
       req.adminPerms = permInfo;
 
       if (permInfo.isSuper) {
@@ -3219,7 +3188,7 @@ const requirePermission = (permission: string) => {
 
 // Admin Access Verification Endpoint
 app.get('/api/admin/verify-access', requireAdmin, async (req, res) => {
-  const permInfo = await getAdminPermissionsForUser((req as any).user, req.headers);
+  const permInfo = await getAdminPermissionsForUser((req as any).user);
   res.json({
     success: true,
     user: (req as any).user,
@@ -3232,7 +3201,7 @@ app.get('/api/admin/verify-access', requireAdmin, async (req, res) => {
 
 // Admin Permissions Endpoint
 app.get('/api/admin/my-permissions', requireAdmin, async (req, res) => {
-  const permInfo = await getAdminPermissionsForUser((req as any).user, req.headers);
+  const permInfo = await getAdminPermissionsForUser((req as any).user);
   res.json({
     success: true,
     role: permInfo.role,
@@ -3299,14 +3268,16 @@ app.post('/api/admin/members', requirePermission('admins'), async (req, res) => 
     let userId = userRow?.id;
 
     if (!userRow) {
-      // Create user account
+      // Create user account. The provided password (or the assigned default) is
+      // hashed before insertion — plaintext is never stored.
       userId = `usr_adm_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
       const plainPassword = (password || '').trim() || 'Lovemeetly@2026';
+      const passwordHash = hashPassword(plainPassword);
 
       await SqlHelper.execute(
         `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
          VALUES (?, ?, ?, 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-        [userId, cleanEmail, plainPassword, now, now]
+        [userId, cleanEmail, passwordHash, now, now]
       );
 
       // Create initial profile
@@ -3335,9 +3306,10 @@ app.post('/api/admin/members', requirePermission('admins'), async (req, res) => 
         [now, userRow.id]
       );
       if (password && String(password).trim()) {
+        const newHash = hashPassword(String(password).trim());
         await SqlHelper.execute(
           'UPDATE users SET password = ?, updated_at = ? WHERE id = ?',
-          [String(password).trim(), now, userRow.id]
+          [newHash, now, userRow.id]
         );
       }
     }
@@ -3420,11 +3392,12 @@ app.put('/api/admin/members/:id', requirePermission('admins'), async (req, res) 
       [updatedName, updatedRole, updatedPerms, updatedActive, updatedNotes, now, memberId]
     );
 
-    // If password provided, update user credentials
+    // If password provided, update user credentials (hashed before storing).
     if (password && String(password).trim()) {
+      const newHash = hashPassword(String(password).trim());
       await SqlHelper.execute(
         'UPDATE users SET password = ?, updated_at = ? WHERE id = ? OR LOWER(email) = ?',
-        [String(password).trim(), now, member.user_id, member.email.toLowerCase()]
+        [newHash, now, member.user_id, member.email.toLowerCase()]
       );
     }
 
@@ -3507,45 +3480,12 @@ app.delete('/api/admin/members/:id', requirePermission('admins'), async (req, re
   }
 });
 
-// Explicit Superadmin Privilege Elevation / Activation
-app.post('/api/admin/claim-superadmin', async (req, res) => {
-  try {
-    const { key, email } = req.body || {};
-    const targetEmail = (email || (req as any).user?.email || 'admin@love.com').trim().toLowerCase();
-    const validKeys = ['tanvir', 'tanvir2026', 'admin123', 'Tanvir@123456789', 'tanvir@123456789'];
-
-    const authorized = validKeys.includes((key || '').trim()) || isSuperAdminEmail(targetEmail);
-    if (!authorized) {
-      return res.status(403).json({ error: 'Unauthorized security key.' });
-    }
-
-    await SqlHelper.execute(
-      "UPDATE users SET role = 'ADMIN', subscription_tier = 'VIP' WHERE LOWER(email) = ?",
-      [targetEmail]
-    );
-
-    let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE LOWER(email) = ?', [targetEmail]);
-    if (!userRow && (targetEmail === 'admin@love.com' || targetEmail === 'tanvirahmadkst@gmail.com')) {
-      const now = new Date().toISOString();
-      const adminId = targetEmail === 'admin@love.com' ? 'usr_admin_love' : 'usr_admin_tanvir';
-      await SqlHelper.execute(
-        `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-         VALUES (?, ?, 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-        [adminId, targetEmail, now, now]
-      );
-      userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [adminId]);
-    }
-
-    const user = userRow ? formatUserRow(userRow) : null;
-    res.json({
-      success: true,
-      user,
-      message: 'Super Administrator privileges successfully elevated.',
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || 'Failed to claim privileges.' });
-  }
-});
+// NOTE: The old `claim-superadmin` privilege-escalation route (which promoted
+// any user to ADMIN using hard-coded master keys, or any "admin@*" email) has
+// been removed. Admin provisioning is exclusively server-authorized through the
+// `requirePermission('admins')` member-management routes, and super-admin status
+// is derived solely from the explicit server-side ADMIN_EMAILS allowlist.
+// Normal users cannot self-promote.
 
 // A1. Admin: Get All Subscription Plans (Active & Inactive)
 app.get('/api/admin/subscriptions/plans', requireAdmin, async (_req, res) => {
@@ -4521,12 +4461,12 @@ app.post('/api/reports', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/admin/moderation', async (req, res) => {
+app.get('/api/admin/moderation', requireAdmin, async (req, res) => {
   const reports = await SqlHelper.queryAll('SELECT * FROM reports ORDER BY created_at DESC');
   res.json({ reports });
 });
 
-app.post('/api/admin/moderation/:id/action', async (req, res) => {
+app.post('/api/admin/moderation/:id/action', requireAdmin, async (req, res) => {
   const { action, notes } = req.body;
   const now = new Date().toISOString();
   await SqlHelper.execute(
@@ -4595,7 +4535,7 @@ app.post('/api/external/track-click', (req, res) => {
 });
 
 // 12. Admin Analytics
-app.get('/api/admin/analytics', async (req, res) => {
+app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
   const userCount = await SqlHelper.queryOne<{ count: number }>('SELECT COUNT(*) as count FROM users');
   const nativeProfCount = await SqlHelper.queryOne<{ count: number }>("SELECT COUNT(*) as count FROM profiles WHERE source_type = 'native'");
   const extProfCount = await SqlHelper.queryOne<{ count: number }>("SELECT COUNT(*) as count FROM profiles WHERE source_type = 'external'");
