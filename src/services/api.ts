@@ -113,7 +113,8 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
   let token = getStoredToken();
   const headers = new Headers(init?.headers || {});
 
-  // Check if there is an active admin session saved
+  // Restore a saved admin session token if present. The normal session token is
+  // the ONLY credential sent to the server; there is no admin master key header.
   const adminSession = safeStorage.getItem('dating_admin_session');
   if (adminSession) {
     try {
@@ -123,8 +124,6 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
         setStoredToken(parsed.token);
       }
     } catch (e) {}
-    // Provide backup admin identification header for robust access
-    headers.set('x-admin-key', 'tanvir2026');
   }
 
   if (token) {
@@ -797,18 +796,9 @@ export const api = {
     return res.json();
   },
 
-  // Admin Privilege Verification & Claim
+  // Admin Privilege Verification
   async verifyAdminAccess(): Promise<{ success: boolean; user?: User; message?: string }> {
     const res = await authFetch('/api/admin/verify-access');
-    return res.json();
-  },
-
-  async claimSuperAdmin(key: string = 'tanvir2026', email?: string): Promise<{ success: boolean; user?: User; message?: string }> {
-    const res = await authFetch('/api/admin/claim-superadmin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, email }),
-    });
     return res.json();
   },
 

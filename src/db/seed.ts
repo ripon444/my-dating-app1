@@ -1,6 +1,7 @@
 import { db } from './index.ts';
 import { users, profiles, follows } from './schema.ts';
 import { sql } from 'drizzle-orm';
+import { hashPassword } from '../../server/password.ts';
 
 export async function seedPostgresIfEmpty() {
   try {
@@ -18,7 +19,7 @@ export async function seedPostgresIfEmpty() {
         user: {
           id: 'usr_admin_love',
           email: 'admin@love.com',
-          password: 'Tanvir@123456789',
+          password: hashPassword('Tanvir@123456789'),
           role: 'ADMIN',
           isEmailVerified: 1,
           isAgeVerified: 1,
@@ -63,7 +64,7 @@ export async function seedPostgresIfEmpty() {
         user: {
           id: 'usr_nat_01',
           email: 'anika.rahman@example.com',
-          password: 'demo_password_123',
+          password: hashPassword('demo_password_123'),
           role: 'USER',
           isEmailVerified: 1,
           isAgeVerified: 1,
@@ -117,7 +118,7 @@ export async function seedPostgresIfEmpty() {
         user: {
           id: 'usr_nat_02',
           email: 'elena.vidal@example.com',
-          password: 'demo_password_123',
+          password: hashPassword('demo_password_123'),
           role: 'USER',
           isEmailVerified: 1,
           isAgeVerified: 1,
@@ -171,7 +172,7 @@ export async function seedPostgresIfEmpty() {
         user: {
           id: 'usr_nat_03',
           email: 'lucas.becker@example.com',
-          password: 'demo_password_123',
+          password: hashPassword('demo_password_123'),
           role: 'USER',
           isEmailVerified: 1,
           isAgeVerified: 1,
@@ -225,7 +226,7 @@ export async function seedPostgresIfEmpty() {
         user: {
           id: 'usr_nat_04',
           email: 'maya.lin@example.com',
-          password: 'demo_password_123',
+          password: hashPassword('demo_password_123'),
           role: 'USER',
           isEmailVerified: 1,
           isAgeVerified: 1,

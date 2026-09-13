@@ -1,6 +1,7 @@
 import initSqlJs, { Database } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
+import { hashPassword } from './password.ts';
 
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'globalmatch.sqlite');
@@ -656,8 +657,8 @@ function initTables(db: Database) {
 
       db.run(
         `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-         VALUES (?, 'admin@love.com', 'Tanvir@123456789', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-        [adminId, now, now]
+         VALUES (?, 'admin@love.com', ?, 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+        [adminId, hashPassword('Tanvir@123456789'), now, now]
       );
 
       db.run(
@@ -676,9 +677,12 @@ function initTables(db: Database) {
       );
       console.log('[SQL Database] Primary Administrator account seeded: admin@love.com');
     } else {
-      // Ensure password and privileges are always synchronized
+      // Ensure privileges are kept synchronized for the explicit seed admin.
+      // NOTE: the password is deliberately NOT re-forced here; password
+      // management is handled by the normal change-password flow (Step 3 of the
+      // security plan migrates storage to hashes).
       db.run(
-        `UPDATE users SET password = 'Tanvir@123456789', role = 'ADMIN', subscription_tier = 'VIP' WHERE LOWER(email) = 'admin@love.com'`
+        `UPDATE users SET role = 'ADMIN', subscription_tier = 'VIP', is_email_verified = 1, is_age_verified = 1, is_banned = 0 WHERE LOWER(email) = 'admin@love.com'`
       );
     }
   } catch (e) {
@@ -697,8 +701,8 @@ function initTables(db: Database) {
 
       db.run(
         `INSERT INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
-         VALUES (?, 'tanvirahmadkst@gmail.com', 'tanvir2026', 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
-        [tanvirId, now, now]
+         VALUES (?, 'tanvirahmadkst@gmail.com', ?, 'ADMIN', 1, 1, 0, 'VIP', ?, ?)`,
+        [tanvirId, hashPassword('tanvir2026'), now, now]
       );
 
       db.run(
@@ -718,12 +722,13 @@ function initTables(db: Database) {
       console.log('[SQL Database] Primary Super Administrator account seeded: tanvirahmadkst@gmail.com');
     }
 
-    // Always guarantee and enforce ADMIN role and VIP subscription tier for all superadmin emails
+    // Keep ADMIN role / VIP tier synchronized ONLY for the explicit super-admin
+    // allowlist. The previous `LIKE 'admin@%'` promotion allowed anyone who
+    // registered an "admin@..." address to be silently elevated — removed.
     db.run(`
-      UPDATE users 
-      SET role = 'ADMIN', subscription_tier = 'VIP', is_email_verified = 1, is_age_verified = 1, is_banned = 0 
+      UPDATE users
+      SET role = 'ADMIN', subscription_tier = 'VIP', is_email_verified = 1, is_age_verified = 1, is_banned = 0
       WHERE LOWER(email) IN ('admin@love.com', 'tanvirahmadkst@gmail.com', 'admin@lovemeetly.com', 'tanvir@gmail.com', 'tanvir@lovemeetly.com')
-         OR LOWER(email) LIKE 'admin@%'
     `);
 
     // Ensure admin_members table exists in migrations
@@ -1399,7 +1404,7 @@ Your personal safety always comes first. Follow these best practices when gettin
     db.run(
       `INSERT OR REPLACE INTO users (id, email, password, role, is_email_verified, is_age_verified, is_banned, subscription_tier, created_at, updated_at)
        VALUES (?, ?, ?, 'USER', 1, 1, 0, 'PREMIUM', ?, ?)`,
-      [p.userId, p.email, 'password123', now, now]
+      [p.userId, p.email, hashPassword('password123'), now, now]
     );
 
     db.run(
