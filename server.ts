@@ -2323,6 +2323,45 @@ app.post('/api/calls/:id/end', async (req, res) => {
     [now, duration, req.params.id]
   );
 
+  // If conversation exists between caller and receiver, log a call event in chat (FB Messenger style)
+  if (callRow?.caller_id && callRow?.receiver_id) {
+    try {
+      const conv = await SqlHelper.queryOne(
+        'SELECT id FROM conversations WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?) LIMIT 1',
+        [callRow.caller_id, callRow.receiver_id, callRow.receiver_id, callRow.caller_id]
+      );
+      if (conv) {
+        const msgId = `msg_call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const mins = Math.floor(duration / 60);
+        const secs = duration % 60;
+        const durText = duration > 0 ? `${mins > 0 ? `${mins}m ` : ''}${secs}s` : 'Missed';
+        const callTypeName = callRow.type === 'video' ? 'Video call' : 'Audio call';
+        const callContent = duration > 0 ? `${callTypeName} ended • ${durText}` : `Missed ${callTypeName.toLowerCase()}`;
+
+        await SqlHelper.execute(
+          `INSERT INTO messages (id, conversation_id, sender_id, receiver_id, content, message_type, created_at)
+           VALUES (?, ?, ?, ?, ?, 'call', ?)`,
+          [msgId, conv.id, callRow.caller_id, callRow.receiver_id, callContent, now]
+        );
+        await SqlHelper.execute('UPDATE conversations SET updated_at = ? WHERE id = ?', [now, conv.id]);
+
+        const callMsg = {
+          id: msgId,
+          conversation_id: conv.id,
+          sender_id: callRow.caller_id,
+          receiver_id: callRow.receiver_id,
+          content: callContent,
+          message_type: 'call',
+          created_at: now,
+        };
+        io.to(`user_${callRow.caller_id}`).emit('message:new', callMsg);
+        io.to(`user_${callRow.receiver_id}`).emit('message:new', callMsg);
+      }
+    } catch (e) {
+      console.warn('[Call End] Error logging call message:', e);
+    }
+  }
+
   io.to(`user_${callRow?.caller_id}`).emit('call:ended', { callId: req.params.id, duration });
   io.to(`user_${callRow?.receiver_id}`).emit('call:ended', { callId: req.params.id, duration });
   io.to(`call_${req.params.id}`).emit('call:ended', { callId: req.params.id, duration });

@@ -368,38 +368,12 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
                 onStartChat(profile);
                 onClose();
               }}
-              className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-bold flex items-center gap-2 transition"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white shadow-lg text-xs font-bold flex items-center gap-2 transition active:scale-95"
               title="Message Profile"
             >
-              <MessageCircle className="w-4 h-4 text-rose-400" />
-              Chat
+              <MessageCircle className="w-4 h-4" />
+              Message / Chat
             </button>
-          )}
-
-          {!isExternal && onStartCall && (
-            <>
-              <button
-                onClick={() => {
-                  onStartCall(profile.user_id || profile.id, 'voice');
-                  onClose();
-                }}
-                className="p-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-emerald-400 border border-stone-700 transition"
-                title="Voice Call"
-              >
-                <Phone className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => {
-                  onStartCall(profile.user_id || profile.id, 'video');
-                  onClose();
-                }}
-                className="p-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-rose-400 border border-stone-700 transition"
-                title="Video Call"
-              >
-                <Video className="w-4 h-4" />
-              </button>
-            </>
           )}
 
           {onLike && (

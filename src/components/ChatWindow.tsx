@@ -23,7 +23,10 @@ import {
   Loader2,
   Lock,
   ArrowRight,
-  Maximize2
+  Maximize2,
+  Info,
+  PhoneCall,
+  PhoneMissed
 } from 'lucide-react';
 import { Conversation, Message, Profile, User, MessageAttachment } from '../types';
 import { api } from '../services/api';
@@ -404,27 +407,37 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <>
               <button
                 onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', 'voice')}
-                className="p-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-emerald-400 transition active:scale-95 shadow-sm"
-                title={t('startVoiceCall')}
+                className="p-2.5 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-emerald-400 border border-stone-700/60 transition-all active:scale-95 shadow-sm"
+                title={t('startVoiceCall') || "Start voice call"}
               >
                 <Phone className="w-4 h-4" />
               </button>
 
               <button
                 onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', 'video')}
-                className="p-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-rose-400 transition active:scale-95 shadow-sm"
-                title={t('startVideoCall')}
+                className="p-2.5 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-rose-400 border border-stone-700/60 transition-all active:scale-95 shadow-sm"
+                title={t('startVideoCall') || "Start video call"}
               >
                 <Video className="w-4 h-4" />
               </button>
             </>
           )}
 
+          {/* Profile Info button (Messenger style) */}
+          <button
+            onClick={() => onViewProfile(otherUser)}
+            className="p-2.5 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white border border-stone-700/60 transition-all active:scale-95 shadow-sm"
+            title="View Profile Details"
+          >
+            <Info className="w-4 h-4" />
+          </button>
+
           {/* More options dropdown */}
           <div className="relative">
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 transition"
+              className="p-2.5 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700/60 transition"
+              title="More Options"
             >
               <MoreVertical className="w-4 h-4" />
             </button>
@@ -493,12 +506,76 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Messages Thread Container */}
       <div className="flex-1 p-4 overflow-y-auto space-y-3">
+        {/* Facebook Messenger Profile Header Card */}
+        <div className="pt-3 pb-5 flex flex-col items-center justify-center text-center border-b border-stone-800/80 mb-2">
+          <div className="relative mb-3">
+            <img
+              src={otherUser.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
+              alt={otherUser.name}
+              className="w-20 h-20 rounded-full object-cover border-2 border-stone-700 shadow-xl"
+              referrerPolicy="no-referrer"
+            />
+            {otherUser.is_online && (
+              <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-stone-900 shadow" />
+            )}
+          </div>
+          <h3 className="text-base font-bold text-white font-serif flex items-center gap-1.5">
+            {otherUser.name}{otherUser.age ? `, ${otherUser.age}` : ''}
+          </h3>
+          <p className="text-xs text-stone-400 mt-0.5">
+            {otherUser.city && otherUser.country ? `${otherUser.city}, ${otherUser.country}` : 'Bondstein Matrimony Member'}
+          </p>
+          <p className="text-[11px] text-stone-500 mt-1 max-w-xs">
+            You're connected on Bondstein Matrimony. Call, video chat, or message anytime.
+          </p>
+
+          {/* Facebook Messenger Action Circles (Profile, Audio Call, Video Call) */}
+          <div className="flex items-center justify-center gap-6 mt-4">
+            <button
+              type="button"
+              onClick={() => onViewProfile(otherUser)}
+              className="flex flex-col items-center gap-1.5 group cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-full bg-stone-800 group-hover:bg-stone-700 text-stone-300 group-hover:text-white flex items-center justify-center transition border border-stone-700 shadow-sm">
+                <Info className="w-4 h-4" />
+              </div>
+              <span className="text-[11px] font-medium text-stone-400 group-hover:text-stone-200">Profile</span>
+            </button>
+
+            {!isExternal && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', 'voice')}
+                  className="flex flex-col items-center gap-1.5 group cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-full bg-stone-800 group-hover:bg-emerald-600/20 text-stone-300 group-hover:text-emerald-400 flex items-center justify-center transition border border-stone-700 group-hover:border-emerald-500/50 shadow-sm">
+                    <Phone className="w-4 h-4" />
+                  </div>
+                  <span className="text-[11px] font-medium text-stone-400 group-hover:text-emerald-300">Audio Call</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', 'video')}
+                  className="flex flex-col items-center gap-1.5 group cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-full bg-stone-800 group-hover:bg-rose-600/20 text-stone-300 group-hover:text-rose-400 flex items-center justify-center transition border border-stone-700 group-hover:border-rose-500/50 shadow-sm">
+                    <Video className="w-4 h-4" />
+                  </div>
+                  <span className="text-[11px] font-medium text-stone-400 group-hover:text-rose-300">Video Call</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center text-stone-400 space-y-2">
-            <Sparkles className="w-8 h-8 text-rose-500/50" />
+          <div className="flex flex-col items-center justify-center py-6 text-center text-stone-400 space-y-2">
+            <Sparkles className="w-6 h-6 text-rose-500/50" />
             <p className="text-xs font-semibold text-stone-300">{t('startConversation')}</p>
             <p className="text-[11px] text-stone-500 max-w-xs">
-              Send a text, photo, video, audio note, or document to start chatting!
+              Send a text, photo, video, audio note, or start a voice/video call!
             </p>
           </div>
         ) : (
@@ -508,6 +585,32 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             const translatedText = translationsMap[msg.id] || msg.translated_text;
             const attachmentUrl = msg.attachment?.url || msg.attachment_url;
             const msgType = msg.message_type || (attachmentUrl ? 'image' : 'text');
+
+            {/* FB Messenger Call Bubble */}
+            if (msgType === 'call') {
+              const isVideo = msg.content?.toLowerCase().includes('video');
+              return (
+                <div key={msg.id} className="flex justify-center my-2.5">
+                  <div className="px-4 py-2.5 rounded-2xl bg-stone-800/90 border border-stone-700 flex items-center gap-3 shadow-md max-w-sm">
+                    <div className={`p-2 rounded-full ${isVideo ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'} shrink-0`}>
+                      {isVideo ? <Video className="w-4 h-4" /> : <PhoneCall className="w-4 h-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-white truncate">{msg.content || (isVideo ? 'Video Call' : 'Audio Call')}</div>
+                      <div className="text-[10px] text-stone-400">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    {!isExternal && (
+                      <button
+                        onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', isVideo ? 'video' : 'voice')}
+                        className="px-2.5 py-1 rounded-lg bg-stone-700 hover:bg-stone-600 text-stone-200 text-[11px] font-medium transition active:scale-95"
+                      >
+                        Call back
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -751,6 +854,28 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         >
           <ImageIcon className="w-4 h-4" />
         </button>
+
+        {/* Quick Audio & Video Call Actions right inside message input (FB Messenger style) */}
+        {!isExternal && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', 'voice')}
+              className="p-2.5 rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-emerald-400 transition shadow-sm active:scale-95"
+              title="Voice Call"
+            >
+              <Phone className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onInitiateCall(otherUser.id || otherUser.user_id || '', 'video')}
+              className="p-2.5 rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-rose-400 transition shadow-sm active:scale-95"
+              title="Video Call"
+            >
+              <Video className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Text Input */}
         <input

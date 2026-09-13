@@ -807,29 +807,10 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                       }
                       onStartChat?.(profile.user_id || profile.id);
                     }}
-                    className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white font-semibold rounded-xl text-sm transition-all border border-neutral-700 flex items-center gap-2 shadow-sm"
+                    className="px-5 py-2.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold rounded-xl text-sm transition-all flex items-center gap-2 shadow-sm"
                   >
-                    <MessageCircle className="w-4 h-4 text-sky-400" />
-                    <span>Message</span>
-                  </button>
-
-                  {/* WebRTC Video / Voice Call Buttons */}
-                  <button
-                    id="btn-profile-video-call"
-                    title="Video Call"
-                    onClick={() => onStartCall?.(profile.user_id || profile.id, 'video')}
-                    className="p-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white rounded-xl border border-neutral-700 transition-all shadow-sm"
-                  >
-                    <Video className="w-4 h-4 text-emerald-400" />
-                  </button>
-
-                  <button
-                    id="btn-profile-voice-call"
-                    title="Voice Call"
-                    onClick={() => onStartCall?.(profile.user_id || profile.id, 'voice')}
-                    className="p-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white rounded-xl border border-neutral-700 transition-all shadow-sm"
-                  >
-                    <Phone className="w-4 h-4 text-indigo-400" />
+                    <MessageCircle className="w-4 h-4 text-white" />
+                    <span>Message / Chat</span>
                   </button>
 
                   {/* Like / Dating Match Button (Requirement 12 - Distinct from follow) */}

@@ -8,7 +8,7 @@ export type SourceType = 'native' | 'external';
 
 export type MatchStatus = 'active' | 'unmatched' | 'blocked';
 
-export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'system';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'system' | 'call';
 
 export type CallType = 'voice' | 'video';
 

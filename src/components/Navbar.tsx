@@ -297,16 +297,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             {t('messages')}
           </button>
-          <button
-            onClick={() => setActiveTab('calls')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'calls'
-                ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
-                : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
-            }`}
-          >
-            {t('calls')}
-          </button>
           {user?.role === 'ADMIN' && (
             <button
               onClick={() => setActiveTab('admin')}

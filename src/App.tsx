@@ -138,9 +138,12 @@ function MainApp() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>('chats');
   const [callHistory, setCallHistory] = useState<Call[]>([]);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+
+  const unreadMessagesCount = conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0);
 
   // Modals
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -812,8 +815,16 @@ function MainApp() {
         
         {/* Sidebar */}
         <Sidebar
-          activeTab={activeTab}
+          activeTab={activeTab === 'messages' && messengerTab === 'calls' ? 'messages' : activeTab}
           setActiveTab={(tab) => {
+            if (tab === 'calls') {
+              setMessengerTab('calls');
+              setActiveTab('messages');
+              return;
+            }
+            if (tab === 'messages') {
+              setMessengerTab('chats');
+            }
             setActiveTab(tab);
             if (tab === 'profile') {
               setIsViewingFullProfile(false);
@@ -1117,23 +1128,16 @@ function MainApp() {
                               if (match.conversation_id) {
                                 setActiveConversationId(match.conversation_id);
                                 setActiveTab('messages');
+                              } else {
+                                handleStartChat(prof);
                               }
                             }}
-                            className="p-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow hover:opacity-90 transition"
-                            title="Chat"
+                            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 text-white text-xs font-semibold shadow hover:opacity-90 transition flex items-center gap-1.5"
+                            title="Chat & Call"
                           >
-                            <MessageCircle className="w-4 h-4" />
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>Chat</span>
                           </button>
-
-                          {prof.source_type === 'native' && (
-                            <button
-                              onClick={() => handleStartCall(prof.user_id || prof.id, 'video')}
-                              className="p-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 transition"
-                              title="Video Call"
-                            >
-                              <Video className="w-4 h-4" />
-                            </button>
-                          )}
                         </div>
                       </div>
                     );
@@ -1149,61 +1153,163 @@ function MainApp() {
           {activeTab === 'messages' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
               
-              {/* Conversations List */}
+              {/* Conversations & Calls List (FB Messenger Style) */}
               <div className={`bg-stone-900 rounded-2xl sm:rounded-3xl border border-stone-800 overflow-hidden flex flex-col shadow-xl ${
                 activeConversationId ? 'hidden md:flex' : 'flex'
               }`}>
                 <div className="p-3 sm:p-4 border-b border-stone-800">
-                  <h2 className="font-bold text-white text-base font-serif">{t('messages')}</h2>
-                  <p className="text-xs text-stone-400">Encrypted instant chats with AI translation</p>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <h2 className="font-bold text-white text-base font-serif">{t('messages')}</h2>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                      Live Chat & Calls
+                    </span>
+                  </div>
+
+                  {/* Facebook Messenger Sub-Tabs: Chats / Calls */}
+                  <div className="grid grid-cols-2 p-1 bg-stone-950 rounded-xl border border-stone-800 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setMessengerTab('chats')}
+                      className={`py-1.5 px-3 rounded-lg font-medium transition flex items-center justify-center gap-1.5 ${
+                        messengerTab === 'chats'
+                          ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>Chats</span>
+                      {unreadMessagesCount > 0 && (
+                        <span className="px-1.5 py-0.2 bg-white/20 text-white rounded-full text-[10px]">
+                          {unreadMessagesCount}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMessengerTab('calls')}
+                      className={`py-1.5 px-3 rounded-lg font-medium transition flex items-center justify-center gap-1.5 ${
+                        messengerTab === 'calls'
+                          ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
+                          : 'text-stone-400 hover:text-stone-200'
+                      }`}
+                    >
+                      <PhoneCall className="w-3.5 h-3.5" />
+                      <span>Calls</span>
+                      {callHistory.length > 0 && (
+                        <span className="px-1.5 py-0.2 bg-stone-800 text-stone-300 rounded-full text-[10px]">
+                          {callHistory.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-1.5 sm:p-2 overflow-y-auto flex-1 space-y-1">
-                  {conversations.length === 0 ? (
-                    <div className="p-8 text-center text-stone-500 text-xs">
-                      No active conversations. Match with someone to start chatting!
-                    </div>
-                  ) : (
-                    conversations.map((conv) => {
-                      const other = conv.other_user;
-                      const isSelected = activeConversationId === conv.id;
+                  {messengerTab === 'chats' ? (
+                    conversations.length === 0 ? (
+                      <div className="p-8 text-center text-stone-500 text-xs">
+                        No active conversations. Match with someone to start chatting!
+                      </div>
+                    ) : (
+                      conversations.map((conv) => {
+                        const other = conv.other_user;
+                        const isSelected = activeConversationId === conv.id;
 
-                      return (
-                        <button
-                          key={conv.id}
-                          onClick={() => setActiveConversationId(conv.id)}
-                          className={`w-full p-3 rounded-2xl text-left flex items-center gap-3 transition ${
-                            isSelected
-                              ? 'bg-rose-500/15 border border-rose-500/40 text-white'
-                              : 'hover:bg-stone-800/80 text-stone-300'
-                          }`}
-                        >
-                          <div className="relative shrink-0">
-                            <img
-                              src={other.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-                              alt={other.name}
-                              className="w-12 h-12 rounded-full object-cover border border-rose-500/30"
-                              referrerPolicy="no-referrer"
-                            />
-                            {other.is_online && (
-                              <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
-                            )}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-white text-xs truncate font-serif">{other.name}</span>
-                              <span className="text-[10px] text-stone-500">
-                                {new Date(conv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
+                        return (
+                          <button
+                            key={conv.id}
+                            onClick={() => setActiveConversationId(conv.id)}
+                            className={`w-full p-3 rounded-2xl text-left flex items-center gap-3 transition ${
+                              isSelected
+                                ? 'bg-rose-500/15 border border-rose-500/40 text-white'
+                                : 'hover:bg-stone-800/80 text-stone-300'
+                            }`}
+                          >
+                            <div className="relative shrink-0">
+                              <img
+                                src={other.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
+                                alt={other.name}
+                                className="w-12 h-12 rounded-full object-cover border border-rose-500/30"
+                                referrerPolicy="no-referrer"
+                              />
+                              {other.is_online && (
+                                <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
+                              )}
                             </div>
-                            <p className="text-[11px] text-stone-400 truncate mt-0.5">
-                              {conv.last_message?.content || 'Matched! Say hello...'}
-                            </p>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-white text-xs truncate font-serif">{other.name}</span>
+                                <span className="text-[10px] text-stone-500">
+                                  {new Date(conv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-stone-400 truncate mt-0.5">
+                                {conv.last_message?.content || 'Matched! Say hello...'}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )
+                  ) : (
+                    callHistory.length === 0 ? (
+                      <div className="p-8 text-center text-stone-500 text-xs space-y-2">
+                        <PhoneCall className="w-8 h-8 text-stone-700 mx-auto" />
+                        <p className="font-semibold text-stone-400">No Call History</p>
+                        <p className="text-[11px] text-stone-500">Start a voice or video call directly from any chat!</p>
+                      </div>
+                    ) : (
+                      callHistory.map((c) => {
+                        const isCaller = c.caller_id === currentUser?.id;
+                        const otherProf = isCaller ? c.receiver_profile : c.caller_profile;
+                        const isVideo = c.type === 'video';
+
+                        return (
+                          <div
+                            key={c.id}
+                            className="p-3 rounded-2xl bg-stone-900 hover:bg-stone-800/70 border border-stone-800/80 flex items-center justify-between gap-3 transition"
+                          >
+                            <div
+                              onClick={() => {
+                                if (otherProf) {
+                                  handleStartChat(otherProf);
+                                }
+                              }}
+                              className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
+                            >
+                              <div className="relative shrink-0">
+                                <img
+                                  src={otherProf?.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
+                                  alt={otherProf?.name || 'Member'}
+                                  className="w-10 h-10 rounded-full object-cover border border-stone-700"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <span className={`absolute bottom-0 right-0 p-0.5 rounded-full ${isVideo ? 'bg-rose-500' : 'bg-emerald-500'} text-white`}>
+                                  {isVideo ? <Video className="w-2.5 h-2.5" /> : <Phone className="w-2.5 h-2.5" />}
+                                </span>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-white text-xs truncate">{otherProf?.name || 'Member'}</div>
+                                <div className="text-[10px] text-stone-400 truncate">
+                                  {new Date(c.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })} • {c.duration ? `${Math.floor(c.duration / 60)}m ${c.duration % 60}s` : (isVideo ? 'Video' : 'Voice')}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => handleStartCall(otherProf?.user_id || otherProf?.id || '', isVideo ? 'video' : 'voice')}
+                                className="p-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-emerald-400 transition active:scale-95"
+                                title="Redial"
+                              >
+                                {isVideo ? <Video className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
                           </div>
-                        </button>
-                      );
-                    })
+                        );
+                      })
+                    )
                   )}
                 </div>
               </div>
@@ -1247,73 +1353,7 @@ function MainApp() {
           )}
 
           {/* ========================================================================= */}
-          {/* 4. CALLS TAB */}
-          {/* ========================================================================= */}
-          {activeTab === 'calls' && (
-            <div className="space-y-4 sm:space-y-6 w-full max-w-4xl mx-auto">
-              <div>
-                <h1 className="text-2xl font-bold text-white font-serif">{t('calls')}</h1>
-                <p className="text-xs text-stone-400">Encrypted WebRTC Voice & Video Call Log</p>
-              </div>
-
-              {callHistory.length === 0 ? (
-                <div className="p-16 text-center bg-stone-900/50 rounded-3xl border border-stone-800 space-y-3">
-                  <PhoneCall className="w-10 h-10 text-stone-600 mx-auto" />
-                  <h3 className="font-bold text-white text-base">No Call History Yet</h3>
-                  <p className="text-xs text-stone-400 max-w-sm mx-auto">
-                    Start high-definition voice and video calls directly from match profiles or chat threads.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {callHistory.map((c) => {
-                    const isCaller = c.caller_id === currentUser?.id;
-                    const otherProf = isCaller ? c.receiver_profile : c.caller_profile;
-
-                    return (
-                      <div
-                        key={c.id}
-                        className="p-4 rounded-2xl bg-stone-900 border border-stone-800 shadow flex items-center justify-between gap-4"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-2xl overflow-hidden bg-stone-800 border border-stone-700 shrink-0">
-                            <img
-                              src={otherProf?.photos?.[0]}
-                              alt={otherProf?.name || 'Member'}
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-bold text-white text-sm font-serif">{otherProf?.name}</h3>
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-stone-800 text-stone-300 font-semibold uppercase">
-                                {c.type}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-stone-400 mt-0.5">
-                              {new Date(c.created_at).toLocaleString()} • Duration: {Math.floor((c.duration || 0) / 60)}m {(c.duration || 0) % 60}s
-                            </div>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => handleStartCall(otherProf?.user_id || otherProf?.id || '', c.type)}
-                          className="p-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-emerald-400 transition"
-                          title="Redial"
-                        >
-                          {c.type === 'video' ? <Video className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ========================================================================= */}
-          {/* 5. PROFILE TAB (Facebook-Style Profile & Settings Hub) */}
+          {/* 4. PROFILE TAB (Facebook-Style Profile & Settings Hub) */}
           {/* ========================================================================= */}
           {activeTab === 'profile' && (
             currentUser ? (

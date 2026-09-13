@@ -163,7 +163,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
       return;
     }
-    if (id === 'matches' || id === 'calls' || id === 'profile' || id === 'messages') {
+    if (id === 'matches' || id === 'profile' || id === 'messages') {
       onCloseProfileMenu?.();
       setActiveTab(id);
     } else {
@@ -175,7 +175,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'home', label: 'Home', icon: Home, badge: undefined },
     { id: 'matches', label: t('matches'), icon: Heart, badge: matchesCount > 0 ? matchesCount : undefined },
     { id: 'messages', label: t('messages'), icon: MessageCircle, badge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined },
-    { id: 'calls', label: t('calls'), icon: PhoneCall, badge: undefined },
     { id: 'profile', label: t('profile'), icon: UserIcon, badge: undefined },
   ];
 
