@@ -12,7 +12,7 @@
 - Premium subscriptions (crypto checkout) and paid/promo profile "boosts", both settled through NOWPayments, plus free promotional plans.
 - Admin portal: member/sub-admin role management, subscription plan management, payment settings, boost packages, legal documents (Terms/Privacy), moderation of user reports, and analytics.
 
-The repository is a single initial commit that also contains a shared SQLite database generated at runtime (`data/globalmatch.sqlite`, gitignored), a cPanel deployment guide, and a historical MySQL schema file for reference.
+The repository also contains a shared SQLite database generated at runtime (`data/globalmatch.sqlite`, gitignored), a cPanel deployment guide, and a historical MySQL schema file for reference. Recent history includes "security: harden admin auth and hash all password storage" and "Fix WebRTC video call flicker and add repo docs" — the codebase has already had admin-auth hardening and scrypt password hashing applied (see Authentication/Admin auth).
 
 ## Frontend technology & structure
 
@@ -33,9 +33,10 @@ The repository is a single initial commit that also contains a shared SQLite dat
 
 - **Stack**: Node.js (>=18, `tsx` for dev), Express 4, Socket.IO 4 (server + client), cors, dotenv, `pg` + Drizzle ORM (Postgres), `sql.js` (SQLite WASM), Nodemailer (SMTP), `@google/genai` (Gemini), `firebase-admin`. No separate backend directory — `server.ts` is the single entry point and hosts both the API and the frontend.
 - **Files**:
-  - `server.ts` (~4,935 lines) — Express app, auth middleware, all REST routes, admin middleware, Socket.IO signaling, Vite dev-middeware / static serving, dynamic OG meta injection, process-level error resilience.
+  - `server.ts` (~4,875 lines) — Express app, auth middleware, all REST routes, admin middleware, Socket.IO signaling, Vite dev-middleware / static serving, dynamic OG meta injection, process-level error resilience.
   - `server/db.ts` — SQLite layer: `SqlHelper` (queryOne/queryAll/execute/follower helpers…), a serialized write queue (`queueWrite`), atomic persistence to `data/globalmatch.sqlite`, and full table definitions.
   - `server/email.ts` — Nodemailer transporter + branded HTML email templates (`sendPasswordResetEmail`, `sendWelcomeEmail`, and other notification emails).
+  - `server/password.ts` — Password hashing utilities: scrypt KDF (`hashPassword`/`verifyPassword`/`isHashedPassword`) with constant-time comparison and in-place migration of legacy plaintext values.
   - `server/nowpayments.ts` — NOWPayments client: config resolution from DB/env, invoice creation, HMAC-SHA512 IPN signature verification, payment status polling, min-amount checks, and subscription expiry date calculation.
   - `src/db/repository.ts` — PostgreSQL data-access functions (public profiles, follow/unfollow, search, profile update for the PG side).
 
@@ -118,7 +119,7 @@ All values in `.env.example`; **`.env` must not be committed** (gitignored). No 
 ## API architecture
 
 - Single Express server on port 3000; JSON body limit 50 MB (attachments are sent as base64 inside JSON).
-- CORS fully permissive, with credentials and the following headers allowed: `Content-Type`, `Authorization`, `x-session-token`, `x-admin-key`, `X-Requested-With`.
+- CORS fully permissive, with credentials and the following headers allowed: `Content-Type`, `Authorization`, `x-session-token`, `X-Requested-With`.
 - **URL rewrite**: `/server-api/*` → `/api/*` to bypass LiteSpeed's `/api` interception on the cPanel host. The client (`api.ts` → `resolveApiUrl`) calls `/server-api/...` primarily and falls back to `/api/...` on 404/502/503.
 - **Auth flow**: `POST /api/auth/login` or `/register` return `{ user, profile, token }`. The client stores the token under `globalmatch_auth_token` and sends it as both `Authorization: Bearer <token>` and `x-session-token`. A global middleware resolves the session to `req.user` / `req.profile` for every request; endpoints return 401 when unauthenticated is required. `GET /api/auth/me` returns the current user+profile.
 - **Route groups** (all under `server.ts`):
@@ -132,7 +133,7 @@ All values in `.env.example`; **`.env` must not be committed** (gitignored). No 
   - Boosts: `/api/boosts/packages`, `/api/boosts/create-invoice`, `/api/boosts/complete-payment`, `/api/boosts/purchase`.
   - External partner provider stubs: `/api/external/providers`, `/sync`, `/api/external/sync-logs`, `/api/external/track-click`.
   - Safety/legal: `/api/reports`, `/api/legal/documents`.
-  - Admin (all behind `requireAdmin`/`requirePermission`): `/api/admin/*` — verify-access, my-permissions, members CRUD, claim-superadmin, subscription plans CRUD, payments list, payments settings (NOWPayments), user subscription assignment + history, boost packages CRUD, legal documents, moderation, analytics.
+  - Admin (all behind `requireAdmin`/`requirePermission`): `/api/admin/*` — verify-access, my-permissions, members CRUD, subscription plans CRUD, payments list, payments settings (NOWPayments), user subscription assignment + history, boost packages CRUD, legal documents, moderation, analytics.
 - `GET /api/health` returns `{ status: 'ok', time }`.
 - Static serving: dev → Vite middleware (with profile-URL OG injection); prod → `express.static(dist)` + SPA fallback `GET *` (excluding `/api`, `/server-api`, `/socket.io`), with Lovemeetly-domain link rewriting and per-profile OG meta injection for `/profile/:id` and `/@:id`.
 
@@ -163,11 +164,11 @@ All values in `.env.example`; **`.env` must not be committed** (gitignored). No 
 
 ## Authentication architecture
 
-- **Primary**: email + password registration (passwords stored **plaintext** in the `users` table) with an 18+ age gate on registration. On login/register the server issues an opaque session token (`tok_<base36-timestamp>_<hex>`, 30-day expiry) stored in a `sessions` table; requests authenticate via `Authorization: Bearer <token>` or `x-session-token`. `GET /api/auth/me` resolves the session to `{ user, profile }`.
+- **Primary**: email + password registration with an 18+ age gate on registration. Passwords are **hashed** with Node's built-in scrypt KDF (`server/password.ts`) before storage; the stored value never contains plaintext (`scrypt$N=16384,r=8,p=1$<saltB64>$<derivedKeyB64>`). Legacy plaintext values are compared in constant time on login and transparently upgraded to a scrypt hash in place (`verifyPassword`/`hashPassword`). On login/register the server issues an opaque session token (`tok_<base36-timestamp>_<hex>`, 30-day expiry) stored in a `sessions` table; requests authenticate via `Authorization: Bearer <token>` or `x-session-token`. `GET /api/auth/me` resolves the session to `{ user, profile }`.
 - **Password reset**: `/api/auth/forgot-password` sends a 6-digit-style OTP via Nodemailer (with in-memory rate limiting: 60s cooldown, max 5/hour per email+IP, 30-min temporary block); `verify-reset-code` and `reset-password` complete the flow. `change-password` handles authenticated changes. Welcome e-mails are also sent on registration.
 - **Firebase**: client `firebase.ts` (Firebase web app; `getAuth`, `GoogleAuthProvider`) and server-side `firebase-admin.ts` (`adminAuth`) are initialized from `firebase-applet-config.json`, but **no Firebase/Google sign-in flow is currently wired into the app**; credentials exist for future OAuth/ID-token verification.
 - **Roles/tiers**: `users.role` (`USER`/`ADMIN`/`MODERATOR`), `subscription_tier` (`FREE`/`PREMIUM`/`VIP`). `formatUserRow` automatically elevates any account whose email matches `isSuperAdminEmail` (see ADMIN_EMAILS list in `server.ts`, ~line 234) to ADMIN/VIP.
-- **Admin auth**: `requireAdmin` middleware accepts (a) a valid session of an ADMIN/super-admin user, or (b) a master key in `x-admin-key`/`x-secret-key` headers (`tanvir`, `tanvir2026`, `admin123`, `Tanvir@123456789`, `tanvir@123456789`). Sub-admins are modeled in an `admin_members` table with `permissions_json` (kpi, subscriptions, payments, users, moderation, providers, logs, settings, admins, boosts, legal); `requirePermission(...)` enforces them. `POST /api/admin/claim-superadmin` elevates an account when given a valid key. `AdminView`/`AdminPortal` are the frontend admin surfaces and the `api.ts` client ships the header key `x-admin-key: tanvir2026` for admin requests.
+- **Admin auth**: `requireAdmin` middleware requires an authenticated session whose user is either `users.role === 'ADMIN'` or a server-side super-admin email from the `ADMIN_EMAILS` allowlist (`server.ts` ~line 230) — there is **no** master-key/secret-header backdoor, and an inactive `admin_members` entry blocks access. Sub-admins are modeled in the `admin_members` table with `permissions_json` (kpi, subscriptions, payments, users, moderation, providers, logs, settings, admins, boosts, legal); `requirePermission(...)` enforces them. The old `POST /api/admin/claim-superadmin` self-promotion route was removed; admin provisioning happens only through the `requirePermission('admins')` member-management routes. Super-admin status is derived solely from the server-side `ADMIN_EMAILS` allowlist. `AdminView`/`AdminPortal` are the frontend admin surfaces.
 - **Flags**: `is_email_verified`, `is_age_verified`, `is_banned` (banned sessions are blocked by middleware).
 
 ## Database architecture
@@ -185,7 +186,7 @@ Dual-layer storage with background bidirectional sync:
 ## Payment / NOWPayments architecture
 
 - **Flows**: subscription purchases and profile boosts are paid in crypto via NOWPayments hosted invoices.
-  1. `POST /api/subscriptions/create-invoice` → `POST /api/boosts/create-invoice`: look up plan/package → record a `payment_transactions` row (`status='waiting'`) → call `createNowPaymentsInvoice()` (live or sandbox base URL depending on config). Invoices always use `price_currency='usd'` (USDT≈USD) and optionally `pay_currency`; amounts near the $10 minimum get a small +0.05 buffer to satisfy NOWPayments' minimal-amount check. Returns `invoice_url` + `orderId`.
+  1. `POST /api/payments/create-invoice` (subscriptions) / `POST /api/boosts/create-invoice`: look up plan/package → record a `payment_transactions` row (`status='waiting'`) → call `createNowPaymentsInvoice()` (live or sandbox base URL depending on config). Invoices always use `price_currency='usd'` (USDT≈USD) and optionally `pay_currency`; amounts near the $10 minimum get a small +0.05 buffer to satisfy NOWPayments' minimal-amount check. Returns `invoice_url` + `orderId`.
   2. User pays on NOWPayments checkout; customer returns via `success_url`/`cancel_url` (`?payment_status=success|cancelled&order_id=...`).
   3. **IPN webhook** `POST /api/payments/nowpayments-ipn`: verifies HMAC-SHA512 signature (`x-nowpayments-sig` header) against the IPN secret using `verifyNowPaymentsSignature` (sorting payload keys, `crypto.timingSafeEqual`). Updates the transaction; on `payment_status === 'finished'` activates the subscription (updates `users.subscription_tier`/`expires_at` via `calculateExpirationDate`) or applies the boost (`profiles.is_boosted`, `boost_expires_at`), writes `user_subscriptions` records, creates notifications, and emits realtime events. Responds `{ status:'ok', received:true }`.
   4. **Client polling** `GET /api/payments/check-status/:orderId`: if not finished, queries NOWPayments directly (`getNowPaymentsPaymentStatus`) and auto-activates when status becomes finished.
@@ -201,7 +202,7 @@ Dual-layer storage with background bidirectional sync:
 - **Signal privacy**: call/WebRTC signaling must only target private per-user/per-call rooms; global broadcasts of call events are a regression (see latest commit "fix: restrict call signaling to private socket rooms").
 - **No TURN servers**: calls rely on public STUN; keep fallback behavior when peer-to-peer connectivity fails.
 - **Payload limits**: base64 file uploads flow through JSON (50 MB limit) — large media changes must respect this.
-- **Admin security**: admin routes are guarded by `requireAdmin`/`requirePermission`; master keys and super-admin emails must remain server-side only and never be committed into client bundles beyond the existing API-client header.
-- **Environment**: `.env` is gitignored; new required config must be added to `.env.example` with a comment. Never commit real secrets (existing SMTP/PG credentials and admin master keys in source are pre-existing and must not be echoed into logs, docs, or new files).
+- **Admin security**: admin routes are guarded by `requireAdmin`/`requirePermission` using authenticated sessions only — no master-key/secret-header backdoor exists, and the self-promotion `claim-superadmin` route has been removed. Super-admin emails must remain server-side only (the `ADMIN_EMAILS` allowlist in `server.ts`) and never be committed into client bundles; the same applies to SMTP/PG credentials, which should not be echoed into logs, docs, or new files.
+- **Environment**: `.env` is gitignored; new required config must be added to `.env.example` with a comment.
 - **Versions**: Node ≥ 18 (cPanel recommends 18/20+); TypeScript strict-ish config with `allowImportingTsExtensions` and `noEmit` — source imports include `.ts`/`.tsx` extensions, so preserve them when moving/renaming files. React 19 + Tailwind 4; keep module-based (`"type": "module"`) for the server bundle.
-- **Repository cleanliness**: `dist/`, `server.js`, `server.cjs`, `data/*.sqlite`, `.env*` and generated bundled assets are gitignored; avoid committing build artifacts.
+- **Repository cleanliness**: `dist/`, `server.cjs`, `data/*.sqlite`, `.env*` and the `assets/index-*.js`/`assets/index-*.css` bundles are gitignored. Note that the build also copies `assets/web-*.js` (the fallback-loader module) to the top-level `assets/` folder, which is **not** gitignored and shows up as `?? assets/web-*.js` in `git status` after every build — leave these untracked artifacts alone unless a deployment requires them.
