@@ -139,8 +139,10 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
       headers,
     });
 
-    // If LiteSpeed gave a 502/503 HTML or 404 on /server-api, fallback to original url if different
-    if ((res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== input) {
+    const isHtmlResponse = (res.headers.get('content-type') || '').toLowerCase().includes('text/html');
+
+    // Retry the original API path if the hosting proxy returns an HTML page instead of JSON.
+    if ((isHtmlResponse || res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== input) {
       const fallbackRes = await fetch(input, { ...init, headers }).catch(() => null);
       if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
         return fallbackRes;
