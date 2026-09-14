@@ -206,15 +206,6 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
 
       {/* Bottom Profile Details & Content */}
       <div className="relative z-20 p-5 space-y-4">
-        {/* Live presence indicator anchored to the profile image area. */}
-        <span
-          aria-label={isOnline ? 'Online' : 'Offline'}
-          title={isOnline ? 'Online' : 'Offline'}
-          className={`absolute bottom-[7.25rem] right-5 z-30 h-3.5 w-3.5 rounded-full border-2 border-white/90 shadow-md ${
-            isOnline ? 'bg-emerald-500' : 'bg-stone-500/80'
-          }`}
-        />
-        
         {/* Name, Age, Verification, Follow Button & Online Status */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
@@ -277,6 +268,19 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
             </div>
           </div>
 
+          <div
+            aria-label={isOnline ? 'Online' : 'Offline'}
+            className={`flex items-center gap-1.5 text-xs font-semibold ${isOnline ? 'text-emerald-400' : 'text-stone-400'}`}
+          >
+            <span
+              aria-hidden="true"
+              className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/80 shadow-sm ${
+                isOnline ? 'bg-emerald-500' : 'bg-stone-500'
+              }`}
+            />
+            <span>{isOnline ? 'Online' : 'Offline'}</span>
+          </div>
+
           {/* Followers count & Location & Online status */}
           <div className="flex items-center gap-3 text-xs text-stone-300 flex-wrap">
             {/* Followers count badge */}
@@ -298,13 +302,6 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
               )}
             </div>
 
-            {isOnline ? (
-              <div className="flex items-center gap-1 text-emerald-400 font-medium">
-                <span>Online</span>
-              </div>
-            ) : (
-              <span className="text-stone-400">Offline</span>
-            )}
           </div>
         </div>
 
