@@ -338,12 +338,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <a
             href="https://lovemeetly.com/downloads/lovemeetly.apk"
             download="lovemeetly.apk"
-            className="w-full mt-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-stone-300 hover:bg-rose-950/40 hover:text-white border border-transparent hover:border-rose-900/60 transition-all flex items-center gap-3"
+            className="group w-full mt-2 p-2.5 rounded-2xl bg-gradient-to-r from-rose-950/70 to-stone-800/80 border border-rose-900/50 text-left shadow-lg shadow-rose-950/10 transition-all duration-200 hover:-translate-y-0.5 hover:border-rose-500/60 hover:from-rose-900/80 hover:to-stone-800 active:translate-y-0 active:scale-[0.98] flex items-center gap-2.5 min-w-0"
             title="Download the Lovemeetly Android app"
             aria-label="Download Lovemeetly Android app"
           >
-            <Download className="w-5 h-5 text-rose-400 shrink-0" />
-            <span className="truncate">Download App</span>
+            <Logo size="sm" showText={false} className="shrink-0" />
+            <span className="flex-1 min-w-0 leading-tight">
+              <span className="block truncate text-sm font-bold text-stone-100 group-hover:text-white">Download App</span>
+              <span className="block truncate text-[10px] font-medium uppercase tracking-wider text-rose-300/80">Android APK</span>
+            </span>
+            <Download className="w-4 h-4 text-rose-300 shrink-0 transition-transform duration-200 group-hover:translate-y-0.5" />
           </a>
         </div>
 
