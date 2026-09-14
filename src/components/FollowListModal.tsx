@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, UserCheck, UserPlus, Search, Users, ShieldAlert, Sparkles, MapPin, ExternalLink } from 'lucide-react';
 import { Profile } from '../types';
 import { api } from '../services/api';
+import { getSocket } from '../services/socket';
 
 interface FollowListModalProps {
   isOpen: boolean;
@@ -50,6 +51,24 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
       loadData();
     }
   }, [isOpen, userId, activeTab]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const handlePresence = (data: { userId?: string; isOnline?: boolean }) => {
+      if (!data.userId) return;
+      const update = (list: FollowUserItem[]) => list.map((item) => (
+        item.userId === data.userId
+          ? { ...item, profile: { ...item.profile, is_online: Boolean(data.isOnline) } }
+          : item
+      ));
+      setFollowers(update);
+      setFollowing(update);
+    };
+    socket.on('presence:update', handlePresence);
+    return () => {
+      socket.off('presence:update', handlePresence);
+    };
+  }, []);
 
   const loadData = async () => {
     setLoading(true);

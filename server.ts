@@ -43,6 +43,8 @@ import { eq, desc } from 'drizzle-orm';
 const app = express();
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
+  pingInterval: 25000,
+  pingTimeout: 20000,
   cors: {
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -220,8 +222,8 @@ export function formatProfileRow(row: any): any {
     drinking: row.drinking,
     children: row.children,
     compatibility_score: Number(row.compatibility_score) || 85,
-    is_online: Boolean(row.is_online),
-    last_active: row.last_active || new Date().toISOString(),
+    is_online: Boolean(row.user_id && presenceSockets.has(row.user_id)),
+    last_active: (row.user_id && presenceLastSeen.get(row.user_id)) || row.last_active || new Date().toISOString(),
     is_verified: Boolean(row.is_verified),
     is_boosted: Boolean(row.is_boosted),
     boost_expires_at: row.boost_expires_at,
@@ -499,12 +501,7 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // Update profile online status in SQL database
     const now = new Date().toISOString();
-    await SqlHelper.execute(
-      'UPDATE profiles SET is_online = 1, last_active = ? WHERE user_id = ?',
-      [now, userRow.id]
-    );
 
     const user = formatUserRow(userRow);
     const profileRow = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ?', [user.id]);
@@ -672,10 +669,7 @@ app.post('/api/auth/logout', async (req, res) => {
     if (token) {
       const session = await SqlHelper.queryOne<{ user_id: string }>('SELECT user_id FROM sessions WHERE token = ?', [token]);
       if (session?.user_id) {
-        await SqlHelper.execute('UPDATE profiles SET is_online = 0, last_active = ? WHERE user_id = ?', [
-          new Date().toISOString(),
-          session.user_id,
-        ]);
+        presenceLastSeen.set(session.user_id, new Date().toISOString());
       }
       await SqlHelper.execute('DELETE FROM sessions WHERE token = ?', [token]);
     }
@@ -1819,11 +1813,6 @@ app.get('/api/discover', async (req, res) => {
     sql += " AND source_type = 'external'";
   }
 
-  // Online filter
-  if (onlineOnly === 'true') {
-    sql += ' AND is_online = 1';
-  }
-
   // Country filter
   if (country && String(country).trim()) {
     sql += ' AND LOWER(country) LIKE ?';
@@ -1852,7 +1841,12 @@ app.get('/api/discover', async (req, res) => {
   sql += " ORDER BY is_boosted DESC, CASE WHEN source_type = 'native' THEN 0 ELSE 1 END, created_at DESC, compatibility_score DESC";
 
   const rows = await SqlHelper.queryAll(sql, params);
-  res.json({ profiles: rows.map(formatProfileRow) });
+  const profiles = rows.map(formatProfileRow);
+  res.json({
+    profiles: onlineOnly === 'true'
+      ? profiles.filter((profile: any) => profile.is_online)
+      : profiles,
+  });
 });
 
 // 4. Likes & Matches
@@ -4691,19 +4685,68 @@ app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
 // -------------------------------------------------------------
 // Socket.IO Real-time Events & WebRTC Signaling
 // -------------------------------------------------------------
+const presenceSockets = new Map<string, Set<string>>();
+const presenceLastSeen = new Map<string, string>();
+
+io.use(async (socket, next) => {
+  try {
+    const authToken = typeof socket.handshake.auth?.token === 'string'
+      ? socket.handshake.auth.token.trim()
+      : '';
+    if (!authToken) return next(new Error('Authentication required'));
+    const session = await SqlHelper.queryOne<{ user_id: string; expires_at: string }>(
+      'SELECT user_id, expires_at FROM sessions WHERE token = ? AND expires_at > ?',
+      [authToken, new Date().toISOString()]
+    );
+    if (!session?.user_id) return next(new Error('Invalid or expired session'));
+    const user = await SqlHelper.queryOne<{ id: string; is_banned: number }>(
+      'SELECT id, is_banned FROM users WHERE id = ?',
+      [session.user_id]
+    );
+    if (!user || user.is_banned) return next(new Error('Authentication required'));
+    socket.data.userId = user.id;
+    return next();
+  } catch (error) {
+    console.warn('[Socket Auth] Presence connection rejected:', error);
+    return next(new Error('Authentication service unavailable'));
+  }
+});
+
+function broadcastPresence(userId: string, isOnline: boolean, lastSeen?: string): void {
+  io.emit('presence:update', { userId, isOnline, ...(lastSeen ? { lastSeen } : {}) });
+}
+
 io.on('connection', (socket) => {
+  const userId = socket.data.userId as string;
+  const userSockets = presenceSockets.get(userId) || new Set<string>();
+  const wasOnline = userSockets.size > 0;
+  userSockets.add(socket.id);
+  presenceSockets.set(userId, userSockets);
+  socket.join(`user_${userId}`);
+
+  socket.emit('presence:snapshot', Array.from(presenceSockets.keys()).map((id) => ({
+    userId: id,
+    isOnline: true,
+  })));
+  if (!wasOnline) broadcastPresence(userId, true);
+
+  socket.on('disconnect', () => {
+    const currentSockets = presenceSockets.get(userId);
+    if (!currentSockets) return;
+    currentSockets.delete(socket.id);
+    if (currentSockets.size > 0) return;
+    presenceSockets.delete(userId);
+    const lastSeen = new Date().toISOString();
+    presenceLastSeen.set(userId, lastSeen);
+    broadcastPresence(userId, false, lastSeen);
+  });
+
   socket.on('user:join', (data) => {
-    if (data?.userId) {
-      socket.join(`user_${data.userId}`);
-      socket.broadcast.emit('user:status', { userId: data.userId, isOnline: true });
-    }
+    if (data?.userId === userId) socket.join(`user_${userId}`);
   });
 
   socket.on('user:online', (data) => {
-    if (data?.userId) {
-      socket.join(`user_${data.userId}`);
-      socket.broadcast.emit('user:status', { userId: data.userId, isOnline: true });
-    }
+    if (data?.userId === userId) socket.join(`user_${userId}`);
   });
 
   socket.on('conversation:join', (convId) => {

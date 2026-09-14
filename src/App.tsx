@@ -174,6 +174,19 @@ function MainApp() {
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const isOnline = (profile: Profile) => onlineUserIds.has(profile.user_id || profile.id);
+    setDiscoverProfiles((profiles) => profiles.map((profile) => ({ ...profile, is_online: isOnline(profile) })));
+    setCurrentProfile((profile) => profile ? { ...profile, is_online: isOnline(profile) } : profile);
+    setSelectedPublicProfile((profile) => profile ? { ...profile, is_online: isOnline(profile) } : profile);
+    setInspectProfile((profile) => profile ? { ...profile, is_online: isOnline(profile) } : profile);
+    setConversations((items) => items.map((conversation) => ({
+      ...conversation,
+      other_user: { ...conversation.other_user, is_online: isOnline(conversation.other_user) },
+    })));
+  }, [onlineUserIds]);
 
   const handleOpenPublicProfile = (target: Profile | string) => {
     let identifier = '';
@@ -423,6 +436,21 @@ function MainApp() {
     emitUserJoin();
     socket.on('connect', emitUserJoin);
 
+    const handlePresenceSnapshot = (users: Array<{ userId: string; isOnline: boolean }>) => {
+      setOnlineUserIds(new Set(users.filter((user) => user.isOnline).map((user) => user.userId)));
+    };
+    const handlePresenceUpdate = (data: { userId?: string; isOnline?: boolean }) => {
+      if (!data?.userId) return;
+      setOnlineUserIds((previous) => {
+        const next = new Set(previous);
+        if (data.isOnline) next.add(data.userId as string);
+        else next.delete(data.userId as string);
+        return next;
+      });
+    };
+    socket.on('presence:snapshot', handlePresenceSnapshot);
+    socket.on('presence:update', handlePresenceUpdate);
+
     socket.on('match:created', (data) => {
       setMatchedProfileData(data.matched_profile);
       setIsMatchModalOpen(true);
@@ -544,6 +572,8 @@ function MainApp() {
     return () => {
       clearInterval(notifSyncInterval);
       socket.off('connect', emitUserJoin);
+      socket.off('presence:snapshot', handlePresenceSnapshot);
+      socket.off('presence:update', handlePresenceUpdate);
       socket.off('match:created');
       socket.off('call:incoming');
       socket.off('call:rejected');
@@ -740,6 +770,7 @@ function MainApp() {
   }
 
   const handleLogout = async () => {
+    getSocket().disconnect();
     try {
       await api.logout();
     } catch (e) {}

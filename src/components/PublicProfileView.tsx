@@ -137,6 +137,12 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
   // Real-time socket listener for follower/following count updates
   useEffect(() => {
     const socket = getSocket();
+    const handlePresence = (data: { userId?: string; isOnline?: boolean }) => {
+      const profileUserId = profile?.user_id || profile?.id;
+      if (data.userId && profileUserId === data.userId) {
+        setProfile((previous) => previous ? { ...previous, is_online: Boolean(data.isOnline) } : previous);
+      }
+    };
     const handleFollowUpdate = (data: {
       targetUserId: string;
       followerId: string;
@@ -157,8 +163,10 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     };
 
     socket.on('follow:update', handleFollowUpdate);
+    socket.on('presence:update', handlePresence);
     return () => {
       socket.off('follow:update', handleFollowUpdate);
+      socket.off('presence:update', handlePresence);
     };
   }, [profile?.user_id, profile?.id, currentUser?.id, isOwnProfile]);
 
