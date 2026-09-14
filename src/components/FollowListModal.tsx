@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, UserCheck, UserPlus, Search, Users, ShieldAlert, Sparkles, MapPin, ExternalLink } from 'lucide-react';
 import { Profile } from '../types';
 import { api } from '../services/api';
-import { getSocket } from '../services/socket';
+import { usePresence } from '../services/presence';
 
 interface FollowListModalProps {
   isOpen: boolean;
@@ -41,6 +41,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const presence = usePresence();
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -51,24 +52,6 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
       loadData();
     }
   }, [isOpen, userId, activeTab]);
-
-  useEffect(() => {
-    const socket = getSocket();
-    const handlePresence = (data: { userId?: string; isOnline?: boolean }) => {
-      if (!data.userId) return;
-      const update = (list: FollowUserItem[]) => list.map((item) => (
-        item.userId === data.userId
-          ? { ...item, profile: { ...item.profile, is_online: Boolean(data.isOnline) } }
-          : item
-      ));
-      setFollowers(update);
-      setFollowing(update);
-    };
-    socket.on('presence:update', handlePresence);
-    return () => {
-      socket.off('presence:update', handlePresence);
-    };
-  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -243,7 +226,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
                           referrerPolicy="no-referrer"
                           className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500 transition-colors"
                         />
-                        {item.profile?.is_online && (
+                        {presence[item.userId] && (
                           <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-neutral-900 rounded-full" />
                         )}
                       </div>

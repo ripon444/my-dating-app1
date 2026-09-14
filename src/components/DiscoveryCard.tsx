@@ -24,6 +24,7 @@ import {
 import { Profile } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import { api } from '../services/api';
+import { usePresenceFor } from '../services/presence';
 
 interface DiscoveryCardProps {
   profile: Profile;
@@ -62,6 +63,7 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
   };
 
   const isExternal = profile.source_type === 'external';
+  const isOnline = usePresenceFor(profile.user_id || profile.id);
 
   const handleFollowToggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -288,13 +290,13 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
               )}
             </div>
 
-            {profile.is_online ? (
+            {isOnline ? (
               <div className="flex items-center gap-1 text-emerald-400 font-medium">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                 <span>{t('onlineNow')}</span>
               </div>
             ) : (
-              <span className="text-stone-400">{t('activeRecently')}</span>
+              <span className="text-stone-400">Offline</span>
             )}
           </div>
         </div>

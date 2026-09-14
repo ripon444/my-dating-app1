@@ -4693,21 +4693,32 @@ io.use(async (socket, next) => {
     const authToken = typeof socket.handshake.auth?.token === 'string'
       ? socket.handshake.auth.token.trim()
       : '';
-    if (!authToken) return next(new Error('Authentication required'));
+    if (!authToken) {
+      console.warn(`[PRESENCE] AUTH FAILED socket=${socket.id}`);
+      return next(new Error('Authentication required'));
+    }
     const session = await SqlHelper.queryOne<{ user_id: string; expires_at: string }>(
       'SELECT user_id, expires_at FROM sessions WHERE token = ? AND expires_at > ?',
       [authToken, new Date().toISOString()]
     );
-    if (!session?.user_id) return next(new Error('Invalid or expired session'));
+    if (!session?.user_id) {
+      console.warn(`[PRESENCE] AUTH FAILED socket=${socket.id}`);
+      return next(new Error('Invalid or expired session'));
+    }
     const user = await SqlHelper.queryOne<{ id: string; is_banned: number }>(
       'SELECT id, is_banned FROM users WHERE id = ?',
       [session.user_id]
     );
-    if (!user || user.is_banned) return next(new Error('Authentication required'));
+    if (!user || user.is_banned) {
+      console.warn(`[PRESENCE] AUTH FAILED socket=${socket.id}`);
+      return next(new Error('Authentication required'));
+    }
     socket.data.userId = user.id;
+    socket.data.authToken = authToken;
     return next();
   } catch (error) {
     console.warn('[Socket Auth] Presence connection rejected:', error);
+    console.warn(`[PRESENCE] AUTH FAILED socket=${socket.id}`);
     return next(new Error('Authentication service unavailable'));
   }
 });
@@ -4728,16 +4739,36 @@ io.on('connection', (socket) => {
     userId: id,
     isOnline: true,
   })));
-  if (!wasOnline) broadcastPresence(userId, true);
+  if (!wasOnline) {
+    console.info(`[PRESENCE] ONLINE user=${userId} socket=${socket.id}`);
+    broadcastPresence(userId, true);
+  }
+
+  const sessionCheck = setInterval(async () => {
+    try {
+      const session = await SqlHelper.queryOne<{ user_id: string }>(
+        'SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?',
+        [socket.data.authToken, new Date().toISOString()]
+      );
+      if (session?.user_id !== userId) socket.disconnect(true);
+    } catch (error) {
+      console.warn('[Socket Auth] Session revalidation deferred:', error);
+    }
+  }, 30000);
 
   socket.on('disconnect', () => {
+    clearInterval(sessionCheck);
     const currentSockets = presenceSockets.get(userId);
     if (!currentSockets) return;
     currentSockets.delete(socket.id);
-    if (currentSockets.size > 0) return;
+    if (currentSockets.size > 0) {
+      console.info(`[PRESENCE] REMAIN ONLINE user=${userId} remainingSockets=${currentSockets.size}`);
+      return;
+    }
     presenceSockets.delete(userId);
     const lastSeen = new Date().toISOString();
     presenceLastSeen.set(userId, lastSeen);
+    console.info(`[PRESENCE] OFFLINE user=${userId} socket=${socket.id}`);
     broadcastPresence(userId, false, lastSeen);
   });
 

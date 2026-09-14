@@ -41,6 +41,7 @@ import { getSocket } from '../services/socket';
 import { FollowListModal } from './FollowListModal';
 import { ShareProfileModal } from './ShareProfileModal';
 import { SocialLinksDisplay } from './SocialLinksDisplay';
+import { usePresenceFor } from '../services/presence';
 
 interface PublicProfileViewProps {
   profileIdOrUserId?: string;
@@ -82,6 +83,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     isOwnProfileProp ||
     (currentUser?.id && (targetId === currentUser.id || targetId === currentUserProfile?.user_id || targetId === currentUserProfile?.id || !targetId))
   );
+  const isProfileOnline = usePresenceFor(targetId);
 
   const [profile, setProfile] = useState<Profile | null>(() => {
     if (initialProfile) return initialProfile;
@@ -137,12 +139,6 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
   // Real-time socket listener for follower/following count updates
   useEffect(() => {
     const socket = getSocket();
-    const handlePresence = (data: { userId?: string; isOnline?: boolean }) => {
-      const profileUserId = profile?.user_id || profile?.id;
-      if (data.userId && profileUserId === data.userId) {
-        setProfile((previous) => previous ? { ...previous, is_online: Boolean(data.isOnline) } : previous);
-      }
-    };
     const handleFollowUpdate = (data: {
       targetUserId: string;
       followerId: string;
@@ -163,10 +159,8 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     };
 
     socket.on('follow:update', handleFollowUpdate);
-    socket.on('presence:update', handlePresence);
     return () => {
       socket.off('follow:update', handleFollowUpdate);
-      socket.off('presence:update', handlePresence);
     };
   }, [profile?.user_id, profile?.id, currentUser?.id, isOwnProfile]);
 
@@ -609,7 +603,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                   onClick={() => setLightboxPhoto(avatarPhoto)}
                   className="w-32 h-32 md:w-40 md:h-40 rounded-full object-cover border-4 border-neutral-900 shadow-2xl ring-2 ring-neutral-700 cursor-pointer group-hover:opacity-90 transition-opacity"
                 />
-                {profile.is_online && (
+                {isProfileOnline && (
                   <span
                     title="Online now"
                     className="absolute bottom-2 right-2 md:bottom-3 md:right-3 w-5 h-5 bg-emerald-500 border-4 border-neutral-900 rounded-full shadow-lg"

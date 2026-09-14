@@ -16,7 +16,14 @@ export function getSocket(): Socket {
   }
   const token = getStoredToken();
   socket.auth = token ? { token } : {};
-  if (token && !socket.connected && !socket.active) socket.connect();
   return socket;
+}
+
+export function connectSocket(): Socket {
+  const currentSocket = getSocket();
+  if (getStoredToken() && !currentSocket.connected && !currentSocket.active) {
+    currentSocket.connect();
+  }
+  return currentSocket;
 }
 

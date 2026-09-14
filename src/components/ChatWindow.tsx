@@ -32,6 +32,7 @@ import { Conversation, Message, Profile, User, MessageAttachment } from '../type
 import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 import { useTranslation } from '../i18n/LanguageContext';
+import { usePresenceFor } from '../services/presence';
 
 function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   const byId = new Map(existing.map((message) => [message.id, message]));
@@ -91,6 +92,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const otherUser = conversation.other_user;
   const activeUserId = currentUser?.id || 'usr_me_01';
+  const isOtherUserOnline = usePresenceFor(otherUser.user_id || otherUser.id);
 
   // 1. Load messages and mark conversation as read
   useEffect(() => {
@@ -375,7 +377,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 className="w-10 h-10 rounded-full object-cover border border-rose-500/30 group-hover:border-rose-500 transition"
                 referrerPolicy="no-referrer"
               />
-              {otherUser.is_online && (
+              {isOtherUserOnline && (
                 <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
               )}
             </div>
@@ -401,7 +403,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   <span className="text-rose-400 font-semibold animate-pulse">
                     typing...
                   </span>
-                ) : otherUser.is_online ? (
+                ) : isOtherUserOnline ? (
                   <span className="text-emerald-400">{t('onlineNow')}</span>
                 ) : (
                   `${otherUser.city}, ${otherUser.country}`
@@ -525,7 +527,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               className="w-20 h-20 rounded-full object-cover border-2 border-stone-700 shadow-xl"
               referrerPolicy="no-referrer"
             />
-            {otherUser.is_online && (
+            {isOtherUserOnline && (
               <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-stone-900 shadow" />
             )}
           </div>

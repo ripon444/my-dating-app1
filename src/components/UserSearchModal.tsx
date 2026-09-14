@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, Users, UserPlus, UserCheck, Sparkles, MapPin, X, ArrowRight } from 'lucide-react';
 import { Profile } from '../types';
 import { api } from '../services/api';
-import { getSocket } from '../services/socket';
+import { usePresence } from '../services/presence';
 
 interface UserSearchModalProps {
   isOpen: boolean;
@@ -22,6 +22,7 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
   const [results, setResults] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const presence = usePresence();
 
   useEffect(() => {
     if (!isOpen) {
@@ -42,22 +43,6 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
 
     return () => clearTimeout(timer);
   }, [query]);
-
-  useEffect(() => {
-    const socket = getSocket();
-    const handlePresence = (data: { userId?: string; isOnline?: boolean }) => {
-      if (!data.userId) return;
-      setResults((previous) => previous.map((user) => (
-        (user.user_id || user.id) === data.userId
-          ? { ...user, is_online: Boolean(data.isOnline) }
-          : user
-      )));
-    };
-    socket.on('presence:update', handlePresence);
-    return () => {
-      socket.off('presence:update', handlePresence);
-    };
-  }, []);
 
   const performSearch = async (q: string) => {
     setLoading(true);
@@ -175,7 +160,7 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
                         referrerPolicy="no-referrer"
                         className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
                       />
-                      {user.is_online && (
+                      {presence[user.user_id || user.id] && (
                         <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950" />
                       )}
                     </div>

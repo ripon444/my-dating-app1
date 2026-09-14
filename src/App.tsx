@@ -52,7 +52,8 @@ import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './ty
 import { soundManager } from './utils/sound';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
-import { getSocket } from './services/socket';
+import { connectSocket, getSocket } from './services/socket';
+import { clearPresence, setPresenceSnapshot, updatePresence, usePresence } from './services/presence';
 import { FALLBACK_PROFILES } from './data/fallbackProfiles';
 
 // Helper function to extract profile target from Facebook-style URL
@@ -174,19 +175,7 @@ function MainApp() {
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(() => new Set());
-
-  useEffect(() => {
-    const isOnline = (profile: Profile) => onlineUserIds.has(profile.user_id || profile.id);
-    setDiscoverProfiles((profiles) => profiles.map((profile) => ({ ...profile, is_online: isOnline(profile) })));
-    setCurrentProfile((profile) => profile ? { ...profile, is_online: isOnline(profile) } : profile);
-    setSelectedPublicProfile((profile) => profile ? { ...profile, is_online: isOnline(profile) } : profile);
-    setInspectProfile((profile) => profile ? { ...profile, is_online: isOnline(profile) } : profile);
-    setConversations((items) => items.map((conversation) => ({
-      ...conversation,
-      other_user: { ...conversation.other_user, is_online: isOnline(conversation.other_user) },
-    })));
-  }, [onlineUserIds]);
+  const presence = usePresence();
 
   const handleOpenPublicProfile = (target: Profile | string) => {
     let identifier = '';
@@ -269,14 +258,14 @@ function MainApp() {
       if (meRes.status === 'fulfilled' && meRes.value) {
         if (!meRes.value.unavailable) {
           setCurrentUser(meRes.value.user);
-          setCurrentProfile(meRes.value.profile);
+          setCurrentProfile(meRes.value.profile ? { ...meRes.value.profile, is_online: false } : null);
         }
       }
 
       if (discoverRes.status === 'fulfilled' && discoverRes.value?.profiles && discoverRes.value.profiles.length > 0) {
-        setDiscoverProfiles(discoverRes.value.profiles);
+        setDiscoverProfiles(discoverRes.value.profiles.map((profile) => ({ ...profile, is_online: false })));
       } else {
-        setDiscoverProfiles(FALLBACK_PROFILES);
+        setDiscoverProfiles(FALLBACK_PROFILES.map((profile) => ({ ...profile, is_online: false })));
       }
 
       if (matchesRes.status === 'fulfilled' && matchesRes.value) {
@@ -437,19 +426,16 @@ function MainApp() {
     socket.on('connect', emitUserJoin);
 
     const handlePresenceSnapshot = (users: Array<{ userId: string; isOnline: boolean }>) => {
-      setOnlineUserIds(new Set(users.filter((user) => user.isOnline).map((user) => user.userId)));
+      setPresenceSnapshot(users.filter((user) => user.isOnline).map((user) => user.userId));
     };
     const handlePresenceUpdate = (data: { userId?: string; isOnline?: boolean }) => {
       if (!data?.userId) return;
-      setOnlineUserIds((previous) => {
-        const next = new Set(previous);
-        if (data.isOnline) next.add(data.userId as string);
-        else next.delete(data.userId as string);
-        return next;
-      });
+      updatePresence(data.userId, Boolean(data.isOnline));
     };
     socket.on('presence:snapshot', handlePresenceSnapshot);
     socket.on('presence:update', handlePresenceUpdate);
+    socket.on('connect_error', () => clearPresence());
+    connectSocket();
 
     socket.on('match:created', (data) => {
       setMatchedProfileData(data.matched_profile);
@@ -574,6 +560,7 @@ function MainApp() {
       socket.off('connect', emitUserJoin);
       socket.off('presence:snapshot', handlePresenceSnapshot);
       socket.off('presence:update', handlePresenceUpdate);
+      socket.off('connect_error');
       socket.off('match:created');
       socket.off('call:incoming');
       socket.off('call:rejected');
@@ -771,6 +758,7 @@ function MainApp() {
 
   const handleLogout = async () => {
     getSocket().disconnect();
+    clearPresence();
     try {
       await api.logout();
     } catch (e) {}
@@ -1128,7 +1116,7 @@ function MainApp() {
                               className="w-14 h-14 rounded-2xl object-cover border-2 border-rose-500/40 group-hover:border-rose-500 transition"
                               referrerPolicy="no-referrer"
                             />
-                            {prof.is_online && (
+                            {presence[prof.user_id || prof.id] && (
                               <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-stone-900" />
                             )}
                           </div>
@@ -1256,7 +1244,7 @@ function MainApp() {
                                 className="w-12 h-12 rounded-full object-cover border border-rose-500/30"
                                 referrerPolicy="no-referrer"
                               />
-                              {other.is_online && (
+                              {presence[other.user_id || other.id] && (
                                 <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
                               )}
                             </div>
