@@ -25,6 +25,10 @@ import { safeStorage } from '../utils/storage';
 import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
 
 const TOKEN_KEY = 'globalmatch_auth_token';
+const AUTH_SNAPSHOT_KEY = 'globalmatch_auth_snapshot';
+const API_REQUEST_TIMEOUT_MS = 5000;
+
+type AuthSnapshot = { user: User | null; profile: Profile | null };
 
 export function getStoredToken(): string | null {
   return safeStorage.getItem(TOKEN_KEY);
@@ -36,6 +40,29 @@ export function setStoredToken(token: string) {
 
 export function removeStoredToken() {
   safeStorage.removeItem(TOKEN_KEY);
+}
+
+export function getStoredAuthSnapshot(): AuthSnapshot | null {
+  try {
+    if (!getStoredToken()) return null;
+    const raw = safeStorage.getItem(AUTH_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.user?.id) return null;
+    return { user: parsed.user, profile: parsed.profile || null };
+  } catch {
+    return null;
+  }
+}
+
+function setStoredAuthSnapshot(snapshot: AuthSnapshot) {
+  try {
+    safeStorage.setItem(AUTH_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {}
+}
+
+function removeStoredAuthSnapshot() {
+  safeStorage.removeItem(AUTH_SNAPSHOT_KEY);
 }
 
 export function getApiBaseUrl(): string {
@@ -133,17 +160,23 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
 
   // Primary URL is /server-api to bypass LiteSpeed /api interception
   const primaryUrl = resolveApiUrl(input);
+  const fetchWithTimeout = async (url: string): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...init, headers, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  };
   try {
-    const res = await fetch(primaryUrl, {
-      ...init,
-      headers,
-    });
+    const res = await fetchWithTimeout(primaryUrl);
 
     const isHtmlResponse = (res.headers.get('content-type') || '').toLowerCase().includes('text/html');
 
     // Retry the original API path if the hosting proxy returns an HTML page instead of JSON.
     if ((isHtmlResponse || res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== input) {
-      const fallbackRes = await fetch(input, { ...init, headers }).catch(() => null);
+      const fallbackRes = await fetchWithTimeout(input).catch(() => null);
       if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
         return fallbackRes;
       }
@@ -151,7 +184,7 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
     return res;
   } catch (err) {
     if (primaryUrl !== input) {
-      const fallbackRes = await fetch(input, { ...init, headers }).catch(() => null);
+      const fallbackRes = await fetchWithTimeout(input).catch(() => null);
       if (fallbackRes) return fallbackRes;
     }
     throw err;
@@ -160,17 +193,24 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
 
 export const api = {
   // Auth & Profile
-  async getMe(): Promise<{ user: User | null; profile: Profile | null }> {
+  async getMe(): Promise<{ user: User | null; profile: Profile | null; unavailable?: boolean }> {
     const token = getStoredToken();
     if (!token) {
       return { user: null, profile: null };
     }
     try {
       const res = await authFetch('/api/auth/me');
-      if (!res.ok) return { user: null, profile: null };
-      return res.json();
+      if (res.status === 401) {
+        removeStoredToken();
+        removeStoredAuthSnapshot();
+        return { user: null, profile: null };
+      }
+      if (!res.ok) return { user: null, profile: null, unavailable: true };
+      const data = await res.json();
+      if (data?.user?.id) setStoredAuthSnapshot({ user: data.user, profile: data.profile || null });
+      return data;
     } catch {
-      return { user: null, profile: null };
+      return { user: null, profile: null, unavailable: true };
     }
   },
 
@@ -280,6 +320,7 @@ export const api = {
     const data = await safeJson<{ success: boolean; user: User; profile: Profile; token?: string }>(res, 'Login failed. Please check your email and password.');
     if (data.token) {
       setStoredToken(data.token);
+      setStoredAuthSnapshot({ user: data.user, profile: data.profile || null });
     }
     return data;
   },
@@ -340,6 +381,7 @@ export const api = {
       await authFetch('/api/auth/logout', { method: 'POST' });
     } finally {
       removeStoredToken();
+      removeStoredAuthSnapshot();
     }
     return { success: true };
   },

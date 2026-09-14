@@ -51,7 +51,7 @@ import { UserSearchModal } from './components/UserSearchModal';
 import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
 import { initializeCapacitorApp } from './utils/capacitorApp';
-import { api } from './services/api';
+import { api, getStoredAuthSnapshot } from './services/api';
 import { getSocket } from './services/socket';
 import { FALLBACK_PROFILES } from './data/fallbackProfiles';
 
@@ -111,8 +111,8 @@ function MainApp() {
   });
 
   // App States
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredAuthSnapshot()?.user || null);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(() => getStoredAuthSnapshot()?.profile || null);
   const [activeTab, setActiveTab] = useState<string>('discover');
   const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('grid');
 
@@ -254,8 +254,10 @@ function MainApp() {
       ]);
 
       if (meRes.status === 'fulfilled' && meRes.value) {
-        setCurrentUser(meRes.value.user);
-        setCurrentProfile(meRes.value.profile);
+        if (!meRes.value.unavailable) {
+          setCurrentUser(meRes.value.user);
+          setCurrentProfile(meRes.value.profile);
+        }
       }
 
       if (discoverRes.status === 'fulfilled' && discoverRes.value?.profiles && discoverRes.value.profiles.length > 0) {

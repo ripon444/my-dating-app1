@@ -274,9 +274,10 @@ app.get('/api/health', (req, res) => {
 // Authentication Middleware (Token & Session Based)
 // -------------------------------------------------------------
 app.use(async (req, res, next) => {
+  let token = '';
   try {
     const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ')
+    token = authHeader.startsWith('Bearer ')
       ? authHeader.substring(7).trim()
       : ((req.headers['x-session-token'] as string) || '').trim();
 
@@ -301,6 +302,9 @@ app.use(async (req, res, next) => {
     }
   } catch (err) {
     console.error('[Auth Middleware] Session resolution error:', err);
+    if (token && (req.path.startsWith('/api') || req.path.startsWith('/server-api'))) {
+      return res.status(503).json({ error: 'Authentication service temporarily unavailable.' });
+    }
   }
   next();
 });
@@ -406,6 +410,11 @@ app.post('/api/push-tokens', async (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const user = (req as any).user || null;
   const profile = (req as any).profile || null;
+  const authHeader = req.headers.authorization || '';
+  const hasSessionToken = authHeader.startsWith('Bearer ') || Boolean((req.headers['x-session-token'] as string)?.trim());
+  if (hasSessionToken && !user) {
+    return res.status(401).json({ error: 'Session is invalid or expired.' });
+  }
   res.json({ user, profile });
 });
 
@@ -4987,9 +4996,13 @@ async function start() {
     (async () => {
       try {
         await getSqlDb();
-        await initializePostgresTables().catch(err => console.warn('[Postgres Init Warning]:', err));
-        await seedPostgresIfEmpty().catch(err => console.warn('[Postgres Seed Warning]:', err));
-        await syncSqliteWithPostgres().catch(err => console.warn('[Postgres Sync Warning]:', err));
+        if (process.env.DATABASE_URL || process.env.SQL_HOST || process.env.SQL_DB_NAME) {
+          await initializePostgresTables().catch(err => console.warn('[Postgres Init Warning]:', err));
+          await seedPostgresIfEmpty().catch(err => console.warn('[Postgres Seed Warning]:', err));
+          await syncSqliteWithPostgres().catch(err => console.warn('[Postgres Sync Warning]:', err));
+        } else {
+          console.log('[Server Startup] PostgreSQL configuration not present; using SQLite until configured.');
+        }
         console.log('[Server Startup] Database layers and sync initialized successfully.');
       } catch (dbErr) {
         console.warn('[Server Startup DB Warning]:', dbErr);
