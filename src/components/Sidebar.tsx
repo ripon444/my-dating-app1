@@ -20,6 +20,7 @@ import {
   Crown,
   Ban,
   Smartphone,
+  Download,
   LogOut,
   SlidersHorizontal
 } from 'lucide-react';
@@ -334,6 +335,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             Navigation
           </div>
           {navItems.map((item) => renderNavButton(item, 'desktop'))}
+          <a
+            href="https://lovemeetly.com/downloads/lovemeetly.apk"
+            download="lovemeetly.apk"
+            className="w-full mt-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-stone-300 hover:bg-rose-950/40 hover:text-white border border-transparent hover:border-rose-900/60 transition-all flex items-center gap-3"
+            title="Download the Lovemeetly Android app"
+            aria-label="Download Lovemeetly Android app"
+          >
+            <Download className="w-5 h-5 text-rose-400 shrink-0" />
+            <span className="truncate">Download App</span>
+          </a>
         </div>
 
         {/* Legal & Compliance Footer in Sidebar */}

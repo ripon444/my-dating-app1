@@ -71,6 +71,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// Keep the APK download outside the SPA fallback so cPanel serves the binary.
+app.get('/downloads/lovemeetly.apk', (req, res) => {
+  const apkPath = path.join(process.cwd(), 'downloads', 'lovemeetly.apk');
+  if (!fs.existsSync(apkPath)) {
+    return res.status(404).json({ error: 'Android app download is not available.' });
+  }
+  res.type('application/vnd.android.package-archive');
+  return res.download(apkPath, 'lovemeetly.apk');
+});
+
 // -------------------------------------------------------------
 // Gemini AI Server-Side Client
 // -------------------------------------------------------------
