@@ -103,6 +103,18 @@ export async function initializePostgresTables() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        device_id TEXT,
+        platform TEXT NOT NULL DEFAULT 'android',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_push_tokens_user_device ON push_tokens(user_id, device_id);
+
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
         user_id TEXT REFERENCES users(id) ON DELETE CASCADE NOT NULL,

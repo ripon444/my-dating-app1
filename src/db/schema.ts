@@ -112,7 +112,20 @@ export const notifications = pgTable('notifications', {
   index('idx_notifications_created_at').on(table.createdAt),
 ]);
 
-// 6. Sessions Table
+// 6. Native Push Tokens
+export const pushTokens = pgTable('push_tokens', {
+  token: text('token').primaryKey(),
+  userId: text('user_id').notNull(),
+  deviceId: text('device_id'),
+  platform: text('platform').notNull().default('android'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  index('idx_push_tokens_user_id').on(table.userId),
+  uniqueIndex('idx_push_tokens_user_device').on(table.userId, table.deviceId),
+]);
+
+// 7. Sessions Table
 export const sessions = pgTable('sessions', {
   token: text('token').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),

@@ -36,6 +36,7 @@ import {
 } from './server/nowpayments.ts';
 import { syncSinglePayment, syncSingleSubscription } from './src/db/sync.ts';
 import { db } from './src/db/index.ts';
+import { getPool } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
 
@@ -307,6 +308,99 @@ app.use(async (req, res, next) => {
 // -------------------------------------------------------------
 // REST API ROUTES
 // -------------------------------------------------------------
+
+// Native Android clients register their FCM token through the same session auth
+// used by the rest of the API. The /server-api alias is rewritten before this route.
+app.post('/api/push-tokens', async (req, res) => {
+  const user = (req as any).user;
+  if (!user?.id) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  const rawToken = req.body?.token ?? req.body?.fcmToken ?? req.body?.fcm_token;
+  const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+  const deviceId = typeof req.body?.deviceId === 'string'
+    ? req.body.deviceId.trim().slice(0, 255)
+    : (typeof req.body?.device_id === 'string' ? req.body.device_id.trim().slice(0, 255) : null);
+  const platform = typeof req.body?.platform === 'string' && req.body.platform.trim()
+    ? req.body.platform.trim().slice(0, 32)
+    : 'android';
+
+  if (!token || token.length < 20 || token.length > 4096 || /[\u0000-\u001f\u007f\s]/.test(token)) {
+    return res.status(400).json({ error: 'A valid FCM token is required.' });
+  }
+
+  const now = new Date().toISOString();
+  try {
+    await SqlHelper.transaction(async (sqliteDb) => {
+      if (deviceId) {
+        const removeOldDeviceToken = sqliteDb.prepare(
+          'DELETE FROM push_tokens WHERE user_id = ? AND device_id = ? AND token <> ?'
+        );
+        try {
+          removeOldDeviceToken.run([user.id, deviceId, token]);
+        } finally {
+          removeOldDeviceToken.free();
+        }
+      }
+      const upsert = sqliteDb.prepare(`
+        INSERT INTO push_tokens (token, user_id, device_id, platform, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(token) DO UPDATE SET
+          user_id = excluded.user_id,
+          device_id = excluded.device_id,
+          platform = excluded.platform,
+          updated_at = excluded.updated_at
+      `);
+      try {
+        upsert.run([token, user.id, deviceId, platform, now, now]);
+      } finally {
+        upsert.free();
+      }
+    });
+
+    // Keep Neon/PostgreSQL current when configured, without making it a
+    // prerequisite for the SQLite-backed request path.
+    if (process.env.DATABASE_URL || process.env.SQL_HOST || process.env.SQL_DB_NAME) {
+      try {
+        const pool = getPool();
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS push_tokens (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            device_id TEXT,
+            platform TEXT NOT NULL DEFAULT 'android',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        if (deviceId) {
+          await pool.query(
+            'DELETE FROM push_tokens WHERE user_id = $1 AND device_id = $2 AND token <> $3',
+            [user.id, deviceId, token]
+          );
+        }
+        await pool.query(`
+          INSERT INTO push_tokens (token, user_id, device_id, platform, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $5)
+          ON CONFLICT (token) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            device_id = EXCLUDED.device_id,
+            platform = EXCLUDED.platform,
+            updated_at = EXCLUDED.updated_at
+        `, [token, user.id, deviceId, platform, now]);
+      } catch (pgError) {
+        console.warn('[Push Token] PostgreSQL sync warning:', pgError);
+      }
+    }
+
+    console.log(`[Push Token] Registered token ${token.slice(0, 8)}... for user ${user.id}`);
+    return res.status(200).json({ success: true, registered: true });
+  } catch (error) {
+    console.error('[Push Token] Registration failed:', error);
+    return res.status(500).json({ error: 'Failed to register push token.' });
+  }
+});
 
 // 1. Auth & Current User
 app.get('/api/auth/me', (req, res) => {
