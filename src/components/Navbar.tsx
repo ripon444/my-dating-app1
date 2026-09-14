@@ -17,7 +17,6 @@ import {
   Heart,
   MessageCircle,
   Search,
-  Users,
   Bell,
   X,
   UserPlus
@@ -160,7 +159,6 @@ interface NavbarProps {
   onOpenAuth: () => void;
   onLogout?: () => void;
   onOpenLegal: (tab: string) => void;
-  onOpenUserSearch?: () => void;
   notifications?: any[];
   unreadNotificationsCount?: number;
   unreadMessagesCount?: number;
@@ -185,7 +183,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onLogout,
   onOpenLegal,
-  onOpenUserSearch,
   notifications = [],
   unreadNotificationsCount = 0,
   unreadMessagesCount = 0,
@@ -370,20 +367,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
             </div>
-          )}
-
-          {/* Find Registered Users (Social Search) */}
-          {onOpenUserSearch && (
-            <button
-              id="btn-nav-find-members"
-              type="button"
-              onClick={onOpenUserSearch}
-              className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-stone-200 border border-neutral-700 text-xs font-semibold transition shrink-0"
-              title="Find Registered Members"
-            >
-              <Users className="w-3.5 h-3.5 text-rose-400" />
-              <span className="hidden md:inline">Find Members</span>
-            </button>
           )}
 
           {/* Mobile Messenger Quick Button (Facebook-style header) */}

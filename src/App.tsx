@@ -788,7 +788,6 @@ function MainApp() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onLogout={handleLogout}
         onOpenLegal={handleOpenLegalModal}
-        onOpenUserSearch={() => setIsUserSearchOpen(true)}
         notifications={notifications}
         unreadNotificationsCount={notifications.filter((n) => !n.is_read).length}
         unreadMessagesCount={conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0)}

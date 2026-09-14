@@ -33,6 +33,16 @@ import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 import { useTranslation } from '../i18n/LanguageContext';
 
+function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
+  const byId = new Map(existing.map((message) => [message.id, message]));
+  incoming.forEach((message) => {
+    if (message?.id) byId.set(message.id, message);
+  });
+  return Array.from(byId.values()).sort(
+    (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+  );
+}
+
 interface ChatWindowProps {
   conversation: Conversation;
   currentUser: User | null;
@@ -84,22 +94,27 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   // 1. Load messages and mark conversation as read
   useEffect(() => {
-    if (conversation.id) {
-      api.getMessages(conversation.id).then((data) => {
-        setMessages(data.messages || []);
-      });
+    if (!conversation.id) return;
 
-      // Mark unread messages as read
-      api.markConversationAsRead(conversation.id).catch(() => {});
+    let isCurrentConversation = true;
+    setMessages([]);
+    api.getMessages(conversation.id).then((data) => {
+      if (isCurrentConversation) {
+        setMessages((prev) => mergeMessages(prev, data.messages || []));
+      }
+    }).catch(() => {});
 
-      // Join conversation socket room
-      const socket = getSocket();
-      socket.emit('conversation:join', conversation.id);
+    // Mark unread messages as read
+    api.markConversationAsRead(conversation.id).catch(() => {});
 
-      return () => {
-        socket.emit('conversation:leave', conversation.id);
-      };
-    }
+    // Join conversation socket room
+    const socket = getSocket();
+    socket.emit('conversation:join', conversation.id);
+
+    return () => {
+      isCurrentConversation = false;
+      socket.emit('conversation:leave', conversation.id);
+    };
   }, [conversation.id]);
 
   // 2. Real-time Socket listeners for new messages, typing, and read receipts
@@ -108,10 +123,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const handleNewMessage = (msg: Message) => {
       if (msg.conversation_id === conversation.id) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
+        setMessages((prev) => mergeMessages(prev, [msg]));
 
         // If I received this message while chat is open, mark it as read immediately
         if (msg.receiver_id === activeUserId) {
@@ -147,14 +159,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     };
 
     socket.on('message:new', handleNewMessage);
-    socket.on('message:received', handleNewMessage);
     socket.on('typing:start', handleTypingStart);
     socket.on('typing:stop', handleTypingStop);
     socket.on('message:read', handleMessageRead);
 
     return () => {
       socket.off('message:new', handleNewMessage);
-      socket.off('message:received', handleNewMessage);
       socket.off('typing:start', handleTypingStart);
       socket.off('typing:stop', handleTypingStop);
       socket.off('message:read', handleMessageRead);
@@ -264,7 +274,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         message_type: msgType,
       });
 
-      setMessages((prev) => [...prev, res.message]);
+      setMessages((prev) => mergeMessages(prev, [res.message]));
       setPendingAttachment(null);
 
       // Stop typing

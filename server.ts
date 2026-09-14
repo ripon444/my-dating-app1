@@ -2261,10 +2261,10 @@ app.post('/api/messages', async (req, res) => {
     created_at: now,
   };
 
-  // Real-time delivery
-  io.to(conversation_id).emit('message:received', newMsg);
+  // Deliver each stored message once through the receiver's user room.
+  // The sender receives the REST response; broadcasting through both the room
+  // and the global Socket.IO channel caused duplicate client events.
   io.to(`user_${targetReceiverId}`).emit('message:new', newMsg);
-  io.emit('message:new', newMsg);
 
   res.json({ message: newMsg });
 });
