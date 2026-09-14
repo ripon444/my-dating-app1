@@ -183,7 +183,10 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
     }
     return res;
   } catch (err) {
-    if (primaryUrl !== input) {
+    // A timed-out /server-api request should not trigger another full timeout
+    // against LiteSpeed's /api fallback. The UI already has local fallbacks,
+    // and retrying here doubles the cold-start delay for every initial request.
+    if (primaryUrl !== input && (err as Error)?.name !== 'AbortError') {
       const fallbackRes = await fetchWithTimeout(input).catch(() => null);
       if (fallbackRes) return fallbackRes;
     }
