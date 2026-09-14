@@ -96,10 +96,10 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-      <div className="bg-stone-900 w-full max-w-xl rounded-3xl border border-stone-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-stone-900 w-full max-w-xl rounded-3xl border border-stone-800 shadow-2xl overflow-hidden flex flex-col h-[90vh] max-h-[90vh]">
         
         {/* Modal Top Header with Close */}
-        <div className="relative h-96 w-full bg-stone-950 select-none">
+        <div className="relative h-56 sm:h-96 w-full shrink-0 bg-stone-950 select-none">
           <img
             src={photos[photoIndex]}
             alt={profile.name}
@@ -165,7 +165,7 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
         </div>
 
         {/* Profile Content Body */}
-        <div className="p-6 space-y-6 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1 min-h-0">
           
           {/* Name & Basic Info Header */}
           <div className="space-y-3 border-b border-stone-800 pb-4">
@@ -361,14 +361,14 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 bg-stone-900/90 border-t border-stone-800 flex flex-wrap items-center justify-center gap-3">
+        <div className="p-3 sm:p-4 bg-stone-900/95 border-t border-stone-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2 sm:gap-3 shrink-0">
           {onStartChat && (
             <button
               onClick={() => {
                 onStartChat(profile);
                 onClose();
               }}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white shadow-lg text-xs font-bold flex items-center gap-2 transition active:scale-95"
+              className="w-full sm:w-auto justify-center px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white shadow-lg text-xs font-bold flex items-center gap-2 transition active:scale-95"
               title="Message Profile"
             >
               <MessageCircle className="w-4 h-4" />
