@@ -17,6 +17,7 @@ import {
 import { Profile } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import { api } from '../services/api';
+import { usePresenceFor } from '../services/presence';
 
 interface DiscoveryGridProps {
   profiles: Profile[];
@@ -38,6 +39,7 @@ const GridCardItem: React.FC<{
   const [followLoading, setFollowLoading] = useState(false);
 
   const isExternal = profile.source_type === 'external';
+  const isOnline = usePresenceFor(profile.user_id || profile.id);
   const photo = profile.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
 
   const handleFollowToggle = async (e: React.MouseEvent) => {
@@ -127,6 +129,18 @@ const GridCardItem: React.FC<{
               <h3 className="text-xl font-bold text-white font-serif hover:text-rose-400 transition-colors">{profile.name}</h3>
               <span className="text-lg font-light text-stone-300">{profile.age}</span>
               {profile.is_verified && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
+            </div>
+            <div
+              aria-label={isOnline ? 'Online' : 'Offline'}
+              className={`mt-1 flex items-center gap-1.5 text-xs font-semibold ${isOnline ? 'text-emerald-400' : 'text-stone-300'}`}
+            >
+              <span
+                aria-hidden="true"
+                className={`h-2.5 w-2.5 shrink-0 rounded-full border border-white/80 shadow-sm ${
+                  isOnline ? 'bg-emerald-500' : 'bg-stone-500'
+                }`}
+              />
+              <span>{isOnline ? 'Online' : 'Offline'}</span>
             </div>
             <div className="flex items-center gap-1 text-[11px] text-stone-300">
               <MapPin className="w-3 h-3 text-rose-400" />
