@@ -1841,7 +1841,17 @@ app.get('/api/discover', async (req, res) => {
   sql += " ORDER BY is_boosted DESC, CASE WHEN source_type = 'native' THEN 0 ELSE 1 END, created_at DESC, compatibility_score DESC";
 
   const rows = await SqlHelper.queryAll(sql, params);
-  const profiles = rows.map(formatProfileRow);
+  const likedProfileIds = currentUserId
+    ? new Set((await SqlHelper.queryAll<{ receiver_id: string }>(
+      'SELECT receiver_id FROM likes WHERE sender_id = ? AND is_super_like = 1',
+      [currentUserId]
+    )).map((like) => like.receiver_id))
+    : new Set<string>();
+  const profiles = await Promise.all(rows.map(async (row: any) => ({
+    ...formatProfileRow(row),
+    followers_count: row.user_id ? await SqlHelper.getFollowerCount(row.user_id) : 0,
+    is_super_liked: likedProfileIds.has(row.user_id) || likedProfileIds.has(row.id),
+  })));
   res.json({
     profiles: onlineOnly === 'true'
       ? profiles.filter((profile: any) => profile.is_online)

@@ -21,7 +21,7 @@ import { usePresenceFor } from '../services/presence';
 
 interface DiscoveryGridProps {
   profiles: Profile[];
-  onLike: (profile: Profile, isSuperLike?: boolean) => void;
+  onLike: (profile: Profile, isSuperLike?: boolean) => boolean | Promise<boolean>;
   onPass: (profile: Profile) => void;
   onViewDetails: (profile: Profile) => void;
   onResetFilters?: () => void;
@@ -29,14 +29,16 @@ interface DiscoveryGridProps {
 
 const GridCardItem: React.FC<{
   profile: Profile;
-  onLike: (profile: Profile, isSuperLike?: boolean) => void;
+  onLike: (profile: Profile, isSuperLike?: boolean) => boolean | Promise<boolean>;
   onPass: (profile: Profile) => void;
   onViewDetails: (profile: Profile) => void;
 }> = ({ profile, onLike, onPass, onViewDetails }) => {
   const { t } = useTranslation();
   const [isFollowing, setIsFollowing] = useState(Boolean(profile.is_following));
-  const [followersCount, setFollowersCount] = useState(profile.followers_count ?? 128);
+  const [followersCount, setFollowersCount] = useState(profile.followers_count ?? 0);
   const [followLoading, setFollowLoading] = useState(false);
+  const [superLikeLoading, setSuperLikeLoading] = useState(false);
+  const [superLiked, setSuperLiked] = useState(Boolean(profile.is_super_liked));
 
   const isExternal = profile.source_type === 'external';
   const isOnline = usePresenceFor(profile.user_id || profile.id);
@@ -68,9 +70,27 @@ const GridCardItem: React.FC<{
         }
       }
     } catch (err) {
+      setIsFollowing(prev);
+      setFollowersCount(prevCount);
       console.warn('Follow error in grid:', err);
     } finally {
       setFollowLoading(false);
+    }
+  };
+
+  const handleSuperLike = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (superLikeLoading || superLiked) return;
+    setSuperLikeLoading(true);
+    try {
+      const succeeded = await onLike(profile, true);
+      if (!succeeded) throw new Error('Super Like failed');
+      setSuperLiked(true);
+    } catch (err) {
+      setSuperLiked(false);
+      console.warn('Super Like error in grid:', err);
+    } finally {
+      setSuperLikeLoading(false);
     }
   };
 
@@ -238,11 +258,16 @@ const GridCardItem: React.FC<{
             <X className="w-5 h-5" />
           </button>
           <button
-            onClick={() => onLike(profile, true)}
-            className="w-9 h-9 rounded-full bg-stone-800 hover:bg-stone-700 text-sky-400 flex items-center justify-center transition cursor-pointer"
+            onClick={handleSuperLike}
+            disabled={superLikeLoading || superLiked}
+            className={`w-9 h-9 rounded-full flex items-center justify-center transition cursor-pointer disabled:cursor-default ${
+              superLiked
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-400/60'
+                : 'bg-stone-800 hover:bg-stone-700 text-sky-400'
+            }`}
             title={t('superLike')}
           >
-            <Star className="w-4 h-4 fill-sky-400" />
+            <Star className={`w-4 h-4 ${superLiked ? 'fill-sky-300' : 'fill-sky-400'} ${superLikeLoading ? 'animate-pulse' : ''}`} />
           </button>
           <button
             onClick={() => onLike(profile, false)}

@@ -616,7 +616,7 @@ function MainApp() {
   };
 
   // Like / Super Like Handler
-  const handleLike = async (profile: Profile, isSuperLike = false) => {
+  const handleLike = async (profile: Profile, isSuperLike = false): Promise<boolean> => {
     try {
       const res = await api.sendLike(profile.user_id || profile.id, isSuperLike);
       if (res.is_match && res.match_data) {
@@ -628,8 +628,10 @@ function MainApp() {
       }
       // Advance card
       setCurrentDeckIndex((prev) => prev + 1);
+      return true;
     } catch (err) {
       console.error('Like error:', err);
+      return false;
     }
   };
 

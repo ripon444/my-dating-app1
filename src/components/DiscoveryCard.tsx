@@ -45,7 +45,7 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
   const [photoIndex, setPhotoIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [isFollowing, setIsFollowing] = useState(Boolean(profile.is_following));
-  const [followersCount, setFollowersCount] = useState(profile.followers_count ?? 128);
+  const [followersCount, setFollowersCount] = useState(profile.followers_count ?? 0);
   const [followLoading, setFollowLoading] = useState(false);
 
   const photos = profile.photos && profile.photos.length > 0
