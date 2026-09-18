@@ -51,8 +51,15 @@ import { UserSearchModal } from './components/UserSearchModal';
 import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
 import {
+  consumeDesktopEventClickTarget,
   consumeDesktopNotifClickTarget,
+  debugNotifLog,
+  describeServerNotification,
+  getDesktopNotificationPermission,
+  isEventPrefEnabled,
   isTabHidden,
+  readMessageNotifPref,
+  showDesktopEventNotification,
   showDesktopMessageNotification,
 } from './utils/desktopNotifications';
 import { initializeCapacitorApp } from './utils/capacitorApp';
@@ -162,7 +169,13 @@ function MainApp() {
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
 
-  const unreadMessagesCount = conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0);
+  const unreadMessagesCount = useMemo(
+    // Single source of truth for the Messages badge: backend `unread_count`
+    // per conversation (GET /api/conversations), kept in lock-step on
+    // realtime message/read events.
+    () => conversations.reduce((acc, c) => acc + (Number(c.unread_count) || 0), 0),
+    [conversations]
+  );
 
   // Modals
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -517,11 +530,55 @@ function MainApp() {
     });
 
     socket.on('notification:new', (notif: any) => {
+      try {
+        debugNotifLog('notification:new received', {
+          id: notif?.id,
+          type: notif?.type,
+          title: notif?.title,
+          hidden: isTabHidden(),
+          permission: getDesktopNotificationPermission(),
+        });
+      } catch {}
       setNotifications((prev) => {
         if (prev.some((n) => n.id === notif.id)) return prev;
         return [notif, ...prev];
       });
       soundManager.playNotificationPop();
+      // LIKE/match/follow desktop notification (server `notification:new`).
+      // Likes arrive ONLY on this event — there is no separate like socket event.
+      try {
+        const described = describeServerNotification(notif);
+        if (!described) {
+          debugNotifLog('notification:new ignored (no title/type)', { id: notif?.id });
+          return;
+        }
+        if (!isEventPrefEnabled(described.prefKey)) {
+          debugNotifLog('event-skipped-pref-off', { id: notif?.id, type: notif?.type });
+          return;
+        }
+        const hidden = isTabHidden();
+        debugNotifLog('event-desktop-decision', { id: notif?.id, type: notif?.type, hidden });
+        // Likes/matches/follows have no other in-app toast beyond the panel
+        // badge, so notify even on a visible tab (matches existing "real-time
+        // alerts" preference copy). Actively-viewed-conversation suppression
+        // does not apply here — these are not chat messages.
+        const result = showDesktopEventNotification({
+          eventId: typeof notif?.id === 'string' ? notif.id : undefined,
+          title: described.title,
+          body: described.body,
+          photo: described.photo,
+          clickConversationId: typeof notif?.data?.conversationId === 'string' ? notif.data.conversationId : undefined,
+          clickNotificationId: typeof notif?.id === 'string' ? notif.id : undefined,
+          clickProfileId:
+            (typeof notif?.data?.profileId === 'string' && notif.data.profileId) ||
+            (typeof notif?.data?.followerId === 'string' && notif.data.followerId) ||
+            (typeof notif?.data?.userId === 'string' && notif.data.userId) ||
+            undefined,
+        });
+        debugNotifLog('event-desktop-result', { id: notif?.id, shown: result.shown, reason: result.reason });
+      } catch (err) {
+        debugNotifLog('event-desktop-error', { error: String(err) });
+      }
     });
 
     // WEB-only: one global incoming-message listener so background/minimized
@@ -534,7 +591,22 @@ function MainApp() {
     const handleGlobalMessageNew = (msg: any) => {
       try {
         const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
-        if (!msg || msg.sender_id === myId) return; // never notify for own sends
+        const socketConnected = socket.connected;
+        debugNotifLog('message:new received', {
+          id: msg?.id,
+          conversationId: msg?.conversation_id,
+          senderId: msg?.sender_id,
+          myId,
+          socketConnected,
+          hidden: isTabHidden(),
+          permission: getDesktopNotificationPermission(),
+          prefMessages: readMessageNotifPref(),
+          viewing: activeConversationIdRef.current,
+        });
+        if (!msg || msg.sender_id === myId) {
+          if (msg) debugNotifLog('message-skipped-own', { id: msg?.id });
+          return; // never notify for own sends
+        }
         const messageId = typeof msg.id === 'string' ? msg.id : '';
         if (messageId) {
           if (seenDesktopMessageIdsRef.current.has(messageId)) return;
@@ -549,11 +621,15 @@ function MainApp() {
         // Case A: user is actively viewing this conversation → in-app only.
         const viewingConv = (activeConversationIdRef.current || '').replace(/^pending:/, '');
         if (convId && viewingConv && (convId === viewingConv || `pending:${convId}` === activeConversationIdRef.current)) {
+          debugNotifLog('message-skipped-viewing', { id: messageId, convId });
           return;
         }
-        // Only escalate to a desktop notification when the tab is hidden
-        // (background tab / minimized / unfocused window).
-        if (!isTabHidden()) return;
+        // Notify whenever the message is for a conversation the user is NOT
+        // actively viewing — whether the tab is hidden (background/minimized/
+        // unfocused) or visible on another page/conversation. There is no
+        // in-app toast for messages, so this does not duplicate anything.
+        const hidden = isTabHidden();
+        debugNotifLog('message-desktop-decision', { id: messageId, convId, hidden });
 
         const known = conversationsRef.current.find((c) => c.id === convId);
         const senderName =
@@ -564,7 +640,7 @@ function MainApp() {
           typeof msg.content === 'string' && msg.content.trim()
             ? msg.content
             : (msg.message_type && msg.message_type !== 'text' ? `[${msg.message_type}]` : '');
-        showDesktopMessageNotification({
+        const result = showDesktopMessageNotification({
           messageId: messageId || undefined,
           conversationId: convId || undefined,
           senderId: typeof msg.sender_id === 'string' ? msg.sender_id : undefined,
@@ -572,9 +648,47 @@ function MainApp() {
           preview,
           photo: known?.other_user?.photos?.[0],
         });
-      } catch {}
+        debugNotifLog('message-desktop-result', { id: messageId, shown: result.shown, reason: result.reason });
+
+        // Update unread count for non-viewed conversations (realtime badge).
+        // Uses functional update so rapid socket events batch correctly.
+        if (convId) {
+          const knownConv = conversationsRef.current.find((c) => c.id === convId);
+          if (knownConv) {
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convId
+                  ? { ...c, unread_count: (Number(c.unread_count) || 0) + 1 }
+                  : c
+              )
+            );
+          } else {
+            // Conversation not in list yet — refresh so the badge/source of truth stays in sync.
+            api.getConversations().then((res) => {
+              if (Array.isArray(res?.conversations)) {
+                setConversations(res.conversations);
+              }
+            }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        debugNotifLog('message-desktop-error', { error: String(err) });
+      }
     };
     socket.on('message:new', handleGlobalMessageNew);
+
+    // Messages badge decrement: emitted by ChatWindow after the server
+    // marks a conversation as read (also fires on the room for other clients).
+    const handleConversationRead = (data: { conversation_id?: string }) => {
+      const convId = typeof data?.conversation_id === 'string' ? data.conversation_id : '';
+      if (!convId) return;
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === convId ? { ...c, unread_count: 0 } : c
+        )
+      );
+    };
+    socket.on('message:read', handleConversationRead);
 
     // Notification click → open the right conversation via existing state.
     // Uses refs so the handler never goes stale between effect re-runs.
@@ -606,6 +720,36 @@ function MainApp() {
       }
     };
     window.addEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
+
+    // Generic notification click → notifications area / profile / conversation.
+    const handleOpenNotificationEvent = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail as { conversationId?: string; notificationId?: string; profileId?: string } | undefined;
+      const convId = typeof detail?.conversationId === 'string' ? detail.conversationId : '';
+      let notifTarget = { notificationId: typeof detail?.notificationId === 'string' ? detail.notificationId : '', profileId: typeof detail?.profileId === 'string' ? detail.profileId : '' };
+      if (!notifTarget.notificationId && !notifTarget.profileId) {
+        const stored = consumeDesktopEventClickTarget();
+        if (stored) notifTarget = stored;
+      } else {
+        consumeDesktopEventClickTarget();
+      }
+      if (convId) {
+        setActiveTab('messages');
+        setMessengerTab('chats');
+        const known = conversationsRef.current.find((c) => c.id === convId);
+        if (known) {
+          setOpeningChat(null);
+          setChatOpenError(null);
+          setActiveConversationId(known.id);
+        }
+        return;
+      }
+      // Likes/matches/follows land on the in-app notifications overlay.
+      setIsNotificationsOpen(true);
+      if (notifTarget.profileId) {
+        handleOpenPublicProfile(notifTarget.profileId);
+      }
+    };
+    window.addEventListener('lovemeetly:open-notification', handleOpenNotificationEvent as EventListener);
 
     // Periodic notifications sync to ensure all-time live updates
     const notifSyncInterval = setInterval(async () => {
@@ -668,7 +812,9 @@ function MainApp() {
       socket.off('call:ended');
       socket.off('notification:new');
       socket.off('message:new', handleGlobalMessageNew);
+      socket.off('message:read', handleConversationRead);
       window.removeEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
+      window.removeEventListener('lovemeetly:open-notification', handleOpenNotificationEvent as EventListener);
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
     };
@@ -1388,7 +1534,7 @@ function MainApp() {
                       <span>Chats</span>
                       {unreadMessagesCount > 0 && (
                         <span className="px-1.5 py-0.2 bg-white/20 text-white rounded-full text-[10px]">
-                          {unreadMessagesCount}
+                          {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
                         </span>
                       )}
                     </button>
@@ -1446,11 +1592,18 @@ function MainApp() {
                             </div>
 
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between">
+                              <div className="flex items-center justify-between gap-1.5">
                                 <span className="font-bold text-white text-xs truncate font-serif">{other.name}</span>
-                                <span className="text-[10px] text-stone-500">
-                                  {new Date(conv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="text-[10px] text-stone-500">
+                                    {new Date(conv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  {(Number(conv.unread_count) || 0) > 0 && (
+                                    <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                                      {(Number(conv.unread_count) || 0) > 99 ? '99+' : conv.unread_count}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <p className="text-[11px] text-stone-400 truncate mt-0.5">
                                 {conv.last_message?.content || 'Matched! Say hello...'}

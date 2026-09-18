@@ -142,7 +142,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!conversation.id || conversation.id.startsWith('pending:')) return;
 
     const markTimer = window.setTimeout(() => {
-      api.markConversationAsRead(conversation.id).catch(() => {});
+      api.markConversationAsRead(conversation.id).then(() => {
+        // Notify the parent so the Messages badge decrements immediately
+        // without requiring a page refresh. Deduped by conversation id.
+        const socket = getSocket();
+        socket.emit('message:read', { conversation_id: conversation.id });
+      }).catch(() => {});
     }, 600);
 
     // Join conversation socket room

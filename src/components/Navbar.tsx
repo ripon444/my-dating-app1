@@ -286,13 +286,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('messages')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all relative ${
               activeTab === 'messages'
                 ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
                 : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
             }`}
           >
             {t('messages')}
+            {unreadMessagesCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-900/50">
+                {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+              </span>
+            )}
           </button>
           {user?.role === 'ADMIN' && (
             <button
@@ -384,12 +389,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             <MessageCircle className="w-4 h-4 text-stone-300" />
             {unreadMessagesCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-900/50">
-                {unreadMessagesCount > 9 ? '9+' : unreadMessagesCount}
+                {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
               </span>
             )}
           </button>
 
-          {/* Real-time Notifications Bell */}
+      {/* Real-time Notifications Bell */}
           <div className="relative shrink-0" ref={notifRef}>
             <button
               id="btn-nav-notifications"
