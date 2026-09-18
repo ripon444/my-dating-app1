@@ -106,6 +106,7 @@ export interface Profile {
   // Social & Follow stats
   followers_count?: number;
   following_count?: number;
+  is_super_liked?: boolean;
   is_following?: boolean;
   is_blocked?: boolean;
   has_blocked?: boolean;

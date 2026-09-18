@@ -11,6 +11,8 @@ declare global {
 export const createPool = () => {
   if (!global._postgresPool) {
     const databaseUrl = process.env.DATABASE_URL;
+    const connectionTimeoutMillis = Number(process.env.PG_CONNECTION_TIMEOUT_MS) || 1500;
+    const queryTimeout = Number(process.env.PG_QUERY_TIMEOUT_MS) || 3000;
 
     if (databaseUrl) {
       global._postgresPool = new Pool({
@@ -20,7 +22,9 @@ export const createPool = () => {
           : false,
         max: 5,
         idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 4000,
+        connectionTimeoutMillis,
+        query_timeout: queryTimeout,
+        statement_timeout: queryTimeout,
         keepAlive: true,
       });
     } else {
@@ -31,7 +35,9 @@ export const createPool = () => {
         database: process.env.SQL_DB_NAME || 'dating_app',
         max: 5,
         idleTimeoutMillis: 10000,
-        connectionTimeoutMillis: 4000,
+        connectionTimeoutMillis,
+        query_timeout: queryTimeout,
+        statement_timeout: queryTimeout,
         keepAlive: true,
       });
     }
