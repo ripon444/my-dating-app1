@@ -139,6 +139,9 @@ function MainApp() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [openingChat, setOpeningChat] = useState<{ targetId: string; profile?: Profile } | null>(null);
+  const [chatOpenError, setChatOpenError] = useState<string | null>(null);
+  const openingChatRef = useRef<string | null>(null);
   const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>('chats');
   const [callHistory, setCallHistory] = useState<Call[]>([]);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
@@ -701,22 +704,75 @@ function MainApp() {
   }, []);
 
   // Direct Message Handler from Profile Modal
-  const handleStartChat = async (profileOrId: Profile | string) => {
-    try {
-      const targetId = typeof profileOrId === 'string' ? profileOrId : (profileOrId.user_id || profileOrId.id);
-      const res = await api.createOrGetConversation(targetId);
-      if (res.conversation) {
-        setConversations((prev) => {
-          if (prev.some((c) => c.id === res.conversation.id)) return prev;
-          return [res.conversation, ...prev];
-        });
-        setActiveConversationId(res.conversation.id);
-        setActiveTab('messages');
-      }
-    } catch (err) {
-      console.error('Start chat error:', err);
+  // Opens the chat destination synchronously (no await before navigation) so the
+  // profile never unmounts into a blank state and the chat feels immediate.
+  // Conversation creation + history load happen asynchronously afterwards.
+  const handleStartChat = useCallback(async (profileOrId: Profile | string) => {
+    const targetProfile = typeof profileOrId === 'string' ? undefined : profileOrId;
+    const rawTargetId = typeof profileOrId === 'string' ? profileOrId : (profileOrId.user_id || profileOrId.id);
+    const targetId = (rawTargetId || '').trim();
+    if (!targetId) {
+      setChatOpenError('Could not determine which profile to message.');
+      return;
     }
-  };
+    // Ignore duplicate taps for the same target while a request is in flight.
+    if (openingChatRef.current === targetId) return;
+
+    const knownConversation = conversations.find((conversation) =>
+      conversation.other_user?.user_id === targetId ||
+      conversation.other_user?.id === targetId ||
+      (conversation.user_a_id === currentUser?.id && conversation.user_b_id === targetId) ||
+      (conversation.user_b_id === currentUser?.id && conversation.user_a_id === targetId)
+    );
+
+    // Navigate FIRST — synchronously — before any network request.
+    setSelectedPublicUserId(null);
+    setSelectedPublicProfile(null);
+    setIsProfileViewOpen(false);
+    setActiveTab('messages');
+    setMessengerTab('chats');
+    setChatOpenError(null);
+
+    if (knownConversation) {
+      setOpeningChat(null);
+      openingChatRef.current = null;
+      setActiveConversationId(knownConversation.id);
+      return;
+    }
+
+    // Render the chat destination immediately while conversation creation runs
+    // in the background. The placeholder id uses the `pending:` prefix so
+    // ChatWindow/API layers know not to fetch history for it.
+    const pendingId = `pending:${targetId}`;
+    setOpeningChat({ targetId, profile: targetProfile });
+    setActiveConversationId(pendingId);
+    openingChatRef.current = targetId;
+
+    try {
+      const res = await api.createOrGetConversation(targetId);
+      if (!res.conversation) throw new Error('The server did not return a conversation.');
+      // Always cache the conversation even if the user moved on (stale),
+      // so a later tap opens instantly from the known list.
+      setConversations((prev) => [
+        res.conversation,
+        ...prev.filter((conversation) => conversation.id !== res.conversation.id),
+      ]);
+      // Ignore stale navigation if the user already opened a different chat.
+      if (openingChatRef.current !== targetId) return;
+      setOpeningChat(null);
+      setChatOpenError(null);
+      setActiveConversationId(res.conversation.id);
+    } catch (err: any) {
+      // Ignore stale failures for a superseded target.
+      if (openingChatRef.current !== targetId) return;
+      console.error('Start chat error:', err);
+      // Keep the user on the messages tab with a retry state instead of
+      // bouncing them back to the (now closed) profile.
+      setChatOpenError(err?.message || 'Could not open this conversation.');
+    } finally {
+      if (openingChatRef.current === targetId) openingChatRef.current = null;
+    }
+  }, [conversations, currentUser?.id]);
 
   const handleOpenLegalModal = (tabName: string) => {
     if (tabName === 'disclosure') {
@@ -742,7 +798,45 @@ function MainApp() {
   });
 
   const activeProfileInDeck = filteredDiscoverProfiles[currentDeckIndex];
-  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+  const rawActiveConversation = activeConversationId
+    ? conversations.find((c) => c.id === activeConversationId)
+    : undefined;
+  // While a new conversation is being created, render an instant provisional
+  // ChatWindow from the known profile so the destination is visible without
+  // waiting for the network. History/socket attach once the real id arrives.
+  // Falls back to a minimal profile shell when only the id is known (e.g. retry).
+  const activeConversation: Conversation | undefined = rawActiveConversation ?? (
+    openingChat && activeConversationId === `pending:${openingChat.targetId}`
+      ? {
+          id: `pending:${openingChat.targetId}`,
+          match_id: '',
+          user_a_id: currentUser?.id || '',
+          user_b_id: openingChat.targetId,
+          other_user: openingChat.profile ?? {
+            id: openingChat.targetId,
+            user_id: openingChat.targetId,
+            name: 'Member',
+            age: 0,
+            gender: 'OTHER' as const,
+            country: '',
+            city: '',
+            bio: '',
+            photos: [],
+            interests: [],
+            languages: [],
+            relationship_goal: '',
+            compatibility_score: 0,
+            is_online: false,
+            source_type: 'native' as const,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          unread_count: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+      : undefined
+  );
 
   // If visiting Admin Route (/tanvir or /admin)
   if (isAdminRoute) {
@@ -1332,9 +1426,15 @@ function MainApp() {
               <div className={`md:col-span-2 h-full ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
                 {activeConversation ? (
                   <ChatWindow
+                    key={activeConversation.id}
                     conversation={activeConversation}
                     currentUser={currentUser}
-                    onBack={() => setActiveConversationId(null)}
+                    onBack={() => {
+                      setActiveConversationId(null);
+                      setOpeningChat(null);
+                      openingChatRef.current = null;
+                      setChatOpenError(null);
+                    }}
                     onInitiateCall={(id, type) => handleStartCall(id, type)}
                     onViewProfile={(p) => {
                       setInspectProfile(p);
@@ -1352,6 +1452,42 @@ function MainApp() {
                       });
                     }}
                   />
+                ) : openingChat ? (
+                  <div className="flex-1 bg-stone-900/40 rounded-3xl border border-stone-800 flex flex-col items-center justify-center text-center p-8 text-stone-300 space-y-3">
+                    {chatOpenError ? (
+                      <>
+                        <MessageCircle className="w-10 h-10 text-rose-400" />
+                        <h3 className="font-bold text-white text-sm">Could not open this chat</h3>
+                        <p className="text-xs text-stone-400 max-w-sm">{chatOpenError}</p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleStartChat(openingChat.profile || openingChat.targetId)}
+                            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
+                          >
+                            Retry
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpeningChat(null);
+                              setChatOpenError(null);
+                              setActiveConversationId(null);
+                            }}
+                            className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold"
+                          >
+                            Back to chats
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-8 h-8 text-rose-400 animate-spin" />
+                        <h3 className="font-bold text-white text-sm">Opening conversation...</h3>
+                        <p className="text-xs text-stone-500">Your profile and messages are still available while the chat connects.</p>
+                      </>
+                    )}
+                  </div>
                 ) : (
                   <div className="flex-1 bg-stone-900/40 rounded-3xl border border-stone-800 flex flex-col items-center justify-center text-center p-8 text-stone-500 space-y-2">
                     <MessageCircle className="w-12 h-12 text-stone-700" />

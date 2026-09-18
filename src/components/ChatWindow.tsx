@@ -70,6 +70,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [translationsMap, setTranslationsMap] = useState<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyRetry, setHistoryRetry] = useState(0);
   const [isTyping, setIsTyping] = useState(false);
   const [typingUserName, setTypingUserName] = useState<string | null>(null);
   
@@ -89,32 +92,65 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const historyRequestIdRef = useRef(0);
 
   const otherUser = conversation.other_user;
   const activeUserId = currentUser?.id || 'usr_me_01';
   const isOtherUserOnline = usePresenceFor(otherUser.user_id || otherUser.id);
 
-  // 1. Load messages and mark conversation as read
+  // Load the complete history independently from the chat shell and socket setup.
+  // Merge (never replace) so a retry or socket race cannot wipe already-loaded history.
   useEffect(() => {
-    if (!conversation.id) return;
+    const conversationId = conversation.id;
+    if (!conversationId || conversationId.startsWith('pending:')) {
+      setIsLoadingHistory(false);
+      setHistoryError(null);
+      return;
+    }
 
     let isCurrentConversation = true;
-    setMessages([]);
-    api.getMessages(conversation.id).then((data) => {
-      if (isCurrentConversation) {
-        setMessages((prev) => mergeMessages(prev, data.messages || []));
-      }
-    }).catch(() => {});
+    const requestId = ++historyRequestIdRef.current;
+    // Reset only when switching to a different real conversation.
+    setMessages((prev) => (prev.length && prev[0]?.conversation_id === conversationId ? prev : []));
+    setIsLoadingHistory(true);
+    setHistoryError(null);
+    api.getMessages(conversationId).then((data) => {
+      if (!isCurrentConversation || historyRequestIdRef.current !== requestId) return;
+      setMessages((prev) => {
+        const base = prev.length && prev[0]?.conversation_id === conversationId ? prev : [];
+        return mergeMessages(base, data.messages || []);
+      });
+      setHistoryError(null);
+    }).catch((err: any) => {
+      if (!isCurrentConversation || historyRequestIdRef.current !== requestId) return;
+      // Keep any already-loaded messages; surface retry instead of blank thread.
+      setHistoryError(err?.message || 'Failed to load message history.');
+    }).finally(() => {
+      if (isCurrentConversation && historyRequestIdRef.current === requestId) setIsLoadingHistory(false);
+    });
 
-    // Mark unread messages as read
-    api.markConversationAsRead(conversation.id).catch(() => {});
+    return () => {
+      isCurrentConversation = false;
+    };
+  }, [conversation.id, historyRetry]);
+
+  // Mark unread messages as read and join the realtime room without blocking history.
+  useEffect(() => {
+    // Debounced so opening a chat doesn't fire mark-as-read twice (effect +
+    // inbound socket echo). Pending placeholder conversations are skipped:
+    // there is no server-side conversation yet, so join/mark would 404.
+    if (!conversation.id || conversation.id.startsWith('pending:')) return;
+
+    const markTimer = window.setTimeout(() => {
+      api.markConversationAsRead(conversation.id).catch(() => {});
+    }, 600);
 
     // Join conversation socket room
     const socket = getSocket();
     socket.emit('conversation:join', conversation.id);
 
     return () => {
-      isCurrentConversation = false;
+      window.clearTimeout(markTimer);
       socket.emit('conversation:leave', conversation.id);
     };
   }, [conversation.id]);
@@ -322,6 +358,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   const isExternal = otherUser.source_type === 'external';
+  const isPendingConversation = conversation.id.startsWith('pending:');
 
   return (
     <div className="flex flex-col h-full bg-stone-900 rounded-3xl border border-stone-800 overflow-hidden shadow-2xl relative">
@@ -387,7 +424,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <span className="font-bold text-white text-sm group-hover:text-rose-400 transition font-serif">
                   {otherUser.name}
                 </span>
-                <span className="text-xs text-stone-400">{otherUser.age}</span>
+                <span className="text-xs text-stone-400">{otherUser.age ? otherUser.age : ''}</span>
                 {isExternal ? (
                   <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-semibold border border-amber-500/30">
                     Partner
@@ -399,7 +436,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
               </div>
               <p className="text-[11px] text-stone-400">
-                {isTyping ? (
+                {isPendingConversation ? (
+                  <span className="text-rose-400 font-semibold animate-pulse">
+                    Connecting...
+                  </span>
+                ) : isTyping ? (
                   <span className="text-rose-400 font-semibold animate-pulse">
                     typing...
                   </span>
@@ -582,7 +623,45 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         </div>
 
-        {messages.length === 0 ? (
+        {isPendingConversation ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center text-stone-400 space-y-2">
+            <Loader2 className="w-6 h-6 text-rose-400 animate-spin" />
+            <p className="text-xs font-semibold text-stone-300">Opening conversation with {otherUser.name || 'member'}...</p>
+            <p className="text-[11px] text-stone-500 max-w-xs">Full history loads automatically once connected.</p>
+          </div>
+        ) : historyError && messages.length > 0 && (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-center">
+            <p className="text-[11px] text-amber-300">{historyError} Showing {messages.length} loaded message{messages.length === 1 ? '' : 's'}.</p>
+            <button
+              type="button"
+              onClick={() => setHistoryRetry((n) => n + 1)}
+              className="mt-1 text-[11px] font-bold text-amber-200 underline underline-offset-2 hover:text-amber-100"
+            >
+              Retry loading history
+            </button>
+          </div>
+        )}
+
+        {isLoadingHistory && messages.length === 0 && !historyError ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center text-stone-400 space-y-2">
+            <Loader2 className="w-6 h-6 text-rose-400 animate-spin" />
+            <p className="text-xs font-semibold text-stone-300">Loading full message history...</p>
+            <p className="text-[11px] text-stone-500 max-w-xs">You can already type below — history appears as soon as it arrives.</p>
+          </div>
+        ) : historyError && messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center space-y-2 rounded-2xl border border-red-500/30 bg-red-500/10 px-4">
+            <ShieldAlert className="w-6 h-6 text-red-400" />
+            <p className="text-xs font-bold text-red-300">Could not load message history</p>
+            <p className="text-[11px] text-stone-400 max-w-xs">{historyError} No messages were deleted.</p>
+            <button
+              type="button"
+              onClick={() => setHistoryRetry((n) => n + 1)}
+              className="mt-1 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
+            >
+              Retry
+            </button>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 text-center text-stone-400 space-y-2">
             <Sparkles className="w-6 h-6 text-rose-500/50" />
             <p className="text-xs font-semibold text-stone-300">{t('startConversation')}</p>
@@ -894,14 +973,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           type="text"
           value={inputVal}
           onChange={handleInputChange}
-          placeholder={pendingAttachment ? 'Add a caption (optional)...' : t('typeMessage')}
-          className="flex-1 bg-stone-800 border border-stone-700 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition"
+          placeholder={isPendingConversation ? 'Connecting — you can type, sending unlocks on connect...' : (pendingAttachment ? 'Add a caption (optional)...' : t('typeMessage'))}
+          disabled={isPendingConversation}
+          className="flex-1 bg-stone-800 border border-stone-700 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition disabled:opacity-60"
         />
 
         {/* Send Button */}
         <button
           type="submit"
-          disabled={(!inputVal.trim() && !pendingAttachment) || isSending}
+          disabled={(!inputVal.trim() && !pendingAttachment) || isSending || isPendingConversation}
           className="p-2.5 sm:px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 disabled:opacity-40 text-white font-bold transition shadow-lg shadow-rose-900/30 flex items-center gap-1.5 active:scale-95"
           title="Send"
         >

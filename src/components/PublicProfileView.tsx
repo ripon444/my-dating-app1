@@ -807,7 +807,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                         showToast('Please log in to message.');
                         return;
                       }
-                      onStartChat?.(profile.user_id || profile.id);
+                      onStartChat?.(profile);
                     }}
                     className="px-5 py-2.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold rounded-xl text-sm transition-all flex items-center gap-2 shadow-sm"
                   >

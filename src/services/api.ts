@@ -136,7 +136,7 @@ export function resolveApiUrl(path: string): string {
   return endpoint;
 }
 
-async function authFetch(input: string, init?: RequestInit): Promise<Response> {
+async function authFetch(input: string, init?: RequestInit, timeoutMs: number = API_REQUEST_TIMEOUT_MS): Promise<Response> {
   let token = getStoredToken();
   const headers = new Headers(init?.headers || {});
 
@@ -160,9 +160,9 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
 
   // Primary URL is /server-api to bypass LiteSpeed /api interception
   const primaryUrl = resolveApiUrl(input);
-  const fetchWithTimeout = async (url: string): Promise<Response> => {
+  const fetchWithTimeout = async (url: string, ms: number): Promise<Response> => {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(() => controller.abort(), ms);
     try {
       return await fetch(url, { ...init, headers, signal: controller.signal });
     } finally {
@@ -170,13 +170,15 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
     }
   };
   try {
-    const res = await fetchWithTimeout(primaryUrl);
+    const res = await fetchWithTimeout(primaryUrl, timeoutMs);
 
     const isHtmlResponse = (res.headers.get('content-type') || '').toLowerCase().includes('text/html');
 
     // Retry the original API path if the hosting proxy returns an HTML page instead of JSON.
+    // The fallback uses a shorter timeout so one slow hosting layer cannot double
+    // the user-visible delay for chat-critical requests.
     if ((isHtmlResponse || res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== input) {
-      const fallbackRes = await fetchWithTimeout(input).catch(() => null);
+      const fallbackRes = await fetchWithTimeout(input, Math.min(timeoutMs, 7000)).catch(() => null);
       if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
         return fallbackRes;
       }
@@ -187,11 +189,25 @@ async function authFetch(input: string, init?: RequestInit): Promise<Response> {
     // against LiteSpeed's /api fallback. The UI already has local fallbacks,
     // and retrying here doubles the cold-start delay for every initial request.
     if (primaryUrl !== input && (err as Error)?.name !== 'AbortError') {
-      const fallbackRes = await fetchWithTimeout(input).catch(() => null);
+      const fallbackRes = await fetchWithTimeout(input, Math.min(timeoutMs, 7000)).catch(() => null);
       if (fallbackRes) return fallbackRes;
     }
     throw err;
   }
+}
+
+// Deduplicate concurrent identical requests so double-clicks, StrictMode
+// remounts, and parallel effects share one network call instead of firing
+// duplicate conversation/message fetches.
+const inFlightRequests = new Map<string, Promise<any>>();
+function dedupedRequest<T>(key: string, factory: () => Promise<T>): Promise<T> {
+  const existing = inFlightRequests.get(key);
+  if (existing) return existing as Promise<T>;
+  const promise = factory().finally(() => {
+    if (inFlightRequests.get(key) === promise) inFlightRequests.delete(key);
+  });
+  inFlightRequests.set(key, promise);
+  return promise;
 }
 
 export const api = {
@@ -452,34 +468,67 @@ export const api = {
 
   // Chat
   async getConversations(): Promise<{ conversations: Conversation[] }> {
-    try {
-      const res = await authFetch('/api/conversations');
-      if (!res.ok) return { conversations: [] };
-      return res.json();
-    } catch {
-      return { conversations: [] };
-    }
+    return dedupedRequest('GET:/api/conversations', async () => {
+      try {
+        const res = await authFetch('/api/conversations');
+        if (!res.ok) return { conversations: [] };
+        return res.json();
+      } catch {
+        return { conversations: [] };
+      }
+    });
   },
 
   async createOrGetConversation(targetUserId: string): Promise<{ conversation: Conversation }> {
-    const res = await authFetch('/api/conversations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_user_id: targetUserId }),
+    if (!targetUserId) throw new Error('Target user ID required');
+    // Per-target dedupe: rapid double taps and StrictMode remounts reuse one POST.
+    return dedupedRequest(`POST:/api/conversations:${targetUserId}`, async () => {
+      const startedAt = Date.now();
+      const res = await authFetch('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_user_id: targetUserId }),
+      });
+      const result = await safeJson<{ conversation: Conversation }>(res, 'Failed to open conversation');
+      if (!result?.conversation?.id) {
+        throw new Error(`The server did not return a conversation (${Date.now() - startedAt}ms).`);
+      }
+      return result;
     });
-    return res.json();
   },
 
   async markConversationAsRead(conversationId: string): Promise<{ success: boolean }> {
+    if (!conversationId || conversationId.startsWith('pending:')) return { success: true };
     const res = await authFetch(`/api/conversations/${conversationId}/read`, {
       method: 'POST',
     });
-    return res.json();
+    return safeJson(res, 'Failed to mark conversation as read');
   },
 
   async getMessages(conversationId: string): Promise<{ messages: Message[] }> {
-    const res = await authFetch(`/api/conversations/${conversationId}/messages`);
-    return res.json();
+    if (!conversationId) throw new Error('Conversation ID required');
+    if (conversationId.startsWith('pending:')) return { messages: [] };
+    // Same-conversation dedupe across the history effect / StrictMode double-invoke.
+    // The server returns the complete ordered history (no pagination yet), so
+    // one request is enough — the client merges, never replaces, on retry.
+    return dedupedRequest(`GET:/api/conversations/${conversationId}/messages`, async () => {
+      const startedAt = Date.now();
+      try {
+        const res = await authFetch(`/api/conversations/${conversationId}/messages`);
+        const result = await safeJson<{ messages: Message[] }>(res, 'Failed to load message history');
+        if (!Array.isArray(result?.messages)) throw new Error('Invalid message history received from server.');
+        return { messages: result.messages };
+      } catch (err: any) {
+        const elapsed = Date.now() - startedAt;
+        // Preserve the underlying cause (timeout vs auth vs server) for the UI.
+        const reason = err?.name === 'AbortError'
+          ? `Message history request timed out after ${elapsed}ms.`
+          : (err?.message || 'Failed to load message history.');
+        const wrapped = new Error(reason);
+        (wrapped as any).cause = err;
+        throw wrapped;
+      }
+    });
   },
 
   async uploadAttachment(data: { data: string; filename: string; mimeType: string; size: number }): Promise<{ success: boolean; file: { id?: string; url: string; filename: string; size: number; mimeType: string; messageType: string } }> {
