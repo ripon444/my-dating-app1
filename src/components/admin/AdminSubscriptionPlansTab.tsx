@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { SubscriptionPlan } from '../../types';
 import { api } from '../../services/api';
+import { SUBSCRIPTION_FEATURES } from '../../data/subscriptionFeatures';
 
 interface AdminSubscriptionPlansTabProps {
   onSuccessMessage: (msg: string) => void;
@@ -47,6 +48,15 @@ export const AdminSubscriptionPlansTab: React.FC<AdminSubscriptionPlansTabProps>
   const [isActive, setIsActive] = useState(true);
   const [displayOrder, setDisplayOrder] = useState<number>(1);
   const [featuresText, setFeaturesText] = useState('');
+
+  const selectedFeatures = featuresText.split('\n').map((feature) => feature.trim()).filter(Boolean);
+
+  const toggleFeature = (feature: string) => {
+    const next = selectedFeatures.includes(feature)
+      ? selectedFeatures.filter((item) => item !== feature)
+      : [...selectedFeatures, feature];
+    setFeaturesText(next.join('\n'));
+  };
 
   // Delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -80,9 +90,7 @@ export const AdminSubscriptionPlansTab: React.FC<AdminSubscriptionPlansTabProps>
     setDurationUnit('months');
     setIsActive(true);
     setDisplayOrder(plans.length + 1);
-    setFeaturesText(
-      'Unlimited Likes & Rewinds\nTop-of-Stack Priority Placement\n5 Free Monthly Profile Boosts\nUnlimited AI Message Translations\nHigh-Definition Audio & Video Calling\nVIP Gold Profile Badge'
-    );
+    setFeaturesText('unlimited_likes\nunlimited_rewinds\nglobal_passport\nai_translation\nsee_who_liked\ntop_stack\nweekly_super_likes\nhd_video_call\nvip_gold_badge');
     setIsModalOpen(true);
   };
 
@@ -284,7 +292,7 @@ export const AdminSubscriptionPlansTab: React.FC<AdminSubscriptionPlansTabProps>
                     {plan.features.map((feat, idx) => (
                       <div key={idx} className="flex items-start gap-2">
                         <Check className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                        <span className="text-[11px] leading-tight">{feat}</span>
+                        <span className="text-[11px] leading-tight">{SUBSCRIPTION_FEATURES.find((item) => item.key === feat)?.label || feat}</span>
                       </div>
                     ))}
                   </div>
@@ -484,19 +492,25 @@ export const AdminSubscriptionPlansTab: React.FC<AdminSubscriptionPlansTabProps>
                 </div>
               </div>
 
-              {/* Features (One per line) */}
+              {/* Feature permissions */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-stone-300 flex items-center justify-between">
-                  <span>Included Features (one per line)</span>
-                  <span className="text-[10px] text-stone-400 font-normal">Press Enter for new bullet</span>
+                  <span>Feature permissions</span>
+                  <span className="text-[10px] text-stone-400 font-normal">Toggle each permission</span>
                 </label>
-                <textarea
-                  rows={5}
-                  value={featuresText}
-                  onChange={(e) => setFeaturesText(e.target.value)}
-                  placeholder="Unlimited Likes & Rewinds&#10;Top-of-Stack Placement&#10;Audio & Video Calling"
-                  className="w-full bg-stone-950 border border-stone-700 rounded-xl p-3 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-amber-500 font-mono leading-relaxed"
-                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-xl bg-stone-950 border border-stone-700 p-3">
+                  {SUBSCRIPTION_FEATURES.map((feature) => (
+                    <label key={feature.key} className="flex items-center gap-2 text-xs text-stone-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedFeatures.includes(feature.key)}
+                        onChange={() => toggleFeature(feature.key)}
+                        className="w-4 h-4 rounded border-stone-700 text-amber-500 focus:ring-amber-500 bg-stone-900"
+                      />
+                      <span>{feature.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               {/* Submit Buttons */}

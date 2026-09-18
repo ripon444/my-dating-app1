@@ -22,6 +22,7 @@ import {
 import { User, SubscriptionPlan } from '../types';
 import { api } from '../services/api';
 import { useTranslation } from '../i18n/LanguageContext';
+import { subscriptionFeatureLabel } from '../data/subscriptionFeatures';
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -484,7 +485,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                               isVip && !isFree ? 'text-amber-400' : isFree ? 'text-stone-500' : 'text-purple-400'
                             }`}
                           />
-                          <span>{feat}</span>
+                          <span>{subscriptionFeatureLabel(feat)}</span>
                         </div>
                       ))}
                     </div>

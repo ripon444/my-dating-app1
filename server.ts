@@ -39,6 +39,7 @@ import { db } from './src/db/index.ts';
 import { getPool } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
+import { DEFAULT_VIP_PLAN_FEATURES, VIP_FEATURE_KEYS, parseFeatureKeys, type VipFeatureKey } from './server/subscriptionFeatures.ts';
 
 const app = express();
 const httpServer = createServer(app);
@@ -273,6 +274,37 @@ export function formatUserRow(row: any): any {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+async function getActiveSubscriptionFeatures(userId: string): Promise<Set<VipFeatureKey>> {
+  const user = await SqlHelper.queryOne<any>('SELECT role, email FROM users WHERE id = ?', [userId]);
+  if (user?.role === 'ADMIN' || isSuperAdminEmail(user?.email)) {
+    return new Set(VIP_FEATURE_KEYS);
+  }
+
+  const activeSubscription = await SqlHelper.queryOne<any>(
+    `SELECT p.features_json
+     FROM user_subscriptions s
+     JOIN subscription_plans p ON p.id = s.plan_id
+     WHERE s.user_id = ? AND s.status = 'active' AND s.expires_at > ?
+     ORDER BY s.expires_at DESC, s.created_at DESC LIMIT 1`,
+    [userId, new Date().toISOString()]
+  );
+  return new Set(parseFeatureKeys(activeSubscription?.features_json));
+}
+
+async function requireVipFeature(feature: VipFeatureKey, req: any, res: any): Promise<boolean> {
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return false;
+  }
+  const features = await getActiveSubscriptionFeatures(user.id);
+  if (!features.has(feature)) {
+    res.status(403).json({ error: `This feature requires an active plan that includes ${feature}.`, feature });
+    return false;
+  }
+  return true;
 }
 
 // -------------------------------------------------------------
@@ -1466,6 +1498,10 @@ app.get('/api/notifications', async (req, res) => {
       'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
       [user.id]
     ).catch(() => []);
+    const features = await getActiveSubscriptionFeatures(user.id);
+    const visibleSqliteNotifs = features.has('see_who_liked')
+      ? sqliteNotifs
+      : sqliteNotifs.filter((notification) => !['like', 'super_like'].includes(notification.type));
 
     // Fetch from PostgreSQL (Cloud SQL persistent)
     let pgNotifs: any[] = [];
@@ -1478,7 +1514,7 @@ app.get('/api/notifications', async (req, res) => {
 
     const combinedMap = new Map<string, any>();
 
-    for (const sn of sqliteNotifs) {
+    for (const sn of visibleSqliteNotifs) {
       let data = {};
       try {
         data = typeof sn.data_json === 'string' ? JSON.parse(sn.data_json) : (sn.data_json || {});
@@ -1495,7 +1531,9 @@ app.get('/api/notifications', async (req, res) => {
       });
     }
 
-    for (const pn of pgNotifs) {
+    for (const pn of pgNotifs.filter((notification) =>
+      features.has('see_who_liked') || !['like', 'super_like'].includes(notification.type)
+    )) {
       let data = {};
       try {
         data = pn.dataJson ? (typeof pn.dataJson === 'string' ? JSON.parse(pn.dataJson) : pn.dataJson) : {};
@@ -1787,6 +1825,14 @@ app.get('/api/discover', async (req, res) => {
   const user = (req as any).user;
   const currentUserId = user?.id || '';
 
+  if (country && currentUserId) {
+    const features = await getActiveSubscriptionFeatures(currentUserId);
+    const profile = await SqlHelper.queryOne<any>('SELECT country FROM profiles WHERE user_id = ?', [currentUserId]);
+    if (!features.has('global_passport') && String(country).trim().toLowerCase() !== String(profile?.country || '').trim().toLowerCase()) {
+      return res.status(403).json({ error: 'Global Passport is required to browse outside your country.', feature: 'global_passport' });
+    }
+  }
+
   let sql = 'SELECT * FROM profiles WHERE is_visible = 1';
   const params: any[] = [];
 
@@ -1838,7 +1884,8 @@ app.get('/api/discover', async (req, res) => {
     params.push(term, term, term, term, term, term);
   }
 
-  sql += " ORDER BY is_boosted DESC, CASE WHEN source_type = 'native' THEN 0 ELSE 1 END, created_at DESC, compatibility_score DESC";
+  const canUseTopStack = currentUserId && (await getActiveSubscriptionFeatures(currentUserId)).has('top_stack');
+  sql += `${canUseTopStack ? ' ORDER BY is_boosted DESC,' : ' ORDER BY'} CASE WHEN source_type = 'native' THEN 0 ELSE 1 END, created_at DESC, compatibility_score DESC`;
 
   const rows = await SqlHelper.queryAll(sql, params);
   const likedProfileIds = currentUserId
@@ -1868,6 +1915,21 @@ app.post('/api/likes', async (req, res) => {
 
   const { receiver_id, is_super_like = false } = req.body;
   if (!receiver_id) return res.status(400).json({ error: 'Receiver ID required' });
+
+  const features = await getActiveSubscriptionFeatures(user.id);
+  if (is_super_like && !features.has('weekly_super_likes')) {
+    return res.status(403).json({ error: 'Weekly Super Likes are not included in your active plan.', feature: 'weekly_super_likes' });
+  }
+  if (!features.has('unlimited_likes')) {
+    const since = new Date(Date.now() - 86400000).toISOString();
+    const likesToday = await SqlHelper.queryOne<any>(
+      'SELECT COUNT(*) AS count FROM likes WHERE sender_id = ? AND created_at > ?',
+      [user.id, since]
+    );
+    if (Number(likesToday?.count || 0) >= 50) {
+      return res.status(403).json({ error: 'Your daily likes limit has been reached. Upgrade for unlimited likes.', feature: 'unlimited_likes' });
+    }
+  }
 
   const now = new Date().toISOString();
   const likeId = 'lk_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
@@ -2290,6 +2352,7 @@ app.post('/api/calls', async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Authentication required' });
 
   const { receiver_id, type = 'video' } = req.body;
+  if (type === 'video' && !(await requireVipFeature('hd_video_call', req, res))) return;
   const receiverRow = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ? OR id = ?', [receiver_id, receiver_id]);
 
   if (!receiverRow) {
@@ -2507,6 +2570,7 @@ app.post('/api/ai/bio-assistant', async (req, res) => {
 });
 
 app.post('/api/ai/translate', async (req, res) => {
+  if (!(await requireVipFeature('ai_translation', req, res))) return;
   try {
     const { text, targetLang = 'English' } = req.body;
     const ai = getGenAI();
@@ -2534,12 +2598,7 @@ app.post('/api/ai/translate', async (req, res) => {
 // Helper to format plan row
 function formatPlanRow(row: any): any {
   if (!row) return null;
-  let features: string[] = [];
-  try {
-    features = typeof row.features_json === 'string' ? JSON.parse(row.features_json) : (row.features_json || []);
-  } catch {
-    features = [];
-  }
+  const features = parseFeatureKeys(row.features_json);
   const priceNum = Number(row.price) || 0;
   const durationNum = Number(row.duration) || 1;
   const durationUnit = row.duration_unit || 'months';
@@ -2615,6 +2674,7 @@ app.get('/api/subscriptions/my-status', async (req, res) => {
       expiresAt: userRow?.subscription_expires_at || null,
       daysRemaining,
       activeSubscription: activeSub || null,
+      features: [...await getActiveSubscriptionFeatures(user.id)],
       paymentHistory: history,
     });
   } catch (err: any) {
@@ -3667,7 +3727,7 @@ app.post('/api/admin/subscriptions/plans', requireAdmin, async (req, res) => {
         (currency || 'USDT').toUpperCase(),
         cleanDuration,
         cleanUnit,
-        JSON.stringify(Array.isArray(features) ? features : []),
+        JSON.stringify(parseFeatureKeys(features)),
         rawActive !== false ? 1 : 0,
         Number(rawOrder) || 0,
         nowIso,
@@ -3719,7 +3779,7 @@ app.put('/api/admin/subscriptions/plans/:id', requireAdmin, async (req, res) => 
     const updatedCurrency = currency !== undefined ? currency.toUpperCase() : existing.currency;
     const updatedDuration = duration !== undefined ? Math.max(1, parseInt(String(duration), 10)) : existing.duration;
     const updatedUnit = rawUnit !== undefined ? (rawUnit === 'days' ? 'days' : 'months') : existing.duration_unit;
-    const updatedFeatures = features !== undefined ? JSON.stringify(Array.isArray(features) ? features : []) : existing.features_json;
+    const updatedFeatures = features !== undefined ? JSON.stringify(parseFeatureKeys(features)) : existing.features_json;
     const updatedActive = rawActive !== undefined ? (rawActive ? 1 : 0) : existing.is_active;
     const updatedOrder = rawOrder !== undefined ? Number(rawOrder) : existing.display_order;
     const nowIso = new Date().toISOString();
@@ -3759,6 +3819,14 @@ app.delete('/api/admin/subscriptions/plans/:id', requireAdmin, async (req, res) 
   try {
     const existing = await SqlHelper.queryOne<any>('SELECT * FROM subscription_plans WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'Plan not found' });
+
+    const activeSubscriptions = await SqlHelper.queryOne<any>(
+      "SELECT COUNT(*) AS count FROM user_subscriptions WHERE plan_id = ? AND status = 'active' AND expires_at > ?",
+      [id, new Date().toISOString()]
+    );
+    if (Number(activeSubscriptions?.count || 0) > 0) {
+      return res.status(409).json({ error: 'This plan cannot be deleted while customers have active subscriptions. Disable it instead.' });
+    }
 
     await SqlHelper.execute('DELETE FROM subscription_plans WHERE id = ?', [id]);
     res.json({ success: true, message: 'Plan deleted successfully' });

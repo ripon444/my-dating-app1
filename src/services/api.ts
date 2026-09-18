@@ -584,6 +584,7 @@ export const api = {
     expiresAt: string | null;
     daysRemaining: number;
     activeSubscription: any;
+    features: string[];
     paymentHistory: PaymentTransaction[];
   }> {
     const res = await authFetch('/api/subscriptions/my-status');

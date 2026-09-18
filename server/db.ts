@@ -2,6 +2,7 @@ import initSqlJs, { Database } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
 import { hashPassword } from './password.ts';
+import { DEFAULT_VIP_PLAN_FEATURES, isLegacyFeatureList } from './subscriptionFeatures.ts';
 
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'globalmatch.sqlite');
@@ -580,13 +581,7 @@ function initTables(db: Database) {
           'USDT',
           1,
           'months',
-          JSON.stringify([
-            '1 Month 100% Free VIP Access',
-            'Explore All Elite Features',
-            'Unlimited Likes & Rewinds',
-            'Global Discovery & Passport',
-            'Zero Payment Required'
-          ]),
+          JSON.stringify(DEFAULT_VIP_PLAN_FEATURES.plan_vip_free_1m),
           1,
           0,
           now,
@@ -607,16 +602,7 @@ function initTables(db: Database) {
           'USDT',
           1,
           'months',
-          JSON.stringify([
-            'Unlimited Likes & Rewinds',
-            'Global Passport (Browse any country)',
-            'AI Real-time Translations',
-            'See Who Liked You',
-            'Top-of-Stack Placement',
-            '5 Weekly Super Likes',
-            'High-Definition Video Calling',
-            'Exclusive VIP Gold Badge'
-          ]),
+          JSON.stringify(DEFAULT_VIP_PLAN_FEATURES.plan_vip_1m),
           1,
           1,
           now,
@@ -637,13 +623,7 @@ function initTables(db: Database) {
           'USDT',
           2,
           'months',
-          JSON.stringify([
-            'Everything in VIP 1 Month',
-            'Save 17% with 2-Month VIP Pass',
-            'Priority Profile Verification',
-            'Extended VIP Concierge Access',
-            'Maximum Global Visibility'
-          ]),
+          JSON.stringify(DEFAULT_VIP_PLAN_FEATURES.plan_vip_2m),
           1,
           2,
           now,
@@ -651,6 +631,19 @@ function initTables(db: Database) {
         ]
       );
       console.log('[SQL Database] Initial subscription plans seeded (VIP Free 1M, VIP 1M, VIP 2M)');
+    }
+
+    // Upgrade only original human-readable seed values; admin-edited key lists remain untouched.
+    for (const [planId, features] of Object.entries(DEFAULT_VIP_PLAN_FEATURES)) {
+      const result = db.exec('SELECT features_json FROM subscription_plans WHERE id = ?', [planId]);
+      const rawFeatures = result[0]?.values[0]?.[0];
+      if (rawFeatures !== undefined && isLegacyFeatureList(rawFeatures)) {
+        db.run('UPDATE subscription_plans SET features_json = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(features),
+          new Date().toISOString(),
+          planId,
+        ]);
+      }
     }
   } catch (e) {
     console.warn('[SQL Database] Error checking/seeding plans:', e);
