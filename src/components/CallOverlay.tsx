@@ -425,7 +425,7 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       // The callee's answer handler fires once per offer. If we are already
       // mid-negotiation or the offer has already been answered, drop the
       // duplicate instead of rolling back a good connection.
-      if (pc.signalingState === 'have-local-answer' || pc.signalingState === 'closed') {
+      if (pc.localDescription?.type === 'answer' || pc.signalingState === 'closed') {
         console.log('[WebRTC] Ignoring offer, already answered/closed:', pc.signalingState);
         return;
       }
