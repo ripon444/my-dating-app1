@@ -26,7 +26,7 @@ import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
 
 const TOKEN_KEY = 'globalmatch_auth_token';
 const AUTH_SNAPSHOT_KEY = 'globalmatch_auth_snapshot';
-const API_REQUEST_TIMEOUT_MS = 5000;
+const API_REQUEST_TIMEOUT_MS = 15000;
 
 type AuthSnapshot = { user: User | null; profile: Profile | null };
 
