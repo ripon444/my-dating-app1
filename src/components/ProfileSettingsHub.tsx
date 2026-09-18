@@ -40,6 +40,11 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
 import { api } from '../services/api';
 import { safeStorage } from '../utils/storage';
+import {
+  getDesktopNotificationPermission,
+  isDesktopNotificationSupported,
+  requestDesktopNotificationPermission,
+} from '../utils/desktopNotifications';
 
 interface ProfileSettingsHubProps {
   currentUser: User | null;
@@ -308,6 +313,32 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     const updated = { ...notifPreferences, [key]: !notifPreferences[key] };
     setNotifPreferences(updated);
     safeStorage.setItem('lm_notif_prefs', JSON.stringify(updated));
+  };
+
+  // WEB-only desktop (Windows/browser) notification permission state.
+  // User-initiated only: no automatic prompts, denied is respected silently.
+  const [desktopNotifState, setDesktopNotifState] = useState<'unsupported' | NotificationPermission>(() =>
+    getDesktopNotificationPermission() as 'unsupported' | NotificationPermission
+  );
+  const [desktopNotifBusy, setDesktopNotifBusy] = useState(false);
+  const refreshDesktopNotifState = () => {
+    setDesktopNotifState(getDesktopNotificationPermission() as 'unsupported' | NotificationPermission);
+  };
+  useEffect(() => {
+    refreshDesktopNotifState();
+    const onFocus = () => refreshDesktopNotifState();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+  const handleDesktopNotifToggle = async () => {
+    if (!isDesktopNotificationSupported() || desktopNotifBusy) return;
+    setDesktopNotifBusy(true);
+    try {
+      await requestDesktopNotificationPermission();
+    } finally {
+      refreshDesktopNotifState();
+      setDesktopNotifBusy(false);
+    }
   };
 
   // Toggle Privacy setting
@@ -896,6 +927,39 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
               </div>
             );
           })}
+          {/* WEB-only: native Windows/browser notification permission (user-initiated). */}
+          <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <Bell className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs sm:text-sm font-semibold text-stone-200">Desktop Notifications</p>
+                <p className="text-[11px] text-stone-400">
+                  {desktopNotifState === 'unsupported'
+                    ? 'This browser does not support desktop notifications.'
+                    : desktopNotifState === 'granted'
+                      ? 'On — new messages notify you even when the tab is in the background or minimized.'
+                      : desktopNotifState === 'denied'
+                        ? 'Blocked in your browser settings. Enable notifications for this site in the browser address bar to receive them.'
+                        : 'Show a Windows notification for new messages when Lovemeetly is in the background or minimized.'}
+                </p>
+              </div>
+            </div>
+            {desktopNotifState !== 'unsupported' && desktopNotifState !== 'denied' && (
+              <button
+                type="button"
+                onClick={handleDesktopNotifToggle}
+                disabled={desktopNotifBusy || desktopNotifState === 'granted'}
+                title={desktopNotifState === 'granted' ? 'Desktop notifications enabled' : 'Enable desktop notifications'}
+                className={`w-12 h-6 rounded-full transition-colors relative shrink-0 cursor-pointer ${
+                  desktopNotifState === 'granted' ? 'bg-rose-600' : 'bg-stone-800'
+                } ${desktopNotifBusy ? 'opacity-60' : ''}`}
+              >
+                <span className={`block w-4 h-4 rounded-full bg-white transition-transform ${
+                  desktopNotifState === 'granted' ? 'translate-x-7' : 'translate-x-1'
+                }`} />
+              </button>
+            )}
+          </div>
         </div>
       </section>
 

@@ -50,6 +50,11 @@ import { ProfileSettingsHub } from './components/ProfileSettingsHub';
 import { UserSearchModal } from './components/UserSearchModal';
 import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
+import {
+  consumeDesktopNotifClickTarget,
+  isTabHidden,
+  showDesktopMessageNotification,
+} from './utils/desktopNotifications';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
 import { connectSocket, getSocket } from './services/socket';
@@ -139,6 +144,16 @@ function MainApp() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  // Refs mirror state for the singleton socket handlers (no stale closures,
+  // no duplicate listeners across effect re-runs).
+  const activeConversationIdRef = useRef<string | null>(null);
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
   const [openingChat, setOpeningChat] = useState<{ targetId: string; profile?: Profile } | null>(null);
   const [chatOpenError, setChatOpenError] = useState<string | null>(null);
   const openingChatRef = useRef<string | null>(null);
@@ -509,6 +524,89 @@ function MainApp() {
       soundManager.playNotificationPop();
     });
 
+    // WEB-only: one global incoming-message listener so background/minimized
+    // tabs still surface a native Windows/browser notification.
+    // ChatWindow only listens while a conversation is open; this singleton
+    // covers the background case without a second socket connection.
+    // Dedupes by message id (StrictMode / reconnect safe) and never notifies
+    // for the conversation the user is actively viewing.
+    const seenDesktopMessageIdsRef = { current: new Set<string>() };
+    const handleGlobalMessageNew = (msg: any) => {
+      try {
+        const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+        if (!msg || msg.sender_id === myId) return; // never notify for own sends
+        const messageId = typeof msg.id === 'string' ? msg.id : '';
+        if (messageId) {
+          if (seenDesktopMessageIdsRef.current.has(messageId)) return;
+          seenDesktopMessageIdsRef.current.add(messageId);
+          if (seenDesktopMessageIdsRef.current.size > 200) {
+            const oldest = seenDesktopMessageIdsRef.current.values().next().value as string | undefined;
+            if (oldest) seenDesktopMessageIdsRef.current.delete(oldest);
+          }
+        }
+
+        const convId = typeof msg.conversation_id === 'string' ? msg.conversation_id : '';
+        // Case A: user is actively viewing this conversation → in-app only.
+        const viewingConv = (activeConversationIdRef.current || '').replace(/^pending:/, '');
+        if (convId && viewingConv && (convId === viewingConv || `pending:${convId}` === activeConversationIdRef.current)) {
+          return;
+        }
+        // Only escalate to a desktop notification when the tab is hidden
+        // (background tab / minimized / unfocused window).
+        if (!isTabHidden()) return;
+
+        const known = conversationsRef.current.find((c) => c.id === convId);
+        const senderName =
+          known?.other_user?.name ||
+          (typeof msg.sender_name === 'string' ? msg.sender_name : '') ||
+          undefined;
+        const preview =
+          typeof msg.content === 'string' && msg.content.trim()
+            ? msg.content
+            : (msg.message_type && msg.message_type !== 'text' ? `[${msg.message_type}]` : '');
+        showDesktopMessageNotification({
+          messageId: messageId || undefined,
+          conversationId: convId || undefined,
+          senderId: typeof msg.sender_id === 'string' ? msg.sender_id : undefined,
+          senderName,
+          preview,
+          photo: known?.other_user?.photos?.[0],
+        });
+      } catch {}
+    };
+    socket.on('message:new', handleGlobalMessageNew);
+
+    // Notification click → open the right conversation via existing state.
+    // Uses refs so the handler never goes stale between effect re-runs.
+    const handleOpenConversationEvent = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail as { conversationId?: string } | undefined;
+      const fromEvent = typeof detail?.conversationId === 'string' ? detail.conversationId : '';
+      const target = fromEvent || consumeDesktopNotifClickTarget();
+      if (!target) return;
+      setActiveTab('messages');
+      setMessengerTab('chats');
+      const known = conversationsRef.current.find((c) => c.id === target);
+      if (known) {
+        setOpeningChat(null);
+        setChatOpenError(null);
+        setActiveConversationId(known.id);
+      } else {
+        // Refresh conversations in the background, then open if it resolves.
+        api.getConversations().then((res) => {
+          if (Array.isArray(res?.conversations)) {
+            setConversations(res.conversations);
+            const found = res.conversations.find((c: Conversation) => c.id === target);
+            if (found) {
+              setOpeningChat(null);
+              setChatOpenError(null);
+              setActiveConversationId(found.id);
+            }
+          }
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
+
     // Periodic notifications sync to ensure all-time live updates
     const notifSyncInterval = setInterval(async () => {
       if (currentUser?.id) {
@@ -569,6 +667,8 @@ function MainApp() {
       socket.off('call:rejected');
       socket.off('call:ended');
       socket.off('notification:new');
+      socket.off('message:new', handleGlobalMessageNew);
+      window.removeEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
     };
