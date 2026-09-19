@@ -33,6 +33,7 @@ import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 import { useTranslation } from '../i18n/LanguageContext';
 import { usePresenceFor } from '../services/presence';
+import { playIncomingMessageSound } from '../utils/messageAlerts';
 
 function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   const byId = new Map(existing.map((message) => [message.id, message]));
@@ -167,6 +168,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     const handleNewMessage = (msg: Message) => {
       if (msg.conversation_id === conversation.id) {
         setMessages((prev) => mergeMessages(prev, [msg]));
+
+        // Foreground open-chat sound: exactly once per message id, never for
+        // our own sends. UI merge above is untouched.
+        playIncomingMessageSound(msg, activeUserId);
 
         // If I received this message while chat is open, mark it as read immediately
         if (msg.receiver_id === activeUserId) {

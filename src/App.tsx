@@ -62,6 +62,7 @@ import {
   showDesktopEventNotification,
   showDesktopMessageNotification,
 } from './utils/desktopNotifications';
+import { playIncomingMessageSound } from './utils/messageAlerts';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
 import { connectSocket, getSocket } from './services/socket';
@@ -588,7 +589,6 @@ function MainApp() {
     // covers the background case without a second socket connection.
     // Dedupes by message id (StrictMode / reconnect safe) and never notifies
     // for the conversation the user is actively viewing.
-    const seenDesktopMessageIdsRef = { current: new Set<string>() };
     const handleGlobalMessageNew = (msg: any) => {
       try {
         const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
@@ -609,14 +609,6 @@ function MainApp() {
           return; // never notify for own sends
         }
         const messageId = typeof msg.id === 'string' ? msg.id : '';
-        if (messageId) {
-          if (seenDesktopMessageIdsRef.current.has(messageId)) return;
-          seenDesktopMessageIdsRef.current.add(messageId);
-          if (seenDesktopMessageIdsRef.current.size > 200) {
-            const oldest = seenDesktopMessageIdsRef.current.values().next().value as string | undefined;
-            if (oldest) seenDesktopMessageIdsRef.current.delete(oldest);
-          }
-        }
 
         const convId = typeof msg.conversation_id === 'string' ? msg.conversation_id : '';
         // Case A: user is actively viewing this conversation → in-app only.
@@ -629,6 +621,9 @@ function MainApp() {
         // actively viewing — whether the tab is hidden (background/minimized/
         // unfocused) or visible on another page/conversation. There is no
         // in-app toast for messages, so this does not duplicate anything.
+        // Short sound too (browser policy allows it after prior interaction).
+        // Both paths dedupe per message id inside their own utilities.
+        playIncomingMessageSound(msg, myId);
         const hidden = isTabHidden();
         debugNotifLog('message-desktop-decision', { id: messageId, convId, hidden });
 
