@@ -1,6 +1,12 @@
+plugins {
+    alias(libs.plugins.kotlin.compose)
+}
 apply plugin: 'com.android.application'
 
 android {
+    buildFeatures {
+        compose true
+    }
     namespace = "com.lovemeetly.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {

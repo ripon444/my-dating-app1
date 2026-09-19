@@ -22,7 +22,8 @@ import {
   Smartphone,
   Download,
   LogOut,
-  SlidersHorizontal
+  SlidersHorizontal,
+  HelpCircle
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { User, Profile } from '../types';
@@ -39,6 +40,7 @@ export type ProfileMenuAction =
   | 'boost'
   | 'blocked'
   | 'sessions'
+  | 'help'
   | 'logout';
 
 interface SidebarProps {
@@ -81,6 +83,7 @@ const PROFILE_MENU_ITEMS: Array<{
   { id: 'boost', emoji: '🚀', label: 'Boost', keywords: 'boost visibility spotlight', icon: Flame },
   { id: 'blocked', emoji: '🚫', label: 'Blocked Users', keywords: 'blocked users ban unblock', icon: Ban },
   { id: 'sessions', emoji: '📱', label: 'Active Sessions', keywords: 'sessions devices login android', icon: Smartphone },
+  { id: 'help', emoji: '❓', label: 'Help & Support', keywords: 'help support contact email account login payment subscription', icon: HelpCircle },
   { id: 'logout', emoji: '🚪', label: 'Log Out', keywords: 'logout sign out exit', icon: LogOut, danger: true },
 ];
 

@@ -39,6 +39,7 @@ import { User, Profile, PaymentTransaction } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
 import { api } from '../services/api';
+import { HelpSupportSection } from './HelpSupportSection';
 import { safeStorage } from '../utils/storage';
 import {
   getDesktopNotificationPermission,
@@ -1137,6 +1138,8 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
           )}
         </div>
       </section>
+
+      <HelpSupportSection accountEmail={currentUser?.email} />
 
       {/* ========================================================================= */}
       {/* 8. LOGOUT SECTION (Prominent, Facebook-Style with Confirmation) */}

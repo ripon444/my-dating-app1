@@ -19,7 +19,8 @@ import {
   Search,
   Bell,
   X,
-  UserPlus
+  UserPlus,
+  HelpCircle
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
@@ -165,6 +166,7 @@ interface NavbarProps {
   onSelectNotificationProfile?: (profileIdOrUserId: string) => void;
   onMarkAllNotificationsRead?: () => void;
   onResetHome?: () => void;
+  onOpenHelpSupport?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -189,6 +191,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectNotificationProfile,
   onMarkAllNotificationsRead,
   onResetHome,
+  onOpenHelpSupport,
 }) => {
   const { currentLanguage, setLanguage, t } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -755,6 +758,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <Lock className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span>{t('safety')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenHelpSupport?.();
+                      setUserMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
+                  >
+                    <HelpCircle className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span>Help &amp; Support</span>
                   </button>
                 </div>
 

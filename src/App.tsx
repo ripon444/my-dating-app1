@@ -265,6 +265,7 @@ function MainApp() {
       security: 'security',
       blocked: 'blocked',
       sessions: 'sessions',
+      help: 'help',
     };
     setActiveTab('profile');
     setIsViewingFullProfile(false);
@@ -1156,6 +1157,7 @@ function MainApp() {
           setSelectedPublicUserId(profileOrUserId);
         }}
         onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        onOpenHelpSupport={() => handleProfileMenuAction('help')}
         onResetHome={() => {
           setSelectedPublicUserId(null);
           setActiveTab('discover');
