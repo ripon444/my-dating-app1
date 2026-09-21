@@ -1,7 +1,9 @@
-import { initializeApp, getApps } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
-export const auth = getAuth(app);
+// Single shared Firebase Web app for the `app-lovemeetly` project.
+// Public client config only — no secrets belong here.
+export const firebaseApp: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const auth = getAuth(firebaseApp);
 export const googleAuthProvider = new GoogleAuthProvider();

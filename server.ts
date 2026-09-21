@@ -40,6 +40,7 @@ import { getPool } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { DEFAULT_VIP_PLAN_FEATURES, VIP_FEATURE_KEYS, parseFeatureKeys, type VipFeatureKey } from './server/subscriptionFeatures.ts';
+import { adminMessaging } from './src/lib/firebase-admin.ts';
 
 const app = express();
 const httpServer = createServer(app);
@@ -370,9 +371,11 @@ app.post('/api/push-tokens', async (req, res) => {
   const deviceId = typeof req.body?.deviceId === 'string'
     ? req.body.deviceId.trim().slice(0, 255)
     : (typeof req.body?.device_id === 'string' ? req.body.device_id.trim().slice(0, 255) : null);
-  const platform = typeof req.body?.platform === 'string' && req.body.platform.trim()
-    ? req.body.platform.trim().slice(0, 32)
+  const platformRaw = typeof req.body?.platform === 'string' && req.body.platform.trim()
+    ? req.body.platform.trim().toLowerCase().slice(0, 32)
     : 'android';
+  // Allowlist so a web token can never be mislabeled, and Android stays default.
+  const platform = ['web', 'android', 'ios'].includes(platformRaw) ? platformRaw : 'android';
 
   if (!token || token.length < 20 || token.length > 4096 || /[\u0000-\u001f\u007f\s]/.test(token)) {
     return res.status(400).json({ error: 'A valid FCM token is required.' });
@@ -449,6 +452,118 @@ app.post('/api/push-tokens', async (req, res) => {
     return res.status(500).json({ error: 'Failed to register push token.' });
   }
 });
+
+// Unregister a push token on logout so the same browser is never bound to a
+// different account. Scoped to the authenticated user's own rows only.
+app.delete('/api/push-tokens', async (req, res) => {
+  const user = (req as any).user;
+  if (!user?.id) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  const rawToken = req.body?.token ?? req.body?.fcmToken ?? req.body?.fcm_token;
+  const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+  const deviceId = typeof req.body?.deviceId === 'string'
+    ? req.body.deviceId.trim().slice(0, 255)
+    : (typeof req.body?.device_id === 'string' ? req.body.device_id.trim().slice(0, 255) : null);
+
+  try {
+    if (token) {
+      await SqlHelper.execute('DELETE FROM push_tokens WHERE token = ? AND user_id = ?', [token, user.id]);
+    } else if (deviceId) {
+      await SqlHelper.execute('DELETE FROM push_tokens WHERE device_id = ? AND user_id = ?', [deviceId, user.id]);
+    } else {
+      return res.status(400).json({ error: 'A token or deviceId is required.' });
+    }
+
+    // Keep Neon/PostgreSQL current when configured; best-effort only.
+    if (process.env.DATABASE_URL || process.env.SQL_HOST || process.env.SQL_DB_NAME) {
+      try {
+        const pool = getPool();
+        if (token) {
+          await pool.query('DELETE FROM push_tokens WHERE token = $1 AND user_id = $2', [token, user.id]);
+        } else {
+          await pool.query('DELETE FROM push_tokens WHERE device_id = $1 AND user_id = $2', [deviceId, user.id]);
+        }
+      } catch (pgError) {
+        console.warn('[Push Token] PostgreSQL unregister warning:', pgError);
+      }
+    }
+
+    return res.status(200).json({ success: true, unregistered: true });
+  } catch (error) {
+    console.error('[Push Token] Unregister failed:', error);
+    return res.status(500).json({ error: 'Failed to unregister push token.' });
+  }
+});
+
+/**
+ * Send a background Web Push (FCM) for a newly created CHAT MESSAGE.
+ * - targets only the receiver's registered tokens (never the sender)
+ * - data-only payload so the service worker renders the notification
+ * - never touches `is_read` (foreground Socket.IO read flow owns that)
+ * Never throws; a push failure must not affect message delivery.
+ */
+async function sendMessagePushToUser(
+  receiverId: string,
+  message: {
+    id: string;
+    conversation_id: string;
+    sender_id: string;
+    content?: string;
+    message_type?: string;
+    sender_name?: string;
+  }
+): Promise<void> {
+  try {
+    if (!receiverId || !message?.id) return;
+    // sender_id and conversation_id are distinct identifiers — never compared.
+    if (message.sender_id === receiverId) return;
+    if (!adminMessaging) return;
+
+    const rows = await SqlHelper.queryAll<{ token: string; platform: string }>(
+      "SELECT token, platform FROM push_tokens WHERE user_id = ? AND platform = 'web'",
+      [receiverId]
+    );
+    const tokens = rows.map((r) => r.token).filter((t) => typeof t === 'string' && t.length > 20);
+    if (!tokens.length) return;
+
+    const preview = typeof message.content === 'string' ? message.content.slice(0, 140) : '';
+    const messageType = message.message_type || 'text';
+    const data: Record<string, string> = {
+      messageId: message.id,
+      conversationId: message.conversation_id,
+      senderId: message.sender_id,
+      senderName: message.sender_name || '',
+      preview,
+      messageType,
+      type: 'chat_message',
+    };
+
+    const response = await adminMessaging.sendEachForMulticast({
+      tokens,
+      data,
+      webpush: {
+        headers: { Urgency: 'high' },
+        fcmOptions: { link: `/?conversation=${encodeURIComponent(message.conversation_id)}&tab=messages` },
+      },
+    });
+
+    // Prune tokens FCM reports as permanently invalid.
+    const staleTokens: string[] = [];
+    response.responses.forEach((r, idx) => {
+      const code = r.error?.code || '';
+      if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+        staleTokens.push(tokens[idx]);
+      }
+    });
+    for (const stale of staleTokens) {
+      await SqlHelper.execute('DELETE FROM push_tokens WHERE token = ?', [stale]).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('[FCM] Message push skipped:', (err as Error)?.message);
+  }
+}
 
 // 1. Auth & Current User
 app.get('/api/auth/me', (req, res) => {
@@ -2341,6 +2456,18 @@ app.post('/api/messages', async (req, res) => {
   // The sender receives the REST response; broadcasting through both the room
   // and the global Socket.IO channel caused duplicate client events.
   io.to(`user_${targetReceiverId}`).emit('message:new', newMsg);
+
+  // Background/closed-tab delivery via FCM. Foreground stays on Socket.IO;
+  // the service worker suppresses itself while a visible tab is present, so
+  // there is no double notification. Fire-and-forget — never blocks the response.
+  sendMessagePushToUser(targetReceiverId, {
+    id: msgId,
+    conversation_id,
+    sender_id: user.id,
+    content: content || '',
+    message_type,
+    sender_name: (req as any).profile?.name || '',
+  }).catch(() => {});
 
   res.json({ message: newMsg });
 });

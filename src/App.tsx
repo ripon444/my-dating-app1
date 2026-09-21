@@ -63,6 +63,7 @@ import {
   showDesktopMessageNotification,
 } from './utils/desktopNotifications';
 import { playIncomingMessageSound } from './utils/messageAlerts';
+import { registerWebPushForCurrentUser, unregisterWebPush } from './utils/webPush';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
 import { connectSocket, getSocket } from './services/socket';
@@ -717,6 +718,31 @@ function MainApp() {
     };
     window.addEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
 
+    // WEB-only FCM: register/enable background Web Push for the signed-in user
+    // once notification permission is granted. Foreground stays on Socket.IO.
+    if (currentUser?.id) {
+      registerWebPushForCurrentUser(currentUser.id).catch(() => {});
+    }
+
+    // Service-worker postMessage (notification click) and `?conversation=`
+    // deep link both reuse the existing open-conversation path above.
+    const swMessageHandler = (event: MessageEvent) => {
+      const detail = event?.data as { type?: string; conversationId?: string } | undefined;
+      if (!detail || detail.type !== 'lm-open-conversation' || !detail.conversationId) return;
+      try {
+        window.dispatchEvent(new CustomEvent('lovemeetly:open-conversation', { detail: { conversationId: detail.conversationId } }));
+      } catch {}
+    };
+    try {
+      navigator.serviceWorker?.addEventListener('message', swMessageHandler);
+    } catch {}
+    const deepLinkConversation = new URLSearchParams(window.location.search).get('conversation');
+    if (deepLinkConversation) {
+      try {
+        window.dispatchEvent(new CustomEvent('lovemeetly:open-conversation', { detail: { conversationId: deepLinkConversation } }));
+      } catch {}
+    }
+
     // Generic notification click → notifications area / profile / conversation.
     const handleOpenNotificationEvent = (event: Event) => {
       const detail = (event as CustomEvent)?.detail as { conversationId?: string; notificationId?: string; profileId?: string } | undefined;
@@ -810,6 +836,9 @@ function MainApp() {
       socket.off('message:new', handleGlobalMessageNew);
       socket.off('message:read', handleConversationRead);
       window.removeEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
+      try {
+        navigator.serviceWorker?.removeEventListener('message', swMessageHandler);
+      } catch {}
       window.removeEventListener('lovemeetly:open-notification', handleOpenNotificationEvent as EventListener);
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
@@ -1097,6 +1126,10 @@ function MainApp() {
   const handleLogout = async () => {
     getSocket().disconnect();
     clearPresence();
+    // Unbind this browser's FCM token from the departing account.
+    try {
+      await unregisterWebPush();
+    } catch {}
     try {
       await api.logout();
     } catch (e) {}
