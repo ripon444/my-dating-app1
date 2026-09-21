@@ -311,13 +311,22 @@ export const api = {
     return res.json();
   },
 
-  async registerPushToken(token: string, deviceId?: string): Promise<{ success: boolean; registered: boolean }> {
+  async registerPushToken(token: string, deviceId?: string, platform: string = 'android'): Promise<{ success: boolean; registered: boolean }> {
     const res = await authFetch('/api/push-tokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, deviceId, platform: 'android' }),
+      body: JSON.stringify({ token, deviceId, platform }),
     });
     return safeJson(res, 'Failed to register push token');
+  },
+
+  async unregisterPushToken(token: string, deviceId?: string): Promise<{ success: boolean }> {
+    const res = await authFetch('/api/push-tokens', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, deviceId }),
+    });
+    return safeJson(res, 'Failed to unregister push token');
   },
 
   async markNotificationRead(id: string): Promise<{ success: boolean }> {

@@ -113,7 +113,7 @@ All values in `.env.example`; **`.env` must not be committed** (gitignored). No 
 | `VITE_API_BASE_URL` (frontend) | Optional explicit API base; otherwise auto-detected (same-origin, or `https://lovemeetly.com` inside Capacitor). |
 | `DISABLE_HMR` | Build-time/dev flag to disable Vite HMR + file watching. |
 
-> Note: `firebase-applet-config.json` is committed and contains Firebase *public* config values (project `tokyo-well-2dtd0`, web `apiKey`). These are client-safe identifiers by design (Firebase web API keys are not secrets).
+> Note: `firebase-applet-config.json` is committed and contains Firebase *public* config values (project `app-lovemeetly`, web `apiKey`). These are client-safe identifiers by design (Firebase web API keys are not secrets). Web FCM push is configured for `app-lovemeetly`; the server-side Admin SDK authenticates via `FIREBASE_SERVICE_ACCOUNT_PATH` (service-account JSON kept outside the repo).
 
 ## API architecture
 

@@ -46,6 +46,7 @@ import {
   isDesktopNotificationSupported,
   requestDesktopNotificationPermission,
 } from '../utils/desktopNotifications';
+import { registerWebPushForCurrentUser } from '../utils/webPush';
 
 interface ProfileSettingsHubProps {
   currentUser: User | null;
@@ -335,7 +336,12 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     if (!isDesktopNotificationSupported() || desktopNotifBusy) return;
     setDesktopNotifBusy(true);
     try {
-      await requestDesktopNotificationPermission();
+      const result = await requestDesktopNotificationPermission();
+      // Permission may have just been granted — register this browser for
+      // background FCM Web Push for the current user.
+      if (result === 'granted' && currentUser?.id) {
+        await registerWebPushForCurrentUser(currentUser.id);
+      }
     } finally {
       refreshDesktopNotifState();
       setDesktopNotifBusy(false);
