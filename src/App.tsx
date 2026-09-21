@@ -62,7 +62,7 @@ import {
   showDesktopEventNotification,
   showDesktopMessageNotification,
 } from './utils/desktopNotifications';
-import { playIncomingMessageSound } from './utils/messageAlerts';
+import { playIncomingMessageSound, shouldCountUnreadForMessage } from './utils/messageAlerts';
 import { registerWebPushForCurrentUser, unregisterWebPush } from './utils/webPush';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
@@ -648,8 +648,9 @@ function MainApp() {
         debugNotifLog('message-desktop-result', { id: messageId, shown: result.shown, reason: result.reason });
 
         // Update unread count for non-viewed conversations (realtime badge).
-        // Uses functional update so rapid socket events batch correctly.
-        if (convId) {
+        // Guarded per message id so a duplicate socket delivery cannot
+        // double-count. Uses functional update so rapid events batch correctly.
+        if (convId && shouldCountUnreadForMessage(msg, myId)) {
           const knownConv = conversationsRef.current.find((c) => c.id === convId);
           if (knownConv) {
             setConversations((prev) =>
@@ -1135,6 +1136,8 @@ function MainApp() {
     } catch (e) {}
     setCurrentUser(null);
     setCurrentProfile(null);
+    // Clear conversation state so the global unread badge resets on logout.
+    setConversations([]);
     setIsViewingFullProfile(false);
     setActiveTab('discover');
     setIsAuthOpen(true);

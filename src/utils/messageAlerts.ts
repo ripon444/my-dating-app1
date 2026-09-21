@@ -9,6 +9,12 @@ import { debugNotifLog, readMessageNotifPref } from './desktopNotifications';
 //   respects the existing `lm_notif_prefs.messages` setting, and never throws.
 const MAX_TRACKED_SOUND_IDS = 300;
 const soundedMessageIds = new Set<string>();
+// Separate bounded dedupe set for unread counting. Kept independent of the
+// sound set so the read/unread DB state stays authoritative while the badge
+// increment is applied at most once per message (duplicate socket deliveries,
+// reconnects, or StrictMode re-runs must not double-count).
+const MAX_TRACKED_UNREAD_IDS = 300;
+const countedUnreadMessageIds = new Set<string>();
 
 function readMessagesPrefEnabled(): boolean {
   try {
@@ -34,6 +40,31 @@ export function getIncomingMessageSoundKey(msg: any): string {
   const content = typeof msg?.content === 'string' ? msg.content : '';
   const created = typeof msg?.created_at === 'string' ? msg.created_at : '';
   return `fallback:${conv}:${sender}:${content}:${created}`;
+}
+
+/**
+ * Decide whether an inbound message should increment the global unread badge.
+ * Returns true at most once per message (stable id, content-hash fallback) and
+ * never for the sender's own messages. Callers must also skip the conversation
+ * the user is actively viewing. This only gates the optimistic badge increment;
+ * the server's `is_read`/`unread_count` remains the authoritative source.
+ */
+export function shouldCountUnreadForMessage(msg: any, myId?: string | null): boolean {
+  try {
+    if (!msg) return false;
+    if (myId && msg.sender_id === myId) return false;
+    const key = getIncomingMessageSoundKey(msg);
+    if (countedUnreadMessageIds.has(key)) return false;
+    countedUnreadMessageIds.add(key);
+    if (countedUnreadMessageIds.size > MAX_TRACKED_UNREAD_IDS) {
+      const oldest = countedUnreadMessageIds.values().next().value as string | undefined;
+      if (oldest) countedUnreadMessageIds.delete(oldest);
+    }
+    return true;
+  } catch {
+    // Never block the badge on a dedupe failure; fall back to counting.
+    return true;
+  }
 }
 
 /**
