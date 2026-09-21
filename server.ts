@@ -2303,8 +2303,11 @@ app.get('/api/conversations', async (req, res) => {
         'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1',
         [c.id]
       );
+      // Unread = messages in this 1:1 conversation not sent by me. Keying off
+      // sender_id (always a real user id) instead of the routing receiver_id
+      // keeps counts correct even for messages stored with a profile-id receiver.
       const unreadCountRes = await SqlHelper.queryOne<{ count: number }>(
-        'SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND receiver_id = ? AND is_read = 0',
+        'SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND is_read = 0 AND sender_id != ?',
         [c.id, user.id]
       );
 
@@ -2386,8 +2389,11 @@ app.post('/api/conversations/:id/read', async (req, res) => {
   if (!user) return res.json({ success: true });
 
   const now = new Date().toISOString();
+  // Mark every message in the conversation that I did not send as read. Mirrors
+  // the sender-based unread count and also covers legacy rows stored with a
+  // profile-id receiver.
   await SqlHelper.execute(
-    'UPDATE messages SET is_read = 1, read_at = ? WHERE conversation_id = ? AND receiver_id = ? AND is_read = 0',
+    'UPDATE messages SET is_read = 1, read_at = ? WHERE conversation_id = ? AND sender_id != ? AND is_read = 0',
     [now, req.params.id, user.id]
   );
 
@@ -2417,7 +2423,14 @@ app.post('/api/messages', async (req, res) => {
   }
 
   const conv = await SqlHelper.queryOne('SELECT * FROM conversations WHERE id = ?', [conversation_id]);
-  const targetReceiverId = receiver_id || (conv?.user_a_id === user.id ? conv?.user_b_id : conv?.user_a_id);
+  // Derive the peer from the conversation itself so an incorrect client-supplied
+  // receiver_id (e.g. a profile id) can never misroute or lose the message.
+  // Without this, messages targeted a `user_<profile_id>` room nobody joins and
+  // the unread query (`receiver_id = user.id`) silently matched nothing.
+  const derivedReceiverId = conv
+    ? (conv.user_a_id === user.id ? conv.user_b_id : conv.user_a_id)
+    : null;
+  const targetReceiverId = (conv && derivedReceiverId) || receiver_id;
 
   const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
   const now = new Date().toISOString();
