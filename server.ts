@@ -6,6 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { getSqlDb, SqlHelper, persistDb } from './server/db';
@@ -72,6 +73,62 @@ app.use((req, res, next) => {
   if (req.url.startsWith('/server-api')) {
     req.url = req.url.replace(/^\/server-api/, '/api');
   }
+  next();
+});
+
+// -------------------------------------------------------------
+// JSON response compression (chat history is sent as one large JSON document)
+// -------------------------------------------------------------
+// Conversation history is delivered as a single JSON body per conversation and
+// was previously sent uncompressed, so opening a long thread was dominated by
+// transfer size. This uses the built-in zlib module only (no new dependency)
+// and is deliberately scoped to JSON API responses: Socket.IO, uploads, static
+// files and every binary response are untouched.
+const JSON_COMPRESSION_MIN_BYTES = 1024;
+
+function pickJsonEncoding(req: express.Request): 'gzip' | 'deflate' | null {
+  const header = req.headers['accept-encoding'];
+  // Never compress for a client that did not advertise an encoding it can decode.
+  if (typeof header !== 'string' || !header.trim()) return null;
+  if (!/gzip|deflate|\*/i.test(header)) return null;
+  const accepted = req.acceptsEncodings('gzip', 'deflate');
+  return accepted === 'gzip' || accepted === 'deflate' ? accepted : null;
+}
+
+app.use((req, res, next) => {
+  const pathname = req.path || '';
+  if (!pathname.startsWith('/api') && !pathname.startsWith('/server-api')) {
+    return next();
+  }
+
+  const originalJson = res.json.bind(res);
+
+  res.json = (body?: any) => {
+    try {
+      if (!res.getHeader('Content-Encoding')) {
+        const encoding = pickJsonEncoding(req);
+        if (encoding) {
+          const serialized = JSON.stringify(body);
+          if (serialized !== undefined) {
+            const raw = Buffer.from(serialized, 'utf8');
+            if (raw.length >= JSON_COMPRESSION_MIN_BYTES) {
+              const compressed =
+                encoding === 'gzip' ? zlib.gzipSync(raw) : zlib.deflateSync(raw);
+              // Match the exact content type res.json would have produced.
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.setHeader('Content-Encoding', encoding);
+              res.vary('Accept-Encoding');
+              return res.send(compressed);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[JSON Compression] Falling back to uncompressed response:', err);
+    }
+    return originalJson(body);
+  };
+
   next();
 });
 

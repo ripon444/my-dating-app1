@@ -33,6 +33,7 @@ import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 import { useTranslation } from '../i18n/LanguageContext';
 import { usePresenceFor } from '../services/presence';
+import { getCachedMessageHistory, setCachedMessageHistory } from '../services/messageHistoryCache';
 import { playIncomingMessageSound } from '../utils/messageAlerts';
 
 function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
@@ -99,6 +100,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const activeUserId = currentUser?.id || 'usr_me_01';
   const isOtherUserOnline = usePresenceFor(otherUser.user_id || otherUser.id);
 
+  // Session key for the in-memory history cache. Held in a ref so the history
+  // effect below never re-runs (and never refetches) when the signed-in user
+  // object finishes loading.
+  const activeUserIdRef = useRef(activeUserId);
+  useEffect(() => {
+    activeUserIdRef.current = activeUserId;
+  }, [activeUserId]);
+
   // Load the complete history independently from the chat shell and socket setup.
   // Merge (never replace) so a retry or socket race cannot wipe already-loaded history.
   useEffect(() => {
@@ -111,9 +120,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
     let isCurrentConversation = true;
     const requestId = ++historyRequestIdRef.current;
-    // Reset only when switching to a different real conversation.
-    setMessages((prev) => (prev.length && prev[0]?.conversation_id === conversationId ? prev : []));
-    setIsLoadingHistory(true);
+
+    // Reopening a thread already loaded in this session: paint the cached
+    // history immediately, then let the request below revalidate it.
+    const cachedHistory = getCachedMessageHistory(conversationId, activeUserIdRef.current);
+    if (cachedHistory && cachedHistory.length > 0) {
+      setMessages((prev) =>
+        prev.length && prev[0]?.conversation_id === conversationId ? prev : cachedHistory
+      );
+      setIsLoadingHistory(false);
+    } else {
+      // Reset only when switching to a different real conversation.
+      setMessages((prev) => (prev.length && prev[0]?.conversation_id === conversationId ? prev : []));
+      setIsLoadingHistory(true);
+    }
     setHistoryError(null);
     api.getMessages(conversationId).then((data) => {
       if (!isCurrentConversation || historyRequestIdRef.current !== requestId) return;
@@ -134,6 +154,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       isCurrentConversation = false;
     };
   }, [conversation.id, historyRetry]);
+
+  // Keep the session history cache in lock-step with what is on screen so a
+  // reopen can paint instantly — including realtime messages that arrived while
+  // the chat was open. Purely additive: no network, no state writes.
+  useEffect(() => {
+    if (!conversation.id || conversation.id.startsWith('pending:')) return;
+    if (messages.length === 0) return;
+    setCachedMessageHistory(conversation.id, messages, activeUserIdRef.current);
+  }, [messages, conversation.id]);
 
   // Mark unread messages as read and join the realtime room without blocking history.
   useEffect(() => {
