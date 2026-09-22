@@ -104,32 +104,150 @@ function getProfileTargetFromUrl(): string | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Facebook-style clean-path navigation (no router, no new dependency).
+// The app has always navigated with `activeTab` state; these helpers keep the
+// address bar in sync with that state so URLs are shareable, refreshable and
+// work with browser Back/Forward. `/calls` stays a Messages sub-tab and
+// `/notifications` stays an overlay - no new top-level systems are introduced.
+// ---------------------------------------------------------------------------
+type MessengerTab = 'chats' | 'calls';
+
+// Tab state -> clean path. `home` and `discover` intentionally share one feed.
+const TAB_TO_PATH: Record<string, string> = {
+  home: '/',
+  discover: '/discover',
+  matches: '/matches',
+  messages: '/messages',
+  profile: '/profile',
+};
+
+interface NavLocation {
+  tab: string;
+  /** Profile hub section that owns a URL (`settings` -> `/settings`). */
+  section: string | null;
+  messengerTab: MessengerTab;
+  notificationsOpen: boolean;
+}
+
+const DEFAULT_NAV_LOCATION: NavLocation = {
+  tab: 'home',
+  section: null,
+  messengerTab: 'chats',
+  notificationsOpen: false,
+};
+
+function normalizePath(pathname: string): string {
+  const raw = (pathname || '/').split('?')[0].split('#')[0].toLowerCase();
+  if (raw.length <= 1) return '/';
+  return raw.replace(/\/+$/, '') || '/';
+}
+
+// Drop only the legacy `tab` / `section` params this fix replaces; every other
+// query param (e.g. the `?conversation=` push deep link) is preserved so message
+// notification deep links keep behaving exactly as before.
+function stripLegacyNavParams(search: string): string {
+  try {
+    const params = new URLSearchParams(search || '');
+    params.delete('tab');
+    params.delete('section');
+    return params.toString();
+  } catch {
+    return '';
+  }
+}
+
+// True only for the shareable public-profile URLs `/profile/<id>` and `/@<id>`.
+// Bare `/profile` is the signed-in user's own profile tab.
+function isPublicProfilePath(pathname: string): boolean {
+  return /^\/(?:profile|@)\/[^/?#]+/i.test(pathname || '');
+}
+
+function isAdminUrl(pathname: string, search: string, hash: string): boolean {
+  const path = (pathname || '').toLowerCase();
+  const query = (search || '').toLowerCase();
+  const fragment = (hash || '').toLowerCase();
+  return (
+    path === '/tanvir' ||
+    path.endsWith('/tanvir') ||
+    path === '/admin' ||
+    path.endsWith('/admin') ||
+    fragment === '#tanvir' ||
+    fragment === '#/tanvir' ||
+    fragment === '#admin' ||
+    query.includes('admin=tanvir') ||
+    query.includes('route=tanvir')
+  );
+}
+
+// Legacy `/?tab=...&section=...` links keep working (old bookmarks and push
+// payloads); the URL sync effect normalizes them to their clean path.
+function navLocationFromLegacyQuery(search: string): NavLocation | null {
+  try {
+    const params = new URLSearchParams(search || '');
+    const tab = (params.get('tab') || '').toLowerCase();
+    if (!tab) return null;
+    if (tab === 'calls') return { ...DEFAULT_NAV_LOCATION, tab: 'messages', messengerTab: 'calls' };
+    if (tab === 'notifications') return { ...DEFAULT_NAV_LOCATION, notificationsOpen: true };
+    if (tab === 'settings') return { ...DEFAULT_NAV_LOCATION, tab: 'profile', section: 'settings' };
+    if (tab === 'profile') {
+      return { ...DEFAULT_NAV_LOCATION, tab: 'profile', section: params.get('section') || null };
+    }
+    if (!TAB_TO_PATH[tab]) return null;
+    return { ...DEFAULT_NAV_LOCATION, tab };
+  } catch {
+    return null;
+  }
+}
+
+function navLocationFromPath(pathname: string): NavLocation {
+  const path = normalizePath(pathname);
+  if (path === '/notifications') return { ...DEFAULT_NAV_LOCATION, notificationsOpen: true };
+  if (path === '/settings') return { ...DEFAULT_NAV_LOCATION, tab: 'profile', section: 'settings' };
+  if (path === '/calls') return { ...DEFAULT_NAV_LOCATION, tab: 'messages', messengerTab: 'calls' };
+  if (path === '/messages') return { ...DEFAULT_NAV_LOCATION, tab: 'messages' };
+  if (path === '/matches') return { ...DEFAULT_NAV_LOCATION, tab: 'matches' };
+  if (path === '/profile') return { ...DEFAULT_NAV_LOCATION, tab: 'profile' };
+  if (path === '/discover') return { ...DEFAULT_NAV_LOCATION, tab: 'discover' };
+  // `/`, `/home`, `/profile/<id>`, `/@<id>` and unknown paths fall back to the feed.
+  return DEFAULT_NAV_LOCATION;
+}
+
+function readNavLocationFromUrl(): NavLocation {
+  if (typeof window === 'undefined') return DEFAULT_NAV_LOCATION;
+  return (
+    navLocationFromLegacyQuery(window.location.search) ??
+    navLocationFromPath(window.location.pathname)
+  );
+}
+
+function pathForNavState(state: {
+  tab: string;
+  section: string | null;
+  messengerTab: MessengerTab;
+  notificationsOpen: boolean;
+}): string | null {
+  if (state.notificationsOpen) return '/notifications';
+  if (state.tab === 'profile' && state.section === 'settings') return '/settings';
+  if (state.tab === 'messages' && state.messengerTab === 'calls') return '/calls';
+  return TAB_TO_PATH[state.tab] ?? null;
+}
+
 function MainApp() {
   const { t } = useTranslation();
 
   // Admin Route State (/tanvir or /admin)
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    const path = window.location.pathname.toLowerCase();
-    const hash = window.location.hash.toLowerCase();
-    const search = window.location.search.toLowerCase();
-    return (
-      path === '/tanvir' ||
-      path.endsWith('/tanvir') ||
-      path === '/admin' ||
-      path.endsWith('/admin') ||
-      hash === '#tanvir' ||
-      hash === '#/tanvir' ||
-      hash === '#admin' ||
-      search.includes('admin=tanvir') ||
-      search.includes('route=tanvir')
-    );
+    return isAdminUrl(window.location.pathname, window.location.search, window.location.hash);
   });
 
   // App States
   const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredAuthSnapshot()?.user || null);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(() => getStoredAuthSnapshot()?.profile || null);
-  const [activeTab, setActiveTab] = useState<string>('discover');
+  // Navigation state is seeded from the URL (clean path first, legacy `?tab=` link
+  // second) so refreshing/sharing any of the clean URLs opens the right page.
+  const [activeTab, setActiveTab] = useState<string>(() => readNavLocationFromUrl().tab);
   const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('grid');
 
   // Discovery State
@@ -167,7 +285,9 @@ function MainApp() {
   const [openingChat, setOpeningChat] = useState<{ targetId: string; profile?: Profile } | null>(null);
   const [chatOpenError, setChatOpenError] = useState<string | null>(null);
   const openingChatRef = useRef<string | null>(null);
-  const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>('chats');
+  const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>(
+    () => readNavLocationFromUrl().messengerTab
+  );
   // Mirror the messenger view so the singleton socket handler can tell whether a
   // conversation is ACTUALLY on screen. `activeConversationId` alone stays set
   // after the user navigates away from Messages, which used to suppress the
@@ -212,10 +332,14 @@ function MainApp() {
   // Social & Registered Users Search / Profile
   const [isUserSearchOpen, setIsUserSearchOpen] = useState(false);
   // Mobile Notifications overlay reuses the existing desktop NotificationsPanel.
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(
+    () => readNavLocationFromUrl().notificationsOpen
+  );
   // Existing Facebook-style Profile Settings slide-out + deep section target.
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [profileSection, setProfileSection] = useState<string | null>(null);
+  const [profileSection, setProfileSection] = useState<string | null>(
+    () => readNavLocationFromUrl().section
+  );
   const [profileSectionNonce, setProfileSectionNonce] = useState(0);
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
@@ -252,10 +376,17 @@ function MainApp() {
   const handleClosePublicProfile = () => {
     setSelectedPublicUserId(null);
     setSelectedPublicProfile(null);
-    if (typeof window !== 'undefined') {
-      if (window.location.pathname.startsWith('/profile/') || window.location.pathname.startsWith('/@')) {
-        window.history.pushState({}, '', '/');
-      }
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname.startsWith('/profile/') || window.location.pathname.startsWith('/@')) {
+      // Replace instead of push: closing the overlay returns the address bar to the
+      // tab the profile was opened from without leaving a dead entry in history.
+      const backToTab = pathForNavState({
+        tab: activeTab,
+        section: profileSection,
+        messengerTab,
+        notificationsOpen: isNotificationsOpen,
+      }) ?? '/';
+      window.history.replaceState({}, '', backToTab);
     }
   };
 
@@ -448,28 +579,45 @@ function MainApp() {
     activeTab,
   ]);
 
-  // Lightweight URL state sync for existing state navigation (no router).
-  // Best-effort replaceState only: preserves refresh + back behavior, never adds history spam.
+  // Clean-path URL sync (no router): mirrors the navigation state into the address
+  // bar. pushState adds a history entry so browser Back/Forward move between tabs;
+  // the first sync after load is a replaceState so landing on a legacy `/?tab=` link
+  // is normalized in place instead of polluting history.
+  const didInitUrlSyncRef = useRef(false);
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return;
-    // Never rewrite shareable public-profile or admin routes.
-    if (getProfileTargetFromUrl()) return;
-    const path = window.location.pathname.toLowerCase();
-    if (path === '/tanvir' || path === '/admin' || path.endsWith('/tanvir') || path.endsWith('/admin')) return;
+    if (typeof window === 'undefined' || typeof window.history?.pushState !== 'function') return;
+    // Never rewrite a shareable public-profile URL while the overlay is open; once it
+    // closes (`selectedPublicUserId` clears) this effect re-runs and re-syncs.
+    if (selectedPublicUserId) return;
+    // Never rewrite the admin routes either.
+    if (isAdminUrl(window.location.pathname, window.location.search, window.location.hash)) return;
+    const desired = pathForNavState({
+      tab: activeTab,
+      section: profileSection,
+      messengerTab,
+      notificationsOpen: isNotificationsOpen,
+    });
+    if (!desired) return;
+    // Keep non-navigation params (e.g. the `?conversation=` push deep link) but drop
+    // the legacy `tab`/`section` params this fix replaces.
+    const rest = stripLegacyNavParams(window.location.search);
+    const target = `${desired}${rest ? `?${rest}` : ''}${window.location.hash || ''}`;
+    const current = `${normalizePath(window.location.pathname)}${window.location.search || ''}${window.location.hash || ''}`;
     try {
-      const params = new URLSearchParams(window.location.search);
-      params.set('tab', activeTab);
-      if (activeTab === 'profile' && profileSection) {
-        params.set('section', profileSection);
-      } else {
-        params.delete('section');
+      if (current === target) {
+        didInitUrlSyncRef.current = true;
+        return;
       }
-      const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-      window.history.replaceState({}, '', next);
+      if (didInitUrlSyncRef.current) {
+        window.history.pushState({ navTab: activeTab }, '', target);
+      } else {
+        window.history.replaceState({ navTab: activeTab }, '', target);
+      }
+      didInitUrlSyncRef.current = true;
     } catch {
       // URL sync is best-effort only; state navigation remains source of truth.
     }
-  }, [activeTab, profileSection]);
+  }, [activeTab, profileSection, messengerTab, isNotificationsOpen, selectedPublicUserId]);
 
   useEffect(() => {
     loadInitialData();
@@ -847,28 +995,28 @@ function MainApp() {
 
     const handleUrlChange = () => {
       if (typeof window === 'undefined') return;
-      const path = window.location.pathname.toLowerCase();
-      const hash = window.location.hash.toLowerCase();
-      const search = window.location.search.toLowerCase();
-      const isTanvir = 
-        path === '/tanvir' ||
-        path.endsWith('/tanvir') ||
-        path === '/admin' ||
-        path.endsWith('/admin') ||
-        hash === '#tanvir' ||
-        hash === '#/tanvir' ||
-        hash === '#admin' ||
-        search.includes('admin=tanvir') ||
-        search.includes('route=tanvir');
+      const isTanvir = isAdminUrl(window.location.pathname, window.location.search, window.location.hash);
       setIsAdminRoute(isTanvir);
 
       // Check if URL points to a public profile
       const urlProfileTarget = getProfileTargetFromUrl();
       if (urlProfileTarget) {
         setSelectedPublicUserId(urlProfileTarget);
-      } else if (path === '/' || path === '') {
+      } else {
+        // Any non-profile URL (Back out of the overlay, another tab, Home...) closes it.
         setSelectedPublicUserId(null);
         setSelectedPublicProfile(null);
+      }
+
+      // Restore the navigation state from the clean path (legacy `?tab=` links are still
+      // honored) so browser Back/Forward move between tabs. Admin and public-profile
+      // URLs keep their own handling above and are left untouched.
+      if (!isTanvir && !urlProfileTarget && !isPublicProfilePath(window.location.pathname)) {
+        const nav = readNavLocationFromUrl();
+        setActiveTab(nav.tab);
+        setMessengerTab(nav.messengerTab);
+        setProfileSection(nav.section);
+        setIsNotificationsOpen(nav.notificationsOpen);
       }
     };
 
@@ -1284,7 +1432,7 @@ function MainApp() {
         onOpenHelpSupport={() => handleProfileMenuAction('help')}
         onResetHome={() => {
           setSelectedPublicUserId(null);
-          setActiveTab('discover');
+          setActiveTab('home');
           setViewMode('grid');
           setSearchQuery('');
         }}
@@ -1320,7 +1468,7 @@ function MainApp() {
           setViewMode={setViewMode}
           onGoHome={() => {
             setSelectedPublicUserId(null);
-            setActiveTab('discover');
+            setActiveTab('home');
             setViewMode('grid');
             setSearchQuery('');
           }}
