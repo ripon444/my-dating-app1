@@ -429,7 +429,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const isPendingConversation = conversation.id.startsWith('pending:');
 
   return (
-    <div className="flex flex-col h-full bg-stone-900 rounded-3xl border border-stone-800 overflow-hidden shadow-2xl relative">
+    <div className="flex flex-col h-full w-full max-w-full min-w-0 bg-stone-900 rounded-3xl border border-stone-800 overflow-hidden shadow-2xl relative">
       
       {/* Lightbox Modal for Fullscreen Images */}
       {lightboxImage && (
@@ -460,8 +460,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       {/* Chat Top Header */}
-      <div className="px-4 py-3 bg-stone-900/90 border-b border-stone-800 flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
+      <div className="px-4 py-3 bg-stone-900/90 border-b border-stone-800 flex items-center justify-between gap-2 min-w-0 z-10">
+        <div className="flex items-center gap-3 min-w-0">
           {onBack && (
             <button
               onClick={onBack}
@@ -473,9 +473,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           <div
             onClick={() => onViewProfile(otherUser)}
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex items-center gap-3 cursor-pointer group min-w-0"
           >
-            <div className="relative">
+            <div className="relative shrink-0">
               <img
                 src={otherUser.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
                 alt={otherUser.name}
@@ -487,9 +487,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               )}
             </div>
 
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-white text-sm group-hover:text-rose-400 transition font-serif">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-bold text-white text-sm group-hover:text-rose-400 transition font-serif truncate">
                   {otherUser.name}
                 </span>
                 <span className="text-xs text-stone-400">{otherUser.age ? otherUser.age : ''}</span>
@@ -523,7 +523,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
 
         {/* Header Actions: Call triggers, More menu */}
-        <div className="flex items-center gap-1.5 relative">
+        <div className="flex items-center gap-1.5 relative shrink-0">
           {!isExternal && (
             <>
               <button
@@ -626,7 +626,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       {/* Messages Thread Container */}
-      <div className="flex-1 p-4 overflow-y-auto space-y-3">
+      <div className="flex-1 min-w-0 p-4 overflow-y-auto overflow-x-hidden space-y-3">
         {/* Facebook Messenger Profile Header Card */}
         <div className="pt-3 pb-5 flex flex-col items-center justify-center text-center border-b border-stone-800/80 mb-2">
           <div className="relative mb-3">
@@ -774,10 +774,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             return (
               <div
                 key={msg.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+                className={`flex flex-col min-w-0 max-w-full ${isMe ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`max-w-[85%] sm:max-w-[75%] rounded-2xl p-3 relative group shadow-md space-y-2 ${
+                  className={`max-w-[85%] sm:max-w-[75%] min-w-0 rounded-2xl p-3 relative group shadow-md space-y-2 ${
                     isMe
                       ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white rounded-br-none'
                       : 'bg-stone-800 text-stone-100 border border-stone-700/80 rounded-bl-none'
@@ -855,7 +855,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
                   {/* Text Message Content (if not just media filename) */}
                   {msg.content && (msgType === 'text' || (msg.content !== msg.file_name && msg.content !== 'attachment')) && (
-                    <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
+                    <p className="chat-bubble-text text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
                       {msg.content}
                     </p>
                   )}
@@ -867,7 +867,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         <Sparkles className="w-2.5 h-2.5" />
                         AI Translation:
                       </div>
-                      <p className="italic text-stone-200">{translatedText}</p>
+                      <p className="chat-bubble-text italic text-stone-200">{translatedText}</p>
                     </div>
                   )}
 
@@ -988,7 +988,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       />
 
       {/* Chat Input Bar */}
-      <form onSubmit={handleSend} className="p-3 bg-stone-900/90 border-t border-stone-800 flex items-center gap-2">
+      <form onSubmit={handleSend} className="p-3 bg-stone-900/90 border-t border-stone-800 flex flex-wrap items-center gap-2 w-full max-w-full min-w-0 box-border overflow-hidden">
         {/* Attachment Options Button */}
         <button
           type="button"
@@ -1043,7 +1043,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           onChange={handleInputChange}
           placeholder={isPendingConversation ? 'Connecting — you can type, sending unlocks on connect...' : (pendingAttachment ? 'Add a caption (optional)...' : t('typeMessage'))}
           disabled={isPendingConversation}
-          className="flex-1 bg-stone-800 border border-stone-700 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition disabled:opacity-60"
+          className="flex-1 basis-40 min-w-[9rem] max-w-full bg-stone-800 border border-stone-700 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition disabled:opacity-60"
         />
 
         {/* Send Button */}

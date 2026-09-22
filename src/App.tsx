@@ -1802,7 +1802,7 @@ function MainApp() {
               </div>
 
               {/* Active Conversation Thread */}
-              <div className={`md:col-span-2 h-full ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
+              <div className={`md:col-span-2 h-full min-w-0 ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
                 {activeConversation ? (
                   <ChatWindow
                     key={activeConversation.id}

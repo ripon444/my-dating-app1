@@ -23,6 +23,17 @@ html, body {
   flex-direction: column;
 }
 
+/* Long unbroken strings (URLs, "llll...", 500+ char tokens) must wrap inside
+   their container instead of forcing it wider or spilling past its edges.
+   `overflow-wrap: anywhere` breaks anywhere when needed but still prefers normal
+   word boundaries, so ordinary prose is unaffected. */
+.chat-bubble-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+  max-width: 100%;
+}
+
 /* Safe area padding utilities for mobile notched phones & Android navigation bar */
 .safe-area-pt {
   padding-top: max(env(safe-area-inset-top, 0px), 0px);
