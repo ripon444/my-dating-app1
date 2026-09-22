@@ -5110,6 +5110,16 @@ io.on('connection', (socket) => {
     if (data?.userId === userId) socket.join(`user_${userId}`);
   });
 
+  // Clients ask for a fresh presence snapshot after returning from a hidden/
+  // throttled tab, where they may have missed broadcasts. Reuses the same
+  // authoritative presence set used for the connect-time snapshot.
+  socket.on('presence:request', () => {
+    socket.emit('presence:snapshot', Array.from(presenceSockets.keys()).map((id) => ({
+      userId: id,
+      isOnline: true,
+    })));
+  });
+
   socket.on('conversation:join', (convId) => {
     if (convId) socket.join(convId);
   });

@@ -21,9 +21,20 @@ export function getSocket(): Socket {
 
 export function connectSocket(): Socket {
   const currentSocket = getSocket();
-  if (getStoredToken() && !currentSocket.connected && !currentSocket.active) {
-    currentSocket.connect();
+  if (!getStoredToken()) return currentSocket;
+  if (currentSocket.connected) return currentSocket;
+
+  if (currentSocket.active) {
+    // Socket.IO is already retrying. Nudge it so a stale transport that never
+    // emitted `disconnect` (laptop sleep, throttled tab, network switch) is
+    // torn down and re-established instead of hanging forever.
+    currentSocket.disconnect();
   }
+  currentSocket.connect();
   return currentSocket;
 }
 
+/** True when the realtime connection is currently usable. */
+export function isSocketHealthy(): boolean {
+  return Boolean(socket?.connected);
+}

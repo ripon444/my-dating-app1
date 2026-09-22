@@ -188,7 +188,34 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       window.clearTimeout(markTimer);
       socket.emit('conversation:leave', conversation.id);
     };
+  }, [conversation.id, historyRetry]);
+
+  // Re-join the room and re-mark as read whenever the realtime connection is
+  // re-established (background recovery / reconnect). A reconnect builds a fresh
+  // socket, so the previous room membership is gone; without this the open
+  // conversation would stop receiving live messages after returning from a
+  // hidden/throttled tab. No listeners are added here — only room state.
+  useEffect(() => {
+    if (!conversation.id || conversation.id.startsWith('pending:')) return;
+    const socket = getSocket();
+    const handleConnect = () => {
+      socket.emit('conversation:join', conversation.id);
+      api.markConversationAsRead(conversation.id).catch(() => {});
+    };
+    socket.on('connect', handleConnect);
+    return () => {
+      socket.off('connect', handleConnect);
+    };
   }, [conversation.id]);
+
+  // Re-fetch history when the app recovers from a hidden/backgrounded tab.
+  // Reuses the existing history effect via its `historyRetry` trigger (merge,
+  // never replace), so messages missed while throttled appear without a reload.
+  useEffect(() => {
+    const handleResync = () => setHistoryRetry((n) => n + 1);
+    window.addEventListener('lovemeetly:resync-active-chat', handleResync);
+    return () => window.removeEventListener('lovemeetly:resync-active-chat', handleResync);
+  }, []);
 
   // 2. Real-time Socket listeners for new messages, typing, and read receipts
   useEffect(() => {

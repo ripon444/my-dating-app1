@@ -66,7 +66,8 @@ import { playIncomingMessageSound, shouldCountUnreadForMessage } from './utils/m
 import { registerWebPushForCurrentUser, unregisterWebPush } from './utils/webPush';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
-import { connectSocket, getSocket } from './services/socket';
+import { connectSocket, getSocket, isSocketHealthy } from './services/socket';
+import { startBackgroundRecovery } from './services/backgroundRecovery';
 import { clearPresence, setPresenceSnapshot, updatePresence, usePresence } from './services/presence';
 import { FALLBACK_PROFILES } from './data/fallbackProfiles';
 
@@ -295,8 +296,18 @@ function MainApp() {
     setIsProfileMenuOpen(false);
   };
 
-  // Initial Data Fetch
-  const loadInitialData = async () => {
+  // Shared server-state fetch: used both for the initial load and for
+  // background/visibility recovery. Refresh is additive — a request that fails
+  // leaves the existing state in place instead of blanking the UI, and the demo
+  // discover fallback only applies on the very first (non-silent) load.
+  const lastSyncAtRef = useRef(0);
+  const syncServerState = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    // Coalesce recovery bursts: visibility + reconnect + settle checks can all
+    // land within a few hundred ms of each other. A silent refresh that already
+    // ran moments ago is skipped so one return-to-tab issues one set of requests.
+    if (silent && Date.now() - lastSyncAtRef.current < 1500) return;
+    lastSyncAtRef.current = Date.now();
     try {
       const [meRes, discoverRes, matchesRes, convsRes, callsRes, notifsRes] = await Promise.allSettled([
         api.getMe(),
@@ -316,7 +327,7 @@ function MainApp() {
 
       if (discoverRes.status === 'fulfilled' && discoverRes.value?.profiles && discoverRes.value.profiles.length > 0) {
         setDiscoverProfiles(discoverRes.value.profiles.map((profile) => ({ ...profile, is_online: false })));
-      } else {
+      } else if (!silent) {
         setDiscoverProfiles(FALLBACK_PROFILES.map((profile) => ({ ...profile, is_online: false })));
       }
 
@@ -336,12 +347,21 @@ function MainApp() {
         setNotifications(notifsRes.value.notifications || []);
       }
     } catch (err) {
-      console.error('Failed to load initial app data:', err);
-      setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
+      console.error('Failed to load app data:', err);
+      if (!silent) setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
+
+  const loadInitialData = () => syncServerState();
+
+  // The recovery listeners outlive individual renders; keep a ref to the latest
+  // sync function so a filter change is picked up without re-subscribing.
+  const syncServerStateRef = useRef(syncServerState);
+  useEffect(() => {
+    syncServerStateRef.current = syncServerState;
+  });
 
   // Capacitor Android Native Integrations (Back Button, Status Bar)
   useEffect(() => {
@@ -877,6 +897,47 @@ function MainApp() {
       window.removeEventListener('hashchange', handleUrlChange);
     };
   }, [currentUser?.id, currentProfile?.user_id, activeCall?.id, incomingCall?.id]);
+
+  // Background/visibility recovery: reconnects the realtime socket and
+  // re-synchronizes server-backed state when the user returns to the tab, or
+  // when the network comes back. One centralized listener — no per-component
+  // visibility handlers — and no full page reload.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const refreshAfterRecovery = () => {
+      // Re-read the authoritative state the socket events normally keep live.
+      if (!currentUser?.id) return;
+      syncServerStateRef.current({ silent: true });
+      try {
+        const socket = getSocket();
+        if (socket.connected) {
+          socket.emit('user:join', { userId: currentUser.id });
+          if (currentProfile?.user_id) socket.emit('user:join', { userId: currentProfile.user_id });
+          socket.emit('presence:request');
+        }
+      } catch {}
+      // Ask the open conversation (if any) to re-fetch history so messages
+      // missed while the tab was throttled show up. Reuses ChatWindow's existing
+      // history reload path; no-op when no chat is open.
+      try {
+        window.dispatchEvent(new CustomEvent('lovemeetly:resync-active-chat'));
+      } catch {}
+    };
+
+    const handle = startBackgroundRecovery({
+      reconnect: () => {
+        connectSocket();
+      },
+      resync: () => {
+        if (currentUser?.id) syncServerStateRef.current({ silent: true });
+      },
+      isConnectionHealthy: () => isSocketHealthy(),
+      onRecovered: refreshAfterRecovery,
+    });
+
+    return () => handle.stop();
+  }, [currentUser?.id, currentProfile?.user_id]);
 
   // Reset all filters and search query to show all global profiles
   const handleResetAllFilters = async () => {
