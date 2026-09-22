@@ -1,5 +1,7 @@
 // Real-time Web Audio API sound generator for Calling (WhatsApp / Messenger style)
 
+import { debugNotifLog } from './desktopNotifications';
+
 class SoundManager {
   private audioCtx: AudioContext | null = null;
   private outgoingRingTimer: any = null;
@@ -158,11 +160,41 @@ class SoundManager {
   }
 
   // Authentic Facebook-Style Notification Pop / Chime (Glassy high chime ping)
+  // Playback is deferred until any required AudioContext resume resolves;
+  // starting oscillators on a suspended context silently produces no sound.
   public playNotificationPop() {
+    let ctx: AudioContext | null = null;
     try {
-      this.unlock();
-      const ctx = this.getAudioContext();
-      if (!ctx) return;
+      ctx = this.getAudioContext();
+      if (!ctx) {
+        debugNotifLog('sound-no-audiocontext', {});
+        return;
+      }
+      debugNotifLog('sound-ctx-state-before', { state: ctx.state });
+      if (ctx.state === 'suspended') {
+        const resuming = ctx;
+        resuming
+          .resume()
+          .then(() => {
+            debugNotifLog('sound-ctx-state-after-resume', { state: resuming.state });
+            this.scheduleNotificationPop(resuming);
+          })
+          .catch((err) => {
+            debugNotifLog('sound-resume-error', { error: String(err) });
+            this.scheduleNotificationPop(resuming);
+          });
+        return;
+      }
+      this.scheduleNotificationPop(ctx);
+    } catch (e) {
+      debugNotifLog('sound-error', { error: String(e) });
+      console.warn('Notification sound error:', e);
+    }
+  }
+
+  private scheduleNotificationPop(ctx: AudioContext) {
+    try {
+      debugNotifLog('sound-fn-reached', { state: ctx.state });
       const now = ctx.currentTime;
 
       // Note 1: 587.33 Hz (D5) - Warm pleasant strike
@@ -210,6 +242,7 @@ class SoundManager {
       osc3.start(now + 0.095);
       osc3.stop(now + 0.4);
     } catch (e) {
+      debugNotifLog('sound-error', { error: String(e) });
       console.warn('Notification sound error:', e);
     }
   }

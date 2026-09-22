@@ -167,6 +167,17 @@ function MainApp() {
   const [chatOpenError, setChatOpenError] = useState<string | null>(null);
   const openingChatRef = useRef<string | null>(null);
   const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>('chats');
+  // Mirror the messenger view so the singleton socket handler can tell whether a
+  // conversation is ACTUALLY on screen. `activeConversationId` alone stays set
+  // after the user navigates away from Messages, which used to suppress the
+  // incoming-message alert for every later message.
+  const messengerViewRef = useRef<{ tab: string; messengerTab: 'chats' | 'calls' }>({
+    tab: activeTab,
+    messengerTab: 'chats',
+  });
+  useEffect(() => {
+    messengerViewRef.current = { tab: activeTab, messengerTab };
+  }, [activeTab, messengerTab]);
   const [callHistory, setCallHistory] = useState<Call[]>([]);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
@@ -207,6 +218,13 @@ function MainApp() {
   const [profileSectionNonce, setProfileSectionNonce] = useState(0);
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
+  // Ref mirror: the singleton socket effect must read the live value without
+  // re-subscribing, so a full-screen public-profile overlay correctly counts as
+  // "not viewing the chat".
+  const selectedPublicUserIdRef = useRef<string | null>(selectedPublicUserId);
+  useEffect(() => {
+    selectedPublicUserIdRef.current = selectedPublicUserId;
+  }, [selectedPublicUserId]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const presence = usePresence();
 
@@ -613,9 +631,23 @@ function MainApp() {
 
         const convId = typeof msg.conversation_id === 'string' ? msg.conversation_id : '';
         // Case A: user is actively viewing this conversation → in-app only.
+        // "Actively viewing" requires the chat thread to actually be on screen:
+        // the Messages tab must be showing the chats list AND a conversation
+        // must be open. `activeConversationId` survives tab switches, so relying
+        // on it alone silenced every later alert after the user left the chat.
+        const messengerView = messengerViewRef.current;
+        const chatOnScreen =
+          messengerView.tab === 'messages' &&
+          messengerView.messengerTab === 'chats' &&
+          !selectedPublicUserIdRef.current;
         const viewingConv = (activeConversationIdRef.current || '').replace(/^pending:/, '');
-        if (convId && viewingConv && (convId === viewingConv || `pending:${convId}` === activeConversationIdRef.current)) {
-          debugNotifLog('message-skipped-viewing', { id: messageId, convId });
+        if (
+          chatOnScreen &&
+          convId &&
+          viewingConv &&
+          (convId === viewingConv || `pending:${convId}` === activeConversationIdRef.current)
+        ) {
+          debugNotifLog('message-skipped-viewing', { id: messageId, convId, tab: messengerView.tab });
           return;
         }
         // Notify whenever the message is for a conversation the user is NOT
