@@ -296,6 +296,36 @@ export function formatProfileRow(row: any): any {
   };
 }
 
+// Resolve any user identifier the client may send (profile id `prf_*`, user id
+// `usr_*`, or a username) to the canonical `users.id`. Messaging, conversation
+// lookup/broadcast and unread accounting all key on `users.id`, so an
+// unresolved profile id would silently break realtime delivery (socket rooms
+// are `user_<users.id>`) and unread counts.
+export async function resolveCanonicalUserId(identifier?: string | null): Promise<string | null> {
+  const value = typeof identifier === 'string' ? identifier.trim() : '';
+  if (!value) return null;
+
+  const direct = await SqlHelper.queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [value]).catch(() => null);
+  if (direct?.id) return direct.id;
+
+  const profById = await SqlHelper.queryOne<{ user_id: string }>('SELECT user_id FROM profiles WHERE id = ?', [value]).catch(() => null);
+  if (profById?.user_id) {
+    const user = await SqlHelper.queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [profById.user_id]).catch(() => null);
+    if (user?.id) return user.id;
+  }
+
+  const profByUsername = await SqlHelper.queryOne<{ user_id: string }>(
+    'SELECT user_id FROM profiles WHERE username = ?',
+    [value]
+  ).catch(() => null);
+  if (profByUsername?.user_id) {
+    const user = await SqlHelper.queryOne<{ id: string }>('SELECT id FROM users WHERE id = ?', [profByUsername.user_id]).catch(() => null);
+    if (user?.id) return user.id;
+  }
+
+  return null;
+}
+
 // Server-side explicit super-admin allowlist. This is the ONLY source of truth
 // for super-admin status — never derived from a client-supplied role, password,
 // key, or an email-pattern guess like "admin@<anything>".
@@ -2352,8 +2382,29 @@ app.get('/api/conversations', async (req, res) => {
     [user.id, user.id]
   );
 
+  // Collapse rows that represent the same peer pair into a single thread.
+  // Legacy conversations were created with profile ids/usernames as the peer
+  // column (before canonicalization), so an existing pair can have several rows
+  // that all mean the same 1:1 chat. Resolve each peer to its canonical
+  // `users.id` and keep the row with the most recent message activity (so a
+  // newer empty duplicate cannot hide an existing thread). Older rows stay in
+  // the database untouched — this only changes what the API lists.
+  const peerActivity = new Map<string, { id: string; at: number }>();
+  for (const c of convRows) {
+    const otherId = c.user_a_id === user.id ? c.user_b_id : c.user_a_id;
+    const canonicalPeer = (await resolveCanonicalUserId(otherId)) || otherId;
+    const lastMsg = await SqlHelper.queryOne<{ created_at: string }>(
+      'SELECT created_at FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1',
+      [c.id]
+    ).catch(() => null);
+    const at = new Date(lastMsg?.created_at || c.updated_at || c.created_at || 0).getTime() || 0;
+    const current = peerActivity.get(canonicalPeer);
+    if (!current || at > current.at) peerActivity.set(canonicalPeer, { id: c.id, at });
+  }
+  const dedupedConvIds = new Set(Array.from(peerActivity.values()).map((entry) => entry.id));
+
   const formattedConvs = await Promise.all(
-    convRows.map(async (c) => {
+    convRows.filter((c) => dedupedConvIds.has(c.id)).map(async (c) => {
       const otherUserId = c.user_a_id === user.id ? c.user_b_id : c.user_a_id;
       const otherProfRow = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ? OR id = ?', [otherUserId, otherUserId]);
       const lastMsgRow = await SqlHelper.queryOne(
@@ -2389,9 +2440,17 @@ app.post('/api/conversations', async (req, res) => {
   const { target_user_id } = req.body;
   if (!target_user_id) return res.status(400).json({ error: 'Target user ID required' });
 
+  // The client may pass a profile id (`prf_*`), a user id (`usr_*`), or a
+  // username (profile links). Prefer the canonical `users.id` so one user pair
+  // maps to exactly one conversation regardless of which identifier the caller
+  // used. Unresolvable ids (e.g. external partner/demo profiles without a local
+  // user) keep the previous behavior and are stored as-is.
+  const canonicalTargetId = (await resolveCanonicalUserId(target_user_id)) || String(target_user_id).trim();
+  if (!canonicalTargetId) return res.status(400).json({ error: 'Target user ID required' });
+
   let conv = await SqlHelper.queryOne(
     'SELECT * FROM conversations WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)',
-    [user.id, target_user_id, target_user_id, user.id]
+    [user.id, canonicalTargetId, canonicalTargetId, user.id]
   );
 
   const now = new Date().toISOString();
@@ -2400,12 +2459,12 @@ app.post('/api/conversations', async (req, res) => {
     const convId = 'conv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const match = await SqlHelper.queryOne(
       'SELECT id FROM matches WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)',
-      [user.id, target_user_id, target_user_id, user.id]
+      [user.id, canonicalTargetId, canonicalTargetId, user.id]
     );
 
     await SqlHelper.execute(
       'INSERT INTO conversations (id, match_id, user_a_id, user_b_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [convId, match ? match.id : '', user.id, target_user_id, now, now]
+      [convId, match ? match.id : '', user.id, canonicalTargetId, now, now]
     );
 
     conv = await SqlHelper.queryOne('SELECT * FROM conversations WHERE id = ?', [convId]);
@@ -2474,7 +2533,16 @@ app.post('/api/messages', async (req, res) => {
   }
 
   const conv = await SqlHelper.queryOne('SELECT * FROM conversations WHERE id = ?', [conversation_id]);
-  const targetReceiverId = receiver_id || (conv?.user_a_id === user.id ? conv?.user_b_id : conv?.user_a_id);
+  const fallbackReceiverId = conv?.user_a_id === user.id ? conv?.user_b_id : conv?.user_a_id;
+  // Normalize the receiver to the canonical `users.id`. The chat UI sends the
+  // peer's PROFILE id (`other_user.id`), but socket rooms are `user_<users.id>`
+  // and unread counts match `receiver_id = users.id`; storing the raw profile id
+  // silently dropped every realtime notification and unread increment.
+  const targetReceiverId =
+    (await resolveCanonicalUserId(receiver_id)) ||
+    (await resolveCanonicalUserId(fallbackReceiverId)) ||
+    receiver_id ||
+    fallbackReceiverId;
 
   const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
   const now = new Date().toISOString();

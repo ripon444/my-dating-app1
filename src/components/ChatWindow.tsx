@@ -342,7 +342,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       const res = await api.sendMessage({
         conversation_id: conversation.id,
-        receiver_id: otherUser.id || otherUser.user_id || '',
+        // Prefer the canonical user id (`user_id`): socket rooms and unread
+        // accounting are keyed on it, while `id` is the profile id.
+        receiver_id: otherUser.user_id || otherUser.id || '',
         content: content || (pendingAttachment ? pendingAttachment.filename : ''),
         attachment: attachmentPayload,
         attachment_url: attachmentPayload?.url,
