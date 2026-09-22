@@ -48,7 +48,7 @@ import { AdminPortal } from './components/AdminPortal';
 import { PublicProfileView } from './components/PublicProfileView';
 import { ProfileSettingsHub } from './components/ProfileSettingsHub';
 import { UserSearchModal } from './components/UserSearchModal';
-import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
+import { Profile, User, Match, Conversation, Call, Message, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api } from './services/api';
@@ -88,6 +88,83 @@ function getProfileTargetFromUrl(): string | null {
   return null;
 }
 
+// Facebook-style clean-path navigation mapping.
+// The app deliberately has no router; navigation is driven by `activeTab` state.
+// These helpers convert between that state and the URL path so the two stay in sync
+// without pulling in a second routing system.
+const TAB_TO_PATH: Record<string, string> = {
+  home: '/',
+  discover: '/discover',
+  matches: '/matches',
+  messages: '/messages',
+  calls: '/calls',
+  profile: '/profile',
+};
+
+const PATH_TO_TAB: Record<string, string> = {
+  '/': 'home',
+  '/home': 'home',
+  '/discover': 'discover',
+  '/matches': 'matches',
+  '/messages': 'messages',
+  '/calls': 'calls',
+  '/profile': 'profile',
+  '/notifications': 'home',
+  '/settings': 'profile',
+};
+
+function normalizePath(pathname: string): string {
+  const raw = (pathname || '/').split('?')[0].split('#')[0].toLowerCase();
+  return raw.length > 1 ? raw.replace(/\/+$/, '') : raw;
+}
+
+interface NavState {
+  tab: string;
+  section: string | null;
+  openNotifications: boolean;
+}
+
+// True only for shareable public-profile URLs (`/profile/<id>` or `/@<id>`).
+// The bare `/profile` path is the signed-in user's own profile tab instead.
+function isPublicProfilePath(pathname: string): boolean {
+  return /^\/(?:profile|@)\/[^/?#]+/i.test(pathname || '');
+}
+
+function navStateFromPath(pathname: string): NavState {
+  const path = normalizePath(pathname);
+  if (path === '/notifications') return { tab: 'home', section: null, openNotifications: true };
+  if (path === '/settings') return { tab: 'profile', section: 'settings', openNotifications: false };
+  const tab = PATH_TO_TAB[path];
+  if (tab) return { tab, section: null, openNotifications: false };
+  return { tab: 'home', section: null, openNotifications: false };
+}
+
+function pathForNavState(tab: string, section: string | null, openNotifications: boolean): string | null {
+  if (openNotifications) return '/notifications';
+  if (tab === 'profile' && section === 'settings') return '/settings';
+  return TAB_TO_PATH[tab] ?? null;
+}
+
+function readInitialNavState(): NavState {
+  if (typeof window === 'undefined') return { tab: 'home', section: null, openNotifications: false };
+  // One-time backward compatibility for legacy `?tab=` links so old bookmarks still
+  // land on the right section; the sync effect then rewrites the URL to a clean path.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const legacyTab = params.get('tab');
+    if (legacyTab && TAB_TO_PATH[legacyTab]) {
+      const section = params.get('section');
+      if (legacyTab === 'profile' && section === 'settings') {
+        return { tab: 'profile', section: 'settings', openNotifications: false };
+      }
+      return { tab: legacyTab, section: null, openNotifications: false };
+    }
+  } catch {
+    // Fall through to path-based parsing.
+  }
+  return navStateFromPath(window.location.pathname);
+}
+
 function MainApp() {
   const { t } = useTranslation();
 
@@ -113,7 +190,7 @@ function MainApp() {
   // App States
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
-  const [activeTab, setActiveTab] = useState<string>('discover');
+  const [activeTab, setActiveTab] = useState<string>(() => readInitialNavState().tab);
   const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('grid');
 
   // Discovery State
@@ -138,6 +215,17 @@ function MainApp() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  // Ref mirror of the active conversation so socket handlers always read the latest value
+  // without being re-registered (which would drop events between effect teardown/setup).
+  const activeConversationIdRef = useRef<string | null>(null);
+  // Dedupe set for incoming chat messages: the server emits the same message on both
+  // `message:new` (user room + global broadcast) and `message:received`, so guard against
+  // playing the notification sound more than once per message id.
+  const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
+  // Ref mirror of the active tab: a conversation stays "selected" even after the user
+  // navigates away, so the same-conversation suppression must also require the messages
+  // tab to be visible.
+  const activeTabRef = useRef<string>('discover');
   const [callHistory, setCallHistory] = useState<Call[]>([]);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
@@ -163,10 +251,14 @@ function MainApp() {
   // Social & Registered Users Search / Profile
   const [isUserSearchOpen, setIsUserSearchOpen] = useState(false);
   // Mobile Notifications overlay reuses the existing desktop NotificationsPanel.
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(
+    () => readInitialNavState().openNotifications
+  );
   // Existing Facebook-style Profile Settings slide-out + deep section target.
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [profileSection, setProfileSection] = useState<string | null>(null);
+  const [profileSection, setProfileSection] = useState<string | null>(
+    () => readInitialNavState().section
+  );
   const [profileSectionNonce, setProfileSectionNonce] = useState(0);
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
@@ -369,28 +461,48 @@ function MainApp() {
     activeTab,
   ]);
 
-  // Lightweight URL state sync for existing state navigation (no router).
-  // Best-effort replaceState only: preserves refresh + back behavior, never adds history spam.
+  // Clean-path URL sync (no router): reflects navigation state into the address bar.
+  // pushState adds a history entry so Back/Forward work; replaceState is used for the
+  // initial normalization/legacy cleanup so page load never spams history.
+  const didInitUrlSyncRef = useRef(false);
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return;
-    // Never rewrite shareable public-profile or admin routes.
+    if (typeof window === 'undefined' || typeof window.history?.pushState !== 'function') return;
+    // Preserve shareable public-profile URLs while a profile overlay is open; once it
+    // closes (`selectedPublicUserId` clears) this effect re-runs and re-syncs.
+    if (selectedPublicUserId) return;
     if (getProfileTargetFromUrl()) return;
-    const path = window.location.pathname.toLowerCase();
-    if (path === '/tanvir' || path === '/admin' || path.endsWith('/tanvir') || path.endsWith('/admin')) return;
+    const rawPath = window.location.pathname.toLowerCase();
+    if (rawPath === '/tanvir' || rawPath === '/admin' || rawPath.endsWith('/tanvir') || rawPath.endsWith('/admin')) return;
+    const desired = pathForNavState(activeTab, profileSection, isNotificationsOpen);
+    if (!desired) return;
+    const current = normalizePath(window.location.pathname);
+    // Strip any legacy `?tab=`/`?section=` params the old navigation left behind.
+    const hasLegacyParams = /[?&](tab|section)=/.test(window.location.search);
+    const hash = window.location.hash || '';
+    const target = `${desired}${hash}`;
     try {
-      const params = new URLSearchParams(window.location.search);
-      params.set('tab', activeTab);
-      if (activeTab === 'profile' && profileSection) {
-        params.set('section', profileSection);
-      } else {
-        params.delete('section');
+      if (current === desired && !hasLegacyParams) {
+        didInitUrlSyncRef.current = true;
+        return;
       }
-      const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-      window.history.replaceState({}, '', next);
+      const method = didInitUrlSyncRef.current ? 'pushState' : 'replaceState';
+      window.history[method]({ navTab: activeTab }, '', target);
+      didInitUrlSyncRef.current = true;
     } catch {
       // URL sync is best-effort only; state navigation remains source of truth.
     }
-  }, [activeTab, profileSection]);
+  }, [activeTab, profileSection, isNotificationsOpen, selectedPublicUserId]);
+
+  // Mirror navigation state into refs so the long-lived socket handlers always read
+  // current values without being re-registered (re-registration would create windows
+  // where an incoming message is missed).
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   useEffect(() => {
     loadInitialData();
@@ -479,6 +591,57 @@ function MainApp() {
       }
     });
 
+    // Incoming chat message → notification alert sound.
+    // The server emits `message:new` to the receiver's user room AND as a global
+    // broadcast, plus `message:received` to the conversation room, so this handler
+    // must filter by recipient and dedupe by message id.
+    const handleIncomingMessageSound = (msg: Message) => {
+      if (!msg || !msg.id) return;
+
+      const myIds = [currentUser?.id, currentProfile?.user_id, currentProfile?.id]
+        .filter(Boolean) as string[];
+
+      const isIncoming =
+        myIds.length > 0 &&
+        myIds.includes(msg.receiver_id) &&
+        !myIds.includes(msg.sender_id);
+
+      console.debug('[notify] message:new received', {
+        id: msg.id,
+        conversationId: msg.conversation_id,
+        incoming: isIncoming,
+      });
+      if (!isIncoming) return;
+
+      if (notifiedMessageIdsRef.current.has(msg.id)) {
+        console.debug('[notify] duplicate message sound suppressed:', msg.id);
+        return;
+      }
+      notifiedMessageIdsRef.current.add(msg.id);
+      if (notifiedMessageIdsRef.current.size > 300) {
+        notifiedMessageIdsRef.current.clear();
+      }
+
+      // Suppress only while the user is actively viewing THIS conversation on the
+      // messages tab (existing ChatWindow read-receipt behavior stays unchanged).
+      const isViewingThisConversation =
+        activeConversationIdRef.current === msg.conversation_id &&
+        activeTabRef.current === 'messages';
+      const shouldPlayNotification = !isViewingThisConversation;
+
+      console.debug('[notify] shouldPlayNotification:', shouldPlayNotification, {
+        activeConversationId: activeConversationIdRef.current,
+        activeTab: activeTabRef.current,
+      });
+
+      if (shouldPlayNotification) {
+        soundManager.playNotificationPop();
+      }
+    };
+
+    socket.on('message:new', handleIncomingMessageSound);
+    socket.on('message:received', handleIncomingMessageSound);
+
     socket.on('notification:new', (notif: any) => {
       setNotifications((prev) => {
         if (prev.some((n) => n.id === notif.id)) return prev;
@@ -531,6 +694,15 @@ function MainApp() {
         setSelectedPublicUserId(null);
         setSelectedPublicProfile(null);
       }
+
+      // Restore the active section for clean-path URLs so Back/Forward navigation works.
+      // Skipped for admin and shareable public-profile routes, which are handled above.
+      if (!isTanvir && !urlProfileTarget && !isPublicProfilePath(window.location.pathname)) {
+        const nav = navStateFromPath(window.location.pathname);
+        setActiveTab(nav.tab);
+        setProfileSection(nav.section);
+        setIsNotificationsOpen(nav.openNotifications);
+      }
     };
 
     window.addEventListener('popstate', handleUrlChange);
@@ -543,6 +715,8 @@ function MainApp() {
       socket.off('call:incoming');
       socket.off('call:rejected');
       socket.off('call:ended');
+      socket.off('message:new', handleIncomingMessageSound);
+      socket.off('message:received', handleIncomingMessageSound);
       socket.off('notification:new');
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
@@ -793,7 +967,7 @@ function MainApp() {
         onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
         onResetHome={() => {
           setSelectedPublicUserId(null);
-          setActiveTab('discover');
+          setActiveTab('home');
           setViewMode('grid');
           setSearchQuery('');
         }}
@@ -821,7 +995,7 @@ function MainApp() {
           setViewMode={setViewMode}
           onGoHome={() => {
             setSelectedPublicUserId(null);
-            setActiveTab('discover');
+            setActiveTab('home');
             setViewMode('grid');
             setSearchQuery('');
           }}

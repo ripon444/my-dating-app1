@@ -150,16 +150,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onOpenNotifications?.();
       return;
     }
-    if (id === 'home' || id === 'discover') {
-      // Home and Discover share the existing main discovery page (no blank tabs).
+    if (id === 'home') {
+      // Home is the canonical `/` feed; Discover keeps its own `/discover` path.
+      // Both reuse the existing main discovery page (no blank tabs).
       // Clear transient overlays so the existing feed is visible again.
+      onCloseProfileMenu?.();
+      setActiveTab('home');
+      if (setViewMode) setViewMode('grid');
+      if (onGoHome) onGoHome();
+      return;
+    }
+    if (id === 'discover') {
       onCloseProfileMenu?.();
       if (onSelectDiscover) {
         onSelectDiscover();
       } else {
         setActiveTab('discover');
         if (setViewMode) setViewMode('grid');
-        if (onGoHome) onGoHome();
       }
       return;
     }
