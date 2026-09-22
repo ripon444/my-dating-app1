@@ -202,8 +202,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         // our own sends. UI merge above is untouched.
         playIncomingMessageSound(msg, activeUserId);
 
-        // If I received this message while chat is open, mark it as read immediately
-        if (msg.receiver_id === activeUserId) {
+        // If I received this message while chat is open, mark it as read
+        // immediately. Keyed off sender so legacy rows stored with a
+        // profile-id receiver still resolve.
+        if (msg.sender_id !== activeUserId) {
           api.markConversationAsRead(conversation.id).catch(() => {});
         }
       }
@@ -342,7 +344,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       const res = await api.sendMessage({
         conversation_id: conversation.id,
-        receiver_id: otherUser.id || otherUser.user_id || '',
+        receiver_id: otherUser.user_id || otherUser.id || '',
         content: content || (pendingAttachment ? pendingAttachment.filename : ''),
         attachment: attachmentPayload,
         attachment_url: attachmentPayload?.url,
