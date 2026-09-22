@@ -620,9 +620,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="btn-nav-user-profile"
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className="flex items-center gap-2 p-1 pr-1.5 sm:pr-2.5 rounded-full bg-stone-800/90 hover:bg-stone-700 border border-stone-700 hover:border-rose-500/60 transition shadow-sm shrink-0 cursor-pointer group"
+                aria-label={`Account menu${profile?.name ? ` for ${profile.name}` : ''}`}
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                className="p-1 rounded-full bg-stone-800/90 hover:bg-stone-700 border border-stone-700 hover:border-rose-500/60 transition shadow-sm shrink-0 cursor-pointer group flex items-center justify-center min-w-[40px] min-h-[40px]"
                 title={`${profile?.name || user?.email?.split('@')[0] || 'My Profile'} (${user?.subscriptionTier || 'Free'})`}
               >
+                {/* Facebook-style: the trigger is the avatar only — the name lives
+                    inside the opened menu below. */}
                 <div className="relative w-8 h-8 rounded-full overflow-hidden shrink-0 ring-2 ring-rose-500/50">
                   {profile?.photos?.[0] ? (
                     <img
@@ -638,15 +643,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-stone-900" />
                 </div>
-                <div className="hidden lg:flex flex-col text-left">
-                  <span className="text-xs font-bold text-stone-100 truncate max-w-[84px] leading-tight">
-                    {profile?.name || user?.email?.split('@')[0] || 'My Profile'}
-                  </span>
-                  <span className="text-[10px] text-rose-400 font-semibold leading-none">
-                    {user?.subscriptionTier || 'Member'}
-                  </span>
-                </div>
-                <ChevronDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-200 transition shrink-0" />
               </button>
             ) : (
               <button

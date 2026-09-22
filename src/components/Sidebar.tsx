@@ -431,6 +431,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
+          {/* Signed-in identity: the nav trigger shows only the avatar, so the
+              profile photo + name are surfaced here once the menu is opened. */}
+          {(user || profile) && (
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-stone-800 bg-stone-900/60">
+              <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0 ring-2 ring-rose-500/50">
+                {profile?.photos?.[0] ? (
+                  <img
+                    src={profile.photos[0]}
+                    alt={profile?.name || 'Profile'}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-sm">
+                    {(profile?.name || user?.email || 'U').charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-white truncate">
+                  {profile?.name || user?.email?.split('@')[0] || 'Member'}
+                </p>
+                <p className="text-[11px] text-stone-400 truncate">
+                  {user?.email || (profile?.username ? `@${profile.username}` : '')}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="px-4 py-3 border-b border-stone-800">
             <div className="relative">
               <Search className="w-4 h-4 text-rose-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
