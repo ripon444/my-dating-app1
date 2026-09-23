@@ -2099,6 +2099,10 @@ app.get('/api/discover', async (req, res) => {
   const profiles = await Promise.all(rows.map(async (row: any) => ({
     ...formatProfileRow(row),
     followers_count: row.user_id ? await SqlHelper.getFollowerCount(row.user_id) : 0,
+    following_count: row.user_id ? await SqlHelper.getFollowingCount(row.user_id) : 0,
+    is_following: currentUserId && row.user_id && currentUserId !== row.user_id
+      ? await SqlHelper.isFollowing(currentUserId, row.user_id).catch(() => false)
+      : false,
     is_super_liked: likedProfileIds.has(row.user_id) || likedProfileIds.has(row.id),
   })));
   res.json({
