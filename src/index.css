@@ -39,7 +39,7 @@ html, body {
    scrollbar's light track was showing as a vertical strip over the dark panel. */
 .chat-thread-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #fff #000;
+  scrollbar-color: #fff transparent;
 }
 
 .chat-thread-scroll::-webkit-scrollbar {
@@ -47,7 +47,7 @@ html, body {
 }
 
 .chat-thread-scroll::-webkit-scrollbar-track {
-  background: #000;
+  background: transparent;
 }
 
 .chat-thread-scroll::-webkit-scrollbar-thumb {
