@@ -60,6 +60,15 @@ html, body {
   background: transparent;
 }
 
+/* Windows Chromium can paint a themed arrow-button pair at the track ends,
+   which reads as small light squares above/below the thumb. Suppress them so
+   only the narrow rounded thumb is visible. */
+.chat-thread-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .chat-thread-scroll::-webkit-scrollbar-track,
 .chat-thread-scroll::-webkit-scrollbar-track-piece,
 .chat-thread-scroll::-webkit-scrollbar-corner {
