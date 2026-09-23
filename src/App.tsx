@@ -1795,7 +1795,14 @@ function MainApp() {
           {/* 3. MESSAGES TAB */}
           {/* ========================================================================= */}
           {activeTab === 'messages' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
+            /* `grid-rows-1` (= minmax(0, 1fr)) is load-bearing: without it the
+               implicit `auto` row is content-sized, so the chat panel's
+               `h-full` resolves against an indefinite height, the message
+               thread grows to its full content height and never becomes a
+               scroll container. `<main>` scrolls the thread instead and its
+               native scrollbar renders in main's padding gutter, far away from
+               the chat panel's right edge. */
+            <div className="grid grid-cols-1 md:grid-cols-3 grid-rows-1 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
               
               {/* Conversations & Calls List (FB Messenger Style) */}
               <div className={`bg-stone-900 rounded-2xl sm:rounded-3xl border border-stone-800 overflow-hidden flex flex-col shadow-xl ${
@@ -1966,7 +1973,7 @@ function MainApp() {
               </div>
 
               {/* Active Conversation Thread */}
-              <div className={`md:col-span-2 h-full min-w-0 ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
+              <div className={`md:col-span-2 h-full min-h-0 min-w-0 ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
                 {activeConversation ? (
                   <ChatWindow
                     key={activeConversation.id}

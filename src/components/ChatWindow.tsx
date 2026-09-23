@@ -651,13 +651,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       )}
 
-      {/* Messages Thread Container.
-          The scroll viewport carries no padding so the scrollbar lane sits flush
-          against the panel's right inner edge; the inner wrapper owns the
-          content padding + spacing. Content padding and scrollbar position are
-          therefore independent. */}
-      <div className="chat-thread-scroll flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
-        <div className="p-4 space-y-3">
+      {/* Messages Thread. Three nested levels, each with one job:
+          - `chat-body`     : the width container for the viewport. No padding,
+                              no margin, no border, min-w-0/min-h-0, so the
+                              viewport's left/right edges ARE the panel's inner
+                              edges.
+          - `chat-thread-scroll`: the ONLY vertical scroller of the message
+                              thread (native overflow-y: auto). Owns no padding
+                              at all, so the native scrollbar is painted flush
+                              against the panel's inner right edge.
+          - `chat-message-content`: holds the existing p-4/space-y-3, so message
+                              padding and scrollbar position stay independent. */}
+      <div className="chat-body w-full min-w-0 min-h-0 flex-1 flex flex-col">
+      <div className="chat-thread-scroll w-full min-w-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="chat-message-content p-4 space-y-3">
         {/* Facebook Messenger Profile Header Card */}
         <div className="pt-3 pb-5 flex flex-col items-center justify-center text-center border-b border-stone-800/80 mb-2">
           <div className="relative mb-3">
@@ -968,8 +975,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
 
         <div ref={messagesEndRef} />
-        </div>
-      </div>
+          </div>{/* /chat-message-content */}
+        </div>{/* /chat-thread-scroll */}
+      </div>{/* /chat-body */}
 
       {/* Pending Attachment Preview Bar (WhatsApp Style) */}
       {pendingAttachment && (

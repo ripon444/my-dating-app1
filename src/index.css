@@ -34,16 +34,23 @@ html, body {
   max-width: 100%;
 }
 
-/* Messenger-style scrollbar for the chat message thread only.
-   Scoped to the single scrolling element in ChatWindow.tsx. The track must be
-   transparent, not #000: the element itself has no background, so it shows the
-   parent panel's stone-900 (#1c1917) and an opaque black track reads as a
-   darker separate gutter down the side of the thread.
+/* Messenger-style scrollbar for the chat message viewport only.
+   Scoped to `.chat-thread-scroll` in ChatWindow.tsx, which is the single
+   vertical scrolling element of the message thread.
 
-   Every scrollbar part that can paint a surface is zeroed out explicitly --
-   the lane (`::-webkit-scrollbar`), the track, the track-piece and the corner.
-   Leaving any of them unset lets the engine fall back to a themed track that
-   shows as a light vertical line beside the thumb.
+   The viewport deliberately carries NO padding/margin/border (`chat-body` is
+   the width container and the p-4 message padding lives on
+   `chat-message-content`), which is what keeps this native scrollbar pinned to
+   the chat panel's inner right edge.
+
+   The track must be transparent, not #000: the element itself has no
+   background, so it shows the parent panel's stone-900 (#1c1917) and an opaque
+   black track reads as a darker separate gutter down the side of the thread.
+
+   Every scrollbar part that can paint a surface is zeroed out explicitly -- the
+   lane (`::-webkit-scrollbar`), the track, the track-piece and the corner, plus
+   the up/down buttons. Leaving any of them unset lets the engine fall back to a
+   themed track/arrows that show as a light vertical line beside the thumb.
 
    Keep `scrollbar-width`/`scrollbar-color` OFF this rule. Chromium treats a
    non-`auto` `scrollbar-width` as opting out of `::-webkit-scrollbar`, which
@@ -74,6 +81,12 @@ html, body {
 .chat-thread-scroll::-webkit-scrollbar-corner {
   background: transparent;
   border: 0;
+}
+
+.chat-thread-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .chat-thread-scroll::-webkit-scrollbar-thumb {
