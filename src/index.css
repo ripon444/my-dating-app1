@@ -35,11 +35,18 @@ html, body {
 }
 
 /* Messenger-style scrollbar for the chat message thread only.
-   Scoped to the single scrolling element in ChatWindow.tsx — the default UA
-   scrollbar's light track was showing as a vertical strip over the dark panel. */
+   Scoped to the single scrolling element in ChatWindow.tsx. The track must be
+   transparent, not #000: the element itself has no background, so it shows the
+   parent panel's stone-900 (#1c1917) and an opaque black track reads as a
+   darker separate gutter down the side of the thread.
+
+   Keep `scrollbar-width`/`scrollbar-color` OFF this rule. Chromium treats a
+   non-`auto` `scrollbar-width` as opting out of `::-webkit-scrollbar`, which
+   silently discarded the 8px width, transparent track and rounded thumb below
+   and fell back to a native track. Firefox, which has no `::-webkit-scrollbar`,
+   gets the standard properties from the @supports block instead. */
 .chat-thread-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: #fff transparent;
+  /* No scrollbar-width/color here for Chromium */
 }
 
 .chat-thread-scroll::-webkit-scrollbar {
@@ -57,6 +64,13 @@ html, body {
 
 .chat-thread-scroll::-webkit-scrollbar-thumb:hover {
   background: #e5e5e5;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .chat-thread-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #fff transparent;
+  }
 }
 
 /* Safe area padding utilities for mobile notched phones & Android navigation bar */
