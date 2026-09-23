@@ -40,6 +40,11 @@ html, body {
    parent panel's stone-900 (#1c1917) and an opaque black track reads as a
    darker separate gutter down the side of the thread.
 
+   Every scrollbar part that can paint a surface is zeroed out explicitly --
+   the lane (`::-webkit-scrollbar`), the track, the track-piece and the corner.
+   Leaving any of them unset lets the engine fall back to a themed track that
+   shows as a light vertical line beside the thumb.
+
    Keep `scrollbar-width`/`scrollbar-color` OFF this rule. Chromium treats a
    non-`auto` `scrollbar-width` as opting out of `::-webkit-scrollbar`, which
    silently discarded the 8px width, transparent track and rounded thumb below
@@ -51,19 +56,24 @@ html, body {
 
 .chat-thread-scroll::-webkit-scrollbar {
   width: 8px;
-}
-
-.chat-thread-scroll::-webkit-scrollbar-track {
+  height: 8px;
   background: transparent;
 }
 
+.chat-thread-scroll::-webkit-scrollbar-track,
+.chat-thread-scroll::-webkit-scrollbar-track-piece,
+.chat-thread-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
 .chat-thread-scroll::-webkit-scrollbar-thumb {
-  background: #fff;
-  border-radius: 10px;
+  background-color: #fff;
+  border-radius: 8px;
 }
 
 .chat-thread-scroll::-webkit-scrollbar-thumb:hover {
-  background: #e5e5e5;
+  background-color: #e5e5e5;
 }
 
 @supports not selector(::-webkit-scrollbar) {
