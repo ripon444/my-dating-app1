@@ -35,11 +35,13 @@ html, body {
 }
 
 /* Messenger-style scrollbar for the chat message thread only.
-   Scoped to the single scrolling element in ChatWindow.tsx — the default UA
-   scrollbar's light track was showing as a vertical strip over the dark panel. */
+   Scoped to the single scrolling element in ChatWindow.tsx. The track must be
+   transparent, not #000: the element itself has no background, so it shows the
+   parent panel's stone-900 (#1c1917) and an opaque black track reads as a
+   darker separate gutter down the side of the thread. */
 .chat-thread-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #fff #000;
+  scrollbar-color: #fff transparent;
 }
 
 .chat-thread-scroll::-webkit-scrollbar {
@@ -47,7 +49,7 @@ html, body {
 }
 
 .chat-thread-scroll::-webkit-scrollbar-track {
-  background: #000;
+  background: transparent;
 }
 
 .chat-thread-scroll::-webkit-scrollbar-thumb {
