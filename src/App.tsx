@@ -439,50 +439,66 @@ function MainApp() {
     // ran moments ago is skipped so one return-to-tab issues one set of requests.
     if (silent && Date.now() - lastSyncAtRef.current < 1500) return;
     lastSyncAtRef.current = Date.now();
-    try {
-      const [meRes, discoverRes, matchesRes, convsRes, callsRes, notifsRes] = await Promise.allSettled([
+
+    // Each request hydrates its own slice as soon as it resolves. Previously all
+    // six were awaited together, so one slow/hung request (a `/server-api` call
+    // pins its full timeout) held back every other slice — the conversation list
+    // in particular, which is what makes Messages look empty after a refresh.
+    // Failures stay isolated per slice and leave existing state in place.
+    const hydrate = <T,>(promise: Promise<T>, apply: (value: T) => void, label: string, onError?: () => void) =>
+      promise
+        .then((value) => {
+          apply(value);
+        })
+        .catch((err) => {
+          console.error(`Failed to load ${label}:`, err);
+          onError?.();
+        });
+
+    const requests = [
+      hydrate(
         api.getMe(),
+        (value) => {
+          if (value && !value.unavailable) {
+            setCurrentUser(value.user);
+            setCurrentProfile(value.profile ? { ...value.profile, is_online: false } : null);
+          }
+        },
+        'current user'
+      ),
+      hydrate(
         api.getDiscoverProfiles(filters),
-        api.getMatches(),
-        api.getConversations(),
-        api.getCallHistory(),
-        api.getNotifications(),
-      ]);
-
-      if (meRes.status === 'fulfilled' && meRes.value) {
-        if (!meRes.value.unavailable) {
-          setCurrentUser(meRes.value.user);
-          setCurrentProfile(meRes.value.profile ? { ...meRes.value.profile, is_online: false } : null);
+        (value) => {
+          if (value?.profiles && value.profiles.length > 0) {
+            setDiscoverProfiles(value.profiles.map((profile) => ({ ...profile, is_online: false })));
+          } else if (!silent) {
+            setDiscoverProfiles(FALLBACK_PROFILES.map((profile) => ({ ...profile, is_online: false })));
+          }
+        },
+        'discover profiles',
+        () => {
+          if (!silent) setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
         }
-      }
+      ),
+      hydrate(api.getMatches(), (value) => {
+        if (value) setMatches(value.matches || []);
+      }, 'matches'),
+      hydrate(api.getConversations(), (value) => {
+        if (value) setConversations(value.conversations || []);
+      }, 'conversations'),
+      hydrate(api.getCallHistory(), (value) => {
+        if (value) setCallHistory(value.calls || []);
+      }, 'call history'),
+      hydrate(api.getNotifications(), (value) => {
+        if (value) setNotifications(value.notifications || []);
+      }, 'notifications'),
+    ];
 
-      if (discoverRes.status === 'fulfilled' && discoverRes.value?.profiles && discoverRes.value.profiles.length > 0) {
-        setDiscoverProfiles(discoverRes.value.profiles.map((profile) => ({ ...profile, is_online: false })));
-      } else if (!silent) {
-        setDiscoverProfiles(FALLBACK_PROFILES.map((profile) => ({ ...profile, is_online: false })));
-      }
+    // Only used to clear the initial loading flag once the batch has settled;
+    // it does not gate any state update above.
+    await Promise.allSettled(requests);
 
-      if (matchesRes.status === 'fulfilled' && matchesRes.value) {
-        setMatches(matchesRes.value.matches || []);
-      }
-
-      if (convsRes.status === 'fulfilled' && convsRes.value) {
-        setConversations(convsRes.value.conversations || []);
-      }
-
-      if (callsRes.status === 'fulfilled' && callsRes.value) {
-        setCallHistory(callsRes.value.calls || []);
-      }
-
-      if (notifsRes.status === 'fulfilled' && notifsRes.value) {
-        setNotifications(notifsRes.value.notifications || []);
-      }
-    } catch (err) {
-      console.error('Failed to load app data:', err);
-      if (!silent) setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
+    if (!silent) setIsLoading(false);
   };
 
   const loadInitialData = () => syncServerState();
