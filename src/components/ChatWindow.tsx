@@ -35,6 +35,7 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { usePresenceFor } from '../services/presence';
 import { getCachedMessageHistory, setCachedMessageHistory } from '../services/messageHistoryCache';
 import { playIncomingMessageSound } from '../utils/messageAlerts';
+import { EmojiPicker } from './EmojiPicker';
 
 function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   const byId = new Map(existing.map((message) => [message.id, message]));
@@ -95,6 +96,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const historyRequestIdRef = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
 
   const otherUser = conversation.other_user;
   const activeUserId = currentUser?.id || 'usr_me_01';
@@ -107,6 +111,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   useEffect(() => {
     activeUserIdRef.current = activeUserId;
   }, [activeUserId]);
+
+  // Never keep an emoji picker open across conversation switches.
+  useEffect(() => {
+    setIsEmojiPickerOpen(false);
+  }, [conversation.id]);
 
   // Load the complete history independently from the chat shell and socket setup.
   // Merge (never replace) so a retry or socket race cannot wipe already-loaded history.
@@ -298,6 +307,23 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         sender_id: activeUserId,
       });
     }, 1500);
+  };
+
+  // 4b. Insert an emoji at the current cursor position (preserves surrounding text)
+  const handleEmojiSelect = (emoji: string) => {
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? inputVal.length;
+    const end = input?.selectionEnd ?? inputVal.length;
+    const nextValue = `${inputVal.slice(0, start)}${emoji}${inputVal.slice(end)}`;
+    const caret = start + emoji.length;
+
+    setInputVal(nextValue);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
   };
 
   // 5. Handle File Selection (Images, Videos, Audio, Documents)
@@ -1036,15 +1062,33 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        {/* Text Input */}
-        <input
-          type="text"
-          value={inputVal}
-          onChange={handleInputChange}
-          placeholder={isPendingConversation ? 'Connecting — you can type, sending unlocks on connect...' : (pendingAttachment ? 'Add a caption (optional)...' : t('typeMessage'))}
-          disabled={isPendingConversation}
-          className="flex-1 basis-40 min-w-[9rem] max-w-full bg-stone-800 border border-stone-700 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition disabled:opacity-60"
-        />
+        {/* Text Input with Emoji Picker (Messenger style) */}
+        <div className="relative flex-1 basis-40 min-w-[9rem] max-w-full flex items-center">
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputVal}
+            onChange={handleInputChange}
+            placeholder={isPendingConversation ? 'Connecting — you can type, sending unlocks on connect...' : (pendingAttachment ? 'Add a caption (optional)...' : t('typeMessage'))}
+            disabled={isPendingConversation}
+            className="w-full bg-stone-800 border border-stone-700 rounded-2xl pl-4 pr-11 py-2.5 text-xs sm:text-sm text-stone-100 placeholder-stone-400 focus:outline-none focus:border-rose-500 transition disabled:opacity-60"
+          />
+          <button
+            ref={emojiButtonRef}
+            type="button"
+            onClick={() => setIsEmojiPickerOpen((open) => !open)}
+            disabled={isPendingConversation}
+            aria-label={isEmojiPickerOpen ? 'Close emoji picker' : 'Open emoji picker'}
+            aria-haspopup="dialog"
+            aria-expanded={isEmojiPickerOpen}
+            title="Emoji"
+            className={`absolute right-1.5 p-1.5 rounded-xl transition active:scale-90 disabled:opacity-40 ${
+              isEmojiPickerOpen ? 'text-rose-400 bg-stone-700/70' : 'text-stone-400 hover:text-rose-400 hover:bg-stone-700/60'
+            }`}
+          >
+            <Smile className="w-4 h-4" />
+          </button>
+        </div>
 
         {/* Send Button */}
         <button
@@ -1063,6 +1107,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           )}
         </button>
       </form>
+
+      {isEmojiPickerOpen && (
+        <EmojiPicker
+          anchorEl={emojiButtonRef.current}
+          onSelect={handleEmojiSelect}
+          onClose={() => setIsEmojiPickerOpen(false)}
+        />
+      )}
 
     </div>
   );
