@@ -34,6 +34,31 @@ html, body {
   max-width: 100%;
 }
 
+/* Messenger-style scrollbar for the chat message thread only.
+   Scoped to the single scrolling element in ChatWindow.tsx — the default UA
+   scrollbar's light track was showing as a vertical strip over the dark panel. */
+.chat-thread-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #fff #000;
+}
+
+.chat-thread-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-thread-scroll::-webkit-scrollbar-track {
+  background: #000;
+}
+
+.chat-thread-scroll::-webkit-scrollbar-thumb {
+  background: #fff;
+  border-radius: 10px;
+}
+
+.chat-thread-scroll::-webkit-scrollbar-thumb:hover {
+  background: #e5e5e5;
+}
+
 /* Safe area padding utilities for mobile notched phones & Android navigation bar */
 .safe-area-pt {
   padding-top: max(env(safe-area-inset-top, 0px), 0px);
