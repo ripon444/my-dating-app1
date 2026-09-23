@@ -256,20 +256,11 @@ export function formatProfileRow(row: any): any {
     approx_distance_km: Number(row.approx_distance_km) || 15,
     bio: row.bio || '',
     cover_photo: row.cover_photo || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1600&q=80',
+    // Never fabricate a profile picture: an account with no uploaded photos
+    // returns an empty list so the UI can show its own placeholder.
     photos: (() => {
       const parsed = typeof row.photos_json === 'string' ? JSON.parse(row.photos_json || '[]') : (Array.isArray(row.photos) ? row.photos : []);
-      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]) {
-        return parsed;
-      }
-      return row.gender === 'FEMALE'
-        ? [
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80',
-            'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=1000&q=80',
-          ]
-        : [
-            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=1000&q=80',
-            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=1000&q=80',
-          ];
+      return Array.isArray(parsed) ? parsed : [];
     })(),
     interests: typeof row.interests_json === 'string' ? JSON.parse(row.interests_json || '[]') : (Array.isArray(row.interests) ? row.interests : []),
     languages: typeof row.languages_json === 'string' ? JSON.parse(row.languages_json || '[]') : (Array.isArray(row.languages) ? row.languages : []),
@@ -815,21 +806,8 @@ app.post('/api/auth/register', async (req, res) => {
       [newUserId, cleanEmail, passwordHash, initialRole, initialTier, now, now]
     );
 
-    const femaleDemoPhotos = [
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=1000&q=80',
-    ];
-    const maleDemoPhotos = [
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=1000&q=80',
-    ];
-    const otherDemoPhotos = [
-      'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=1000&q=80',
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80',
-    ];
-    const assignedPhotos = gender === 'FEMALE' ? femaleDemoPhotos : (gender === 'OTHER' ? otherDemoPhotos : maleDemoPhotos);
+    // New accounts start with NO profile picture. The avatar stays empty until
+    // the member explicitly uploads/selects one; the UI shows initials meanwhile.
     const defaultCover = 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1600&q=80';
 
     const userCountry = (country || 'United States').trim();
@@ -837,7 +815,8 @@ app.post('/api/auth/register', async (req, res) => {
     const baseUsername = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'member';
     const uniqueUsername = `${baseUsername}_${uniqueHex.slice(0, 4)}`;
 
-    // SQL INSERT INTO profiles table with unique username, demo photos and social defaults
+    // SQL INSERT INTO profiles table with unique username; profile picture left empty
+    // until the user uploads one, with social defaults
     await SqlHelper.execute(
       `INSERT INTO profiles (
         id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
@@ -861,7 +840,7 @@ app.post('/api/auth/register', async (req, res) => {
         userCity,
         defaultCover,
         uniqueUsername,
-        JSON.stringify(assignedPhotos),
+        '[]',
         now,
         now,
         now,
@@ -1887,7 +1866,6 @@ app.put('/api/profiles/me', async (req, res) => {
   if (!existingProfile) {
     // Create new profile row for this user if missing
     const newProfileId = `prf_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
-    const defaultPhoto = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
     const fallbackUsername = (name ? name.trim() : user.email.split('@')[0] || 'member').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20);
     await SqlHelper.execute(
       `INSERT INTO profiles (
@@ -1905,7 +1883,7 @@ app.put('/api/profiles/me', async (req, res) => {
         user.id,
         name ? name.trim() : (user.email.split('@')[0] || 'Member'),
         fallbackUsername,
-        JSON.stringify(Array.isArray(photos) && photos.length > 0 ? photos : [defaultPhoto]),
+        JSON.stringify(Array.isArray(photos) ? photos : []),
         now,
         now,
         now,
