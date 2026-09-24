@@ -42,7 +42,9 @@ const GridCardItem: React.FC<{
 
   const isExternal = profile.source_type === 'external';
   const isOnline = usePresenceFor(profile.user_id || profile.id);
-  const photo = profile.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
+  // Never fabricate a profile picture. A member with no uploaded photo keeps an
+  // empty src so the card below renders its own no-photo (initials) state.
+  const photo = profile.photos?.[0] || '';
 
   const handleFollowToggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -102,15 +104,24 @@ const GridCardItem: React.FC<{
         onClick={() => onViewDetails(profile)}
         title="Click to view full profile"
       >
-        <img
-          src={photo}
-          alt={profile.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-          referrerPolicy="no-referrer"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
-          }}
-        />
+        {photo ? (
+          <img
+            src={photo}
+            alt={profile.name}
+            className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              // Hide the broken image instead of substituting a demo picture URL.
+              (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+            }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-tr from-rose-600/25 via-stone-900 to-stone-950">
+            <span className="w-20 h-20 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-3xl shadow-lg shadow-rose-950/40">
+              {(profile.name || '?').charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-stone-950 via-stone-950/20 to-transparent" />
 
         {/* Source & Compatibility Badges */}

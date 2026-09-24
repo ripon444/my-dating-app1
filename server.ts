@@ -806,17 +806,17 @@ app.post('/api/auth/register', async (req, res) => {
       [newUserId, cleanEmail, passwordHash, initialRole, initialTier, now, now]
     );
 
-    // New accounts start with NO profile picture. The avatar stays empty until
-    // the member explicitly uploads/selects one; the UI shows initials meanwhile.
-    const defaultCover = 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1600&q=80';
-
+    // New accounts start with NO profile picture and NO default cover image.
+    // Both stay empty until the member explicitly uploads/selects one; the UI
+    // shows initials meanwhile. Never auto-assign a demo/fallback image URL here.
     const userCountry = (country || 'United States').trim();
     const userCity = (city || 'New York').trim();
     const baseUsername = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'member';
     const uniqueUsername = `${baseUsername}_${uniqueHex.slice(0, 4)}`;
 
-    // SQL INSERT INTO profiles table with unique username; profile picture left empty
-    // until the user uploads one, with social defaults
+    // SQL INSERT INTO profiles table with unique username. Both the profile
+    // picture list and the cover photo stay empty until the user uploads their
+    // own images — no demo/fallback image URL is ever auto-assigned.
     await SqlHelper.execute(
       `INSERT INTO profiles (
         id, user_id, source_type, name, age, date_of_birth, gender, country, city, region,
@@ -838,7 +838,7 @@ app.post('/api/auth/register', async (req, res) => {
         gender || 'MALE',
         userCountry,
         userCity,
-        defaultCover,
+        '',
         uniqueUsername,
         '[]',
         now,

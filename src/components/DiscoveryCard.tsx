@@ -48,17 +48,19 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
   const [followersCount, setFollowersCount] = useState(profile.followers_count ?? 0);
   const [followLoading, setFollowLoading] = useState(false);
 
-  const photos = profile.photos && profile.photos.length > 0
-    ? profile.photos
-    : ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'];
+  // Never fabricate a profile picture. A member with no uploaded photo keeps an
+  // empty list so the card below renders its own no-photo (initials) state.
+  const photos = profile.photos && profile.photos.length > 0 ? profile.photos : [];
 
   const nextPhoto = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (photos.length === 0) return;
     setPhotoIndex((prev) => (prev + 1) % photos.length);
   };
 
   const prevPhoto = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (photos.length === 0) return;
     setPhotoIndex((prev) => (prev - 1 + photos.length) % photos.length);
   };
 
@@ -109,17 +111,30 @@ export const DiscoveryCard: React.FC<DiscoveryCardProps> = ({
     >
       {/* Background Image Carousel */}
       <div className="absolute inset-0 z-0 bg-stone-950">
-        <img
-          src={photos[photoIndex] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-          alt={profile.name}
-          className="w-full h-full object-cover cursor-pointer"
-          referrerPolicy="no-referrer"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
-          }}
-          onClick={() => onViewDetails(profile)}
-          title="Click to view full profile"
-        />
+        {photos.length > 0 ? (
+          <img
+            src={photos[photoIndex]}
+            alt={profile.name}
+            className="w-full h-full object-cover cursor-pointer"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              // Hide the broken image instead of substituting a demo picture URL.
+              (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+            }}
+            onClick={() => onViewDetails(profile)}
+            title="Click to view full profile"
+          />
+        ) : (
+          <div
+            className="w-full h-full flex items-center justify-center bg-gradient-to-tr from-rose-600/25 via-stone-900 to-stone-950 cursor-pointer"
+            onClick={() => onViewDetails(profile)}
+            title="Click to view full profile"
+          >
+            <span className="w-24 h-24 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-4xl shadow-xl shadow-rose-950/40">
+              {(profile.name || '?').charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
         
         {/* Soft Multi-Stop Gradient Overlays for optimal readability */}
         <div 
