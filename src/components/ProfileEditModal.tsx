@@ -409,7 +409,8 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = PRESET_COVERS[0];
+                        // Hide the broken image instead of substituting a preset/demo cover.
+                        (e.target as HTMLImageElement).style.visibility = 'hidden';
                       }}
                     />
                     <div className="absolute inset-0 bg-black/40 group-hover:bg-black/60 transition flex flex-col items-center justify-center gap-1.5 opacity-90 group-hover:opacity-100">
@@ -508,7 +509,8 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                       className="w-full h-full object-cover" 
                       referrerPolicy="no-referrer"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=800';
+                        // Hide the broken image instead of substituting a demo picture URL.
+                        (e.target as HTMLImageElement).style.visibility = 'hidden';
                       }}
                     />
 

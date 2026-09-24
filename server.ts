@@ -255,7 +255,10 @@ export function formatProfileRow(row: any): any {
     region: row.region,
     approx_distance_km: Number(row.approx_distance_km) || 15,
     bio: row.bio || '',
-    cover_photo: row.cover_photo || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1600&q=80',
+    // Never fabricate imagery: an account with no uploaded cover/banner returns
+    // an empty string so the UI shows its own neutral state (same rule as the
+    // profile picture list below).
+    cover_photo: row.cover_photo || '',
     // Never fabricate a profile picture: an account with no uploaded photos
     // returns an empty list so the UI can show its own placeholder.
     photos: (() => {

@@ -365,7 +365,10 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     }
   };
 
-  const primaryPhoto = currentProfile?.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+  // Never fabricate a profile picture. An account with no uploaded photo keeps
+  // this empty so the avatar below renders a neutral initials state instead of
+  // an automatic demo/default image.
+  const primaryPhoto = currentProfile?.photos?.[0] || '';
   const userName = currentProfile?.name || currentUser?.email?.split('@')[0] || 'My Profile';
   const userAge = currentProfile?.age;
   const userCity = currentProfile?.city || currentProfile?.country;
@@ -388,12 +391,18 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
           {/* Avatar with Status Ring */}
           <div className="relative shrink-0 group">
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-3 border-rose-500/80 shadow-lg shadow-rose-950/40 p-0.5 bg-stone-950">
-              <img
-                src={primaryPhoto}
-                alt={userName}
-                className="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300"
-                referrerPolicy="no-referrer"
-              />
+              {primaryPhoto ? (
+                <img
+                  src={primaryPhoto}
+                  alt={userName}
+                  className="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-3xl sm:text-4xl select-none">
+                  {(userName || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
             {isVip && (
               <div 

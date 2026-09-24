@@ -171,12 +171,18 @@ export const ShareProfileModal: React.FC<ShareProfileModalProps> = ({
           <div className="p-6 space-y-5">
             {/* Profile Preview Pill */}
             <div className="flex items-center gap-3 p-3 rounded-2xl bg-neutral-950/70 border border-neutral-800/80">
-              <img
-                src={profile.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
-                alt={profile.name}
-                referrerPolicy="no-referrer"
-                className="w-12 h-12 rounded-xl object-cover border border-neutral-700"
-              />
+              {profile.photos?.[0] ? (
+                <img
+                  src={profile.photos[0]}
+                  alt={profile.name}
+                  referrerPolicy="no-referrer"
+                  className="w-12 h-12 rounded-xl object-cover border border-neutral-700"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-rose-600 to-pink-600 border border-neutral-700 flex items-center justify-center text-white font-bold text-lg select-none">
+                  {(profile.name || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-white text-sm truncate">{profile.name}</span>

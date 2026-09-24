@@ -757,12 +757,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
                       <tr key={prof.id} className="hover:bg-stone-800/40 transition">
                         <td className="p-3.5">
                           <div className="flex items-center gap-3">
-                            <img
-                              src={prof.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
-                              alt={prof.name}
-                              className="w-10 h-10 rounded-xl object-cover border border-stone-700 shrink-0"
-                              referrerPolicy="no-referrer"
-                            />
+                            {prof.photos?.[0] ? (
+                              <img
+                                src={prof.photos[0]}
+                                alt={prof.name}
+                                className="w-10 h-10 rounded-xl object-cover border border-stone-700 shrink-0"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 to-pink-600 border border-stone-700 shrink-0 flex items-center justify-center text-white font-bold text-base select-none">
+                                {(prof.name || '?').charAt(0).toUpperCase()}
+                              </div>
+                            )}
                             <div>
                               <div className="font-bold text-white flex items-center gap-1.5">
                                 <span>{prof.name}</span>

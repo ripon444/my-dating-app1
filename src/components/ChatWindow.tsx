@@ -502,12 +502,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             className="flex items-center gap-3 cursor-pointer group min-w-0"
           >
             <div className="relative shrink-0">
-              <img
-                src={otherUser.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-                alt={otherUser.name}
-                className="w-10 h-10 rounded-full object-cover border border-rose-500/30 group-hover:border-rose-500 transition"
-                referrerPolicy="no-referrer"
-              />
+              {otherUser.photos?.[0] ? (
+                <img
+                  src={otherUser.photos[0]}
+                  alt={otherUser.name}
+                  className="w-10 h-10 rounded-full object-cover border border-rose-500/30 group-hover:border-rose-500 transition"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 border border-rose-500/30 flex items-center justify-center text-white font-bold text-base select-none">
+                  {(otherUser.name || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
               {isOtherUserOnline && (
                 <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
               )}
@@ -668,12 +674,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         {/* Facebook Messenger Profile Header Card */}
         <div className="pt-3 pb-5 flex flex-col items-center justify-center text-center border-b border-stone-800/80 mb-2">
           <div className="relative mb-3">
-            <img
-              src={otherUser.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-              alt={otherUser.name}
-              className="w-20 h-20 rounded-full object-cover border-2 border-stone-700 shadow-xl"
-              referrerPolicy="no-referrer"
-            />
+            {otherUser.photos?.[0] ? (
+              <img
+                src={otherUser.photos[0]}
+                alt={otherUser.name}
+                className="w-20 h-20 rounded-full object-cover border-2 border-stone-700 shadow-xl"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 border-2 border-stone-700 shadow-xl flex items-center justify-center text-white font-bold text-3xl select-none">
+                {(otherUser.name || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
             {isOtherUserOnline && (
               <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-stone-900 shadow" />
             )}

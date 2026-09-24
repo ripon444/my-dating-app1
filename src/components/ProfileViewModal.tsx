@@ -85,14 +85,20 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
     }
   };
 
-  const photos = profile.photos && profile.photos.length > 0
-    ? profile.photos
-    : ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'];
+  // Never fabricate a profile picture. A member with no uploaded photo keeps an
+  // empty list so the modal renders a neutral no-photo (initials) state.
+  const photos = profile.photos && profile.photos.length > 0 ? profile.photos : [];
 
   const isExternal = profile.source_type === 'external';
 
-  const nextPhoto = () => setPhotoIndex((prev) => (prev + 1) % photos.length);
-  const prevPhoto = () => setPhotoIndex((prev) => (prev - 1 + photos.length) % photos.length);
+  const nextPhoto = () => {
+    if (photos.length === 0) return;
+    setPhotoIndex((prev) => (prev + 1) % photos.length);
+  };
+  const prevPhoto = () => {
+    if (photos.length === 0) return;
+    setPhotoIndex((prev) => (prev - 1 + photos.length) % photos.length);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
@@ -100,12 +106,20 @@ export const ProfileViewModal: React.FC<ProfileViewModalProps> = ({
         
         {/* Modal Top Header with Close */}
         <div className="relative h-56 sm:h-96 w-full shrink-0 bg-stone-950 select-none">
-          <img
-            src={photos[photoIndex]}
-            alt={profile.name}
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
+          {photos.length > 0 ? (
+            <img
+              src={photos[photoIndex]}
+              alt={profile.name}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-rose-600/25 via-stone-900 to-stone-950">
+              <span className="w-24 h-24 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-4xl shadow-xl shadow-rose-950/40 select-none">
+                {(profile.name || '?').charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-stone-900 via-transparent to-black/40" />
 
           {/* Close Button */}

@@ -69,12 +69,18 @@ export const MatchModal: React.FC<MatchModalProps> = ({
         <div className="relative flex items-center justify-center gap-4 my-8">
           {/* User Photo */}
           <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-rose-500 shadow-xl bg-stone-800">
-            <img
-              src={currentUserProfile?.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-              alt={currentUserProfile?.name || 'You'}
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
+            {currentUserProfile?.photos?.[0] ? (
+              <img
+                src={currentUserProfile.photos[0]}
+                alt={currentUserProfile?.name || 'You'}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-4xl select-none">
+                {(currentUserProfile?.name || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
           </div>
 
           {/* Center Heart Icon */}
@@ -84,12 +90,18 @@ export const MatchModal: React.FC<MatchModalProps> = ({
 
           {/* Matched Profile Photo */}
           <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-pink-500 shadow-xl bg-stone-800">
-            <img
-              src={matchedProfile.photos?.[0] || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=1000&q=80'}
-              alt={matchedProfile.name}
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
+            {matchedProfile.photos?.[0] ? (
+              <img
+                src={matchedProfile.photos[0]}
+                alt={matchedProfile.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-4xl select-none">
+                {(matchedProfile.name || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
           </div>
         </div>
 

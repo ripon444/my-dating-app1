@@ -447,12 +447,11 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     );
   }
 
-  const defaultCover =
-    profile.cover_photo ||
-    'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1600&q=80';
-  const avatarPhoto =
-    profile.photos?.[0] ||
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+  // Never fabricate imagery. Without an uploaded cover/avatar these stay empty
+  // so the UI renders its own neutral banner / initials avatar instead of an
+  // automatic demo or fallback image.
+  const defaultCover = profile.cover_photo || '';
+  const avatarPhoto = profile.photos?.[0] || '';
 
   return (
     <div id="facebook-style-public-profile" className="w-full max-w-5xl mx-auto pb-20 px-1 sm:px-4 md:px-6">
@@ -564,13 +563,20 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
       <div className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl relative mb-4 sm:mb-6">
         {/* Cover Photo Banner */}
         <div className="relative h-44 sm:h-64 md:h-80 w-full overflow-hidden bg-neutral-950">
-          <img
-            id="profile-cover-photo"
-            src={defaultCover}
-            alt="Cover"
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-cover"
-          />
+          {defaultCover ? (
+            <img
+              id="profile-cover-photo"
+              src={defaultCover}
+              alt="Cover"
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div
+              id="profile-cover-photo"
+              className="w-full h-full bg-gradient-to-br from-rose-600/20 via-neutral-900 to-neutral-950"
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-transparent to-black/30" />
 
           {/* Edit Cover Photo Button (Owner only) */}
@@ -595,14 +601,23 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
             {/* Avatar & Online status */}
             <div className="flex flex-col md:flex-row items-center md:items-end gap-5 text-center md:text-left">
               <div className="relative group">
-                <img
-                  id="profile-avatar-photo"
-                  src={avatarPhoto}
-                  alt={profile.name}
-                  referrerPolicy="no-referrer"
-                  onClick={() => setLightboxPhoto(avatarPhoto)}
-                  className="w-32 h-32 md:w-40 md:h-40 rounded-full object-cover border-4 border-neutral-900 shadow-2xl ring-2 ring-neutral-700 cursor-pointer group-hover:opacity-90 transition-opacity"
-                />
+                {avatarPhoto ? (
+                  <img
+                    id="profile-avatar-photo"
+                    src={avatarPhoto}
+                    alt={profile.name}
+                    referrerPolicy="no-referrer"
+                    onClick={() => setLightboxPhoto(avatarPhoto)}
+                    className="w-32 h-32 md:w-40 md:h-40 rounded-full object-cover border-4 border-neutral-900 shadow-2xl ring-2 ring-neutral-700 cursor-pointer group-hover:opacity-90 transition-opacity"
+                  />
+                ) : (
+                  <div
+                    id="profile-avatar-photo"
+                    className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-neutral-900 shadow-2xl ring-2 ring-neutral-700 bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-5xl select-none"
+                  >
+                    {(profile.name || '?').charAt(0).toUpperCase()}
+                  </div>
+                )}
                 {isProfileOnline && (
                   <span
                     title="Online now"
@@ -1115,12 +1130,18 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                     onClick={() => onNavigateProfile?.(item.profile || item.userId)}
                     className="p-4 bg-neutral-950 border border-neutral-800 hover:border-rose-500/50 rounded-2xl cursor-pointer flex items-center gap-3 transition-colors group"
                   >
-                    <img
-                      src={item.profile?.photos?.[0] || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80'}
-                      alt={item.profile?.name}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
-                    />
+                    {item.profile?.photos?.[0] ? (
+                      <img
+                        src={item.profile.photos[0]}
+                        alt={item.profile?.name}
+                        referrerPolicy="no-referrer"
+                        className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 shrink-0 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-lg select-none">
+                        {(item.profile?.name || '?').charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div className="min-w-0 flex-1">
                       <h4 className="text-sm font-bold text-white group-hover:text-rose-400 truncate">
                         {item.profile?.name || 'Registered User'}
@@ -1162,12 +1183,18 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                     onClick={() => onNavigateProfile?.(item.profile || item.userId)}
                     className="p-4 bg-neutral-950 border border-neutral-800 hover:border-rose-500/50 rounded-2xl cursor-pointer flex items-center gap-3 transition-colors group"
                   >
-                    <img
-                      src={item.profile?.photos?.[0] || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80'}
-                      alt={item.profile?.name}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
-                    />
+                    {item.profile?.photos?.[0] ? (
+                      <img
+                        src={item.profile.photos[0]}
+                        alt={item.profile?.name}
+                        referrerPolicy="no-referrer"
+                        className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 shrink-0 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-lg select-none">
+                        {(item.profile?.name || '?').charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div className="min-w-0 flex-1">
                       <h4 className="text-sm font-bold text-white group-hover:text-rose-400 truncate">
                         {item.profile?.name || 'Registered User'}

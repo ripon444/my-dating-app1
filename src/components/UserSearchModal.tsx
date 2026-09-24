@@ -140,7 +140,9 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
             </div>
           ) : (
             results.map((user) => {
-              const photo = user.photos?.[0] || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80';
+              // Never fabricate a profile picture: an account with no uploaded photo keeps
+              // this empty so a neutral initials avatar renders instead.
+              const photo = user.photos?.[0] || '';
               const isSelf = currentUserId === user.user_id;
 
               return (
@@ -154,12 +156,18 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
                     <div className="relative shrink-0">
-                      <img
-                        src={photo}
-                        alt={user.name}
-                        referrerPolicy="no-referrer"
-                        className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
-                      />
+                      {photo ? (
+                        <img
+                          src={photo}
+                          alt={user.name}
+                          referrerPolicy="no-referrer"
+                          className="w-12 h-12 rounded-full object-cover border border-neutral-700 group-hover:border-rose-500"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-lg select-none">
+                          {(user.name || '?').charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       {presence[user.user_id || user.id] && (
                         <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950" />
                       )}

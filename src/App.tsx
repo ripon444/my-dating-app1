@@ -1742,12 +1742,18 @@ function MainApp() {
                           onClick={() => handleOpenPublicProfile(prof)}
                         >
                           <div className="relative">
-                            <img
-                              src={prof.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-                              alt={prof.name}
-                              className="w-14 h-14 rounded-2xl object-cover border-2 border-rose-500/40 group-hover:border-rose-500 transition"
-                              referrerPolicy="no-referrer"
-                            />
+                            {prof.photos?.[0] ? (
+                              <img
+                                src={prof.photos[0]}
+                                alt={prof.name}
+                                className="w-14 h-14 rounded-2xl object-cover border-2 border-rose-500/40 group-hover:border-rose-500 transition"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-600 border-2 border-rose-500/40 flex items-center justify-center text-white font-bold text-xl select-none">
+                                {(prof.name || '?').charAt(0).toUpperCase()}
+                              </div>
+                            )}
                             {presence[prof.user_id || prof.id] && (
                               <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-stone-900" />
                             )}
@@ -1877,12 +1883,18 @@ function MainApp() {
                             }`}
                           >
                             <div className="relative shrink-0">
-                              <img
-                                src={other.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-                                alt={other.name}
-                                className="w-12 h-12 rounded-full object-cover border border-rose-500/30"
-                                referrerPolicy="no-referrer"
-                              />
+                              {other.photos?.[0] ? (
+                                <img
+                                  src={other.photos[0]}
+                                  alt={other.name}
+                                  className="w-12 h-12 rounded-full object-cover border border-rose-500/30"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 border border-rose-500/30 flex items-center justify-center text-white font-bold text-lg select-none">
+                                  {(other.name || '?').charAt(0).toUpperCase()}
+                                </div>
+                              )}
                               {presence[other.user_id || other.id] && (
                                 <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-stone-900" />
                               )}
@@ -1937,12 +1949,18 @@ function MainApp() {
                               className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
                             >
                               <div className="relative shrink-0">
-                                <img
-                                  src={otherProf?.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-                                  alt={otherProf?.name || 'Member'}
-                                  className="w-10 h-10 rounded-full object-cover border border-stone-700"
-                                  referrerPolicy="no-referrer"
-                                />
+                                {otherProf?.photos?.[0] ? (
+                                  <img
+                                    src={otherProf.photos[0]}
+                                    alt={otherProf?.name || 'Member'}
+                                    className="w-10 h-10 rounded-full object-cover border border-stone-700"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-rose-600 to-pink-600 border border-stone-700 flex items-center justify-center text-white font-bold text-base select-none">
+                                    {(otherProf?.name || '?').charAt(0).toUpperCase()}
+                                  </div>
+                                )}
                                 <span className={`absolute bottom-0 right-0 p-0.5 rounded-full ${isVideo ? 'bg-rose-500' : 'bg-emerald-500'} text-white`}>
                                   {isVideo ? <Video className="w-2.5 h-2.5" /> : <Phone className="w-2.5 h-2.5" />}
                                 </span>

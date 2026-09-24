@@ -118,7 +118,9 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
 
   const caller = call.caller_profile || {
     name: 'Lovemeetly Member',
-    photos: ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'],
+    // Never fabricate a profile picture: no photo means an empty list, so the
+    // avatar below renders a neutral initials state instead of a demo image.
+    photos: [],
     city: 'New York',
     country: 'United States',
   };
@@ -177,7 +179,8 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
       {/* Blurred Ambient Background from Caller Photo */}
       <div 
         className="absolute inset-0 bg-cover bg-center opacity-20 filter blur-3xl scale-125 pointer-events-none"
-        style={{ backgroundImage: `url(${caller.photos?.[0] || ''})` }}
+        // Only paint the ambient backdrop when a real photo exists — never a demo image.
+        style={{ backgroundImage: caller.photos?.[0] ? `url(${caller.photos[0]})` : 'none' }}
       />
 
       <div className="relative z-10 bg-stone-900/90 border border-stone-800 w-full max-w-sm rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden">
@@ -191,12 +194,18 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
         {/* Caller Avatar with WhatsApp/FB Ringing Ripples */}
         <div className="relative mb-6">
           <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full overflow-hidden border-4 border-rose-500 shadow-2xl relative z-10 bg-stone-800">
-            <img
-              src={caller.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80'}
-              alt={caller.name}
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
+            {caller.photos?.[0] ? (
+              <img
+                src={caller.photos[0]}
+                alt={caller.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-5xl select-none">
+                {(caller.name || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
           </div>
           <div className="absolute -inset-3 rounded-full border-2 border-rose-500/60 animate-ping pointer-events-none" />
           <div className="absolute -inset-6 rounded-full border border-rose-500/30 animate-pulse pointer-events-none" />

@@ -102,7 +102,9 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
   const isCaller = call.caller_id === myUserId;
   const otherUserId = isCaller ? call.receiver_id : call.caller_id;
   const otherProfile = isCaller ? call.receiver_profile : call.caller_profile;
-  const targetPhoto = otherProfile?.photos?.[0] || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=1000&q=80';
+  // Never fabricate a profile picture: an account with no uploaded photo keeps
+  // this empty so a neutral initials avatar renders instead.
+  const targetPhoto = otherProfile?.photos?.[0] || '';
   const targetName = otherProfile?.name || 'Partner';
 
   // Call & UI states
@@ -896,12 +898,18 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
         <div className="flex items-center gap-3">
           <div className="relative">
             <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden border-2 border-emerald-500 bg-stone-800 shadow-md">
-              <img
-                src={targetPhoto}
-                alt={targetName}
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
+              {targetPhoto ? (
+                <img
+                  src={targetPhoto}
+                  alt={targetName}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-lg select-none">
+                  {(targetName || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
             {callState === 'connected' && (
               <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-stone-950 rounded-full" />
@@ -995,12 +1003,18 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
 
                   <div className="relative mb-5">
                     <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full overflow-hidden border-4 border-rose-500/80 shadow-2xl bg-stone-800">
-                      <img
-                        src={targetPhoto}
-                        alt={targetName}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
+                      {targetPhoto ? (
+                        <img
+                          src={targetPhoto}
+                          alt={targetName}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-5xl select-none">
+                          {(targetName || '?').charAt(0).toUpperCase()}
+                        </div>
+                      )}
                     </div>
                     {callState === 'connected' && (
                       <>
@@ -1084,12 +1098,18 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
             
             <div className="relative">
               <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-rose-500 shadow-2xl">
-                <img
-                  src={targetPhoto}
-                  alt={targetName}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
+                {targetPhoto ? (
+                  <img
+                    src={targetPhoto}
+                    alt={targetName}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-tr from-rose-600 to-pink-600 flex items-center justify-center text-white font-bold text-5xl select-none">
+                    {(targetName || '?').charAt(0).toUpperCase()}
+                  </div>
+                )}
               </div>
               {callState === 'connected' && (
                 <>
