@@ -18,3 +18,5 @@ server.cjs.map
 # Generated frontend assets
 assets/index-*.js
 assets/index-*.css
+assets/index.esm-*.js
+assets/web-*.js
