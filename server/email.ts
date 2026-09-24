@@ -1,11 +1,50 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 
-// SMTP Configuration
-const smtpHost = process.env.SMTP_HOST || 'smtp-prod.mailrcld.com';
-const smtpPort = Number(process.env.SMTP_PORT) || 587;
-const smtpUser = process.env.SMTP_USER || 'tanvirahmadkst@gmail.com';
-const smtpPass = process.env.SMTP_PASS || '78c303f694908d72536674ff97a2ab95';
+// -----------------------------------------------------------------------------
+// SMTP Configuration (environment variables only — no credentials in source)
+// -----------------------------------------------------------------------------
+// Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS.
+// Optional: SMTP_FROM (sender identity/display address, never a credential).
+// Production values are supplied by the hosting environment; this file carries no
+// host, username, or password fallbacks.
+const REQUIRED_SMTP_ENV_VARS = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'] as const;
+
 const smtpFrom = process.env.SMTP_FROM || '"Lovemeetly Security" <support@lovemeetly.com>';
+
+interface SmtpConnectionConfig {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+}
+
+// Reads the SMTP connection settings from the environment. If required variables
+// are missing the thrown error names only the missing variable NAMES (never any
+// value) so misconfiguration fails loudly instead of silently degrading.
+function readSmtpConnectionConfig(): SmtpConnectionConfig {
+  const missing = REQUIRED_SMTP_ENV_VARS.filter((name) => !(process.env[name] || '').trim());
+  if (missing.length > 0) {
+    throw new Error(
+      `SMTP configuration error: missing required environment variable(s): ${missing.join(', ')}. ` +
+        'Provide them through the hosting environment (never in source code) and restart the server.'
+    );
+  }
+
+  const port = Number((process.env.SMTP_PORT || '').trim());
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(
+      'SMTP configuration error: SMTP_PORT must be a valid TCP port (use 587 for STARTTLS or 465 for implicit TLS).'
+    );
+  }
+
+  return {
+    host: (process.env.SMTP_HOST || '').trim(),
+    port,
+    user: (process.env.SMTP_USER || '').trim(),
+    // Passwords are used verbatim (never trimmed) so intentional characters survive.
+    pass: process.env.SMTP_PASS || '',
+  };
+}
 
 // Base Public URL for assets (Logo must be an absolute HTTPS URL)
 const getAppBaseUrl = (): string => {
@@ -17,18 +56,19 @@ let transporter: Transporter | null = null;
 
 export function getEmailTransporter(): Transporter {
   if (!transporter) {
-    const isPort465 = smtpPort === 465;
+    const { host, port, user, pass } = readSmtpConnectionConfig();
+    // Port 465 uses implicit TLS. Any other port (587/25) starts plaintext and must
+    // be upgraded through STARTTLS, which requireTLS enforces. Certificate
+    // validation is left at the Node/nodemailer default (no TLS downgrade override).
+    const isImplicitTlsPort = port === 465;
     transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: isPort465, // false for 587 / STARTTLS
-      requireTLS: !isPort465, // Enforces STARTTLS on port 587
+      host,
+      port,
+      secure: isImplicitTlsPort, // true for 465 / implicit TLS
+      requireTLS: !isImplicitTlsPort, // true and enforced for 587 / STARTTLS
       auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-      tls: {
-        rejectUnauthorized: false,
+        user,
+        pass,
       },
     });
   }
