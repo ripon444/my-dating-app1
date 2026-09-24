@@ -526,6 +526,94 @@ export async function sendNotificationEmail(
   }
 }
 
+// -----------------------------------------------------------------------------
+// Transactional Template 5: In-App Support Request (Help & Support form)
+// -----------------------------------------------------------------------------
+export const SUPPORT_INBOX_EMAIL = process.env.SUPPORT_INBOX_EMAIL || 'support@lovemeetly.com';
+
+export interface SupportRequestEmailParams {
+  categoryLabel: string;
+  subjectLabel: string;
+  description: string;
+  accountEmail?: string | null;
+  accountName?: string | null;
+  userId?: string | null;
+  requestId?: string | null;
+}
+
+export async function sendSupportRequestEmail(params: SupportRequestEmailParams): Promise<SendMailResult> {
+  const mailer = getEmailTransporter();
+  const cleanEmail = (params.accountEmail || '').trim().toLowerCase();
+  const displayName = (params.accountName || '').trim() || 'Lovemeetly Member';
+  const referenceId = (params.requestId || '').trim();
+  const submittedAt = new Date().toUTCString();
+  const subject = `Lovemeetly Support - ${params.subjectLabel}`;
+
+  const detailRow = (label: string, value: string): string => `
+    <tr>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #2c2438; font-size: 12px; color: #8b8398; text-transform: uppercase; letter-spacing: 0.5px; width: 38%;">${escapeHtml(label)}</td>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #2c2438; font-size: 13px; color: #ffffff; word-break: break-word;">${escapeHtml(value)}</td>
+    </tr>`;
+
+  const contentHtml = `
+    <p style="margin: 0 0 16px 0; font-size: 15px; color: #e2e0e6; line-height: 1.6;">
+      A member has submitted a new support request through the in-app Help &amp; Support form.
+    </p>
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #201a2d; border-radius: 12px; margin: 18px 0; border: 1px solid #2c2438;">
+      ${detailRow('Category', params.categoryLabel)}
+      ${detailRow('Member Email', cleanEmail || 'Not provided')}
+      ${detailRow('Member Name', displayName)}
+      ${detailRow('User ID', (params.userId || '').trim() || 'Not signed in')}
+      ${detailRow('Reference ID', referenceId || 'Not assigned')}
+      ${detailRow('Submitted At', submittedAt)}
+    </table>
+    <div style="background-color: #201a2d; border-left: 3px solid #0ea5e9; border-radius: 0 12px 12px 0; padding: 18px 20px; margin: 20px 0; font-size: 14px; color: #d4cde0; line-height: 1.6;">
+      <div style="font-size: 12px; font-weight: 700; color: #ffffff; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Problem Description</div>
+      ${escapeHtml(params.description).replace(/\r?\n/g, '<br />')}
+    </div>
+    <p style="margin: 0; font-size: 13px; color: #b3acc0; line-height: 1.6;">
+      Reply directly to this email to continue the conversation with the member at
+      <strong style="color: #ffffff;">${escapeHtml(cleanEmail || 'their registered address')}</strong>.
+    </p>
+  `;
+
+  const html = buildLovemeetlyEmailHtml({
+    subject,
+    preheader: `${params.categoryLabel} - support request from ${cleanEmail || displayName}`,
+    badgeText: 'SUPPORT REQUEST',
+    heading: 'New Support Request',
+    subheading: `Category: ${params.categoryLabel}`,
+    contentHtml,
+    footerNote: referenceId ? `Reference ID: ${referenceId}` : undefined,
+  });
+
+  try {
+    const info = await mailer.sendMail({
+      from: smtpFrom,
+      to: SUPPORT_INBOX_EMAIL,
+      replyTo: cleanEmail || undefined,
+      subject,
+      text: [
+        'New Lovemeetly support request',
+        '',
+        `Category: ${params.categoryLabel}`,
+        `Member Email: ${cleanEmail || 'Not provided'}`,
+        `Member Name: ${displayName}`,
+        `User ID: ${(params.userId || '').trim() || 'Not signed in'}`,
+        `Reference ID: ${referenceId || 'Not assigned'}`,
+        `Submitted At: ${submittedAt}`,
+        '',
+        'Problem Description:',
+        params.description,
+      ].join('\n'),
+      html,
+    });
+    return { success: true, messageId: info.messageId };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+}
+
 // Helper utility to prevent HTML injection in emails
 function escapeHtml(text: string): string {
   if (!text) return '';

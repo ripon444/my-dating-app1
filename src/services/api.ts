@@ -759,6 +759,20 @@ export const api = {
     return res.json();
   },
 
+  // Help & Support (in-app support request form)
+  async submitSupportRequest(data: {
+    category: string;
+    description: string;
+    accountEmail?: string | null;
+  }): Promise<{ success: boolean; message?: string; requestId?: string }> {
+    const res = await authFetch('/api/support/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return safeJson(res, 'Support request could not be sent. Please try again.');
+  },
+
   // External Providers
   async getProviders(): Promise<{ providers: ExternalProvider[] }> {
     const res = await authFetch('/api/external/providers');

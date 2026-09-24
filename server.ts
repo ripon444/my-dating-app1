@@ -26,7 +26,7 @@ import { seedPostgresIfEmpty } from './src/db/seed.ts';
 import { initializePostgresTables } from './src/db/migrate.ts';
 import { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite } from './src/db/sync.ts';
 export { syncSqliteWithPostgres, syncSingleUser, syncPostgresToSqlite };
-import { sendPasswordResetEmail, sendWelcomeEmail } from './server/email.ts';
+import { sendPasswordResetEmail, sendWelcomeEmail, sendSupportRequestEmail, SUPPORT_INBOX_EMAIL } from './server/email.ts';
 import {
   getNowPaymentsConfig,
   saveNowPaymentsConfig,
@@ -4896,6 +4896,77 @@ app.post('/api/admin/moderation/:id/action', requireAdmin, async (req, res) => {
     ['ACTION_TAKEN', `Action: ${action}. ${notes || ''}`, now, req.params.id]
   );
   res.json({ success: true });
+});
+
+// 10b. Help & Support — in-app support request form
+// Category ids are resolved to their display labels on the server so only known
+// categories are accepted, and the request is delivered to the Lovemeetly
+// support inbox through the existing Nodemailer transport (server/email.ts).
+const SUPPORT_REQUEST_CATEGORIES: Record<string, { label: string; subjectLabel: string }> = {
+  account: { label: 'Account / ID Issue', subjectLabel: 'Account/ID Issue' },
+  login: { label: 'Login Issue', subjectLabel: 'Login Issue' },
+  password: { label: 'Password / Account Access Issue', subjectLabel: 'Password Issue' },
+  payment: { label: 'Payment Issue', subjectLabel: 'Payment Issue' },
+  subscription: { label: 'Subscription / VIP Issue', subjectLabel: 'Subscription/VIP Issue' },
+  profile: { label: 'Profile Issue', subjectLabel: 'Profile Issue' },
+  technical: { label: 'Technical Issue', subjectLabel: 'Technical Issue' },
+  other: { label: 'Other', subjectLabel: 'General Inquiry' },
+};
+
+app.post('/api/support/request', async (req, res) => {
+  try {
+    const sessionUser = (req as any).user;
+    const body = req.body || {};
+    const categoryId = typeof body.category === 'string' ? body.category.trim() : '';
+    const category = SUPPORT_REQUEST_CATEGORIES[categoryId];
+
+    if (!category) {
+      return res.status(400).json({ error: 'Please select a valid problem category.' });
+    }
+
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    if (description.length < 10) {
+      return res.status(400).json({ error: 'Please describe your problem in at least 10 characters.' });
+    }
+    if (description.length > 2000) {
+      return res.status(400).json({ error: 'Please keep the description under 2000 characters.' });
+    }
+
+    // The signed-in session email always wins; the submitted email is only a
+    // fallback so a member can never file a request as someone else.
+    const submittedEmail = typeof body.accountEmail === 'string' ? body.accountEmail.trim().toLowerCase() : '';
+    const accountEmail = String(sessionUser?.email || submittedEmail || '').trim().toLowerCase();
+    if (!accountEmail) {
+      return res.status(400).json({ error: 'Your account email could not be detected. Please sign in again and retry.' });
+    }
+
+    const requestId = 'sup_' + Date.now().toString(36) + '_' + crypto.randomBytes(3).toString('hex');
+
+    const result = await sendSupportRequestEmail({
+      categoryLabel: category.label,
+      subjectLabel: category.subjectLabel,
+      description,
+      accountEmail,
+      accountName: sessionUser?.name || (req as any).profile?.name || null,
+      userId: sessionUser?.id || null,
+      requestId,
+    });
+
+    if (!result.success) {
+      console.error('[Support Request] Email dispatch failed:', result.error);
+      return res.status(502).json({ error: 'Support email could not be sent right now. Please try again in a moment.' });
+    }
+
+    console.log(`[Support Request] ${requestId} (${category.label}) submitted by ${accountEmail}`);
+    res.json({
+      success: true,
+      message: `Your support request has been sent to ${SUPPORT_INBOX_EMAIL}. Our team will reply to your email address.`,
+      requestId,
+    });
+  } catch (err: any) {
+    console.error('[Support Request] Error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to send support request.' });
+  }
 });
 
 // 11. External Providers

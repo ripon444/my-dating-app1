@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
-import { HelpCircle, Mail, Copy, Check, ExternalLink } from 'lucide-react';
+import React, { useState } from 'react';
+import { HelpCircle, Mail, Check, Send, Loader2, AlertCircle } from 'lucide-react';
+import { api } from '../services/api';
 
 export const SUPPORT_EMAIL = 'support@lovemeetly.com';
+export const SUPPORT_REQUEST_MIN_LENGTH = 10;
+export const SUPPORT_REQUEST_MAX_LENGTH = 2000;
 
 export interface SupportCategory {
   id: string;
@@ -21,39 +24,56 @@ export const SUPPORT_CATEGORIES: SupportCategory[] = [
   { id: 'other', label: 'Other', subjectLabel: 'General Inquiry', emoji: '💬' },
 ];
 
-export function buildSupportMailto(categoryId: string, accountEmail?: string | null): string {
-  const category = SUPPORT_CATEGORIES.find((c) => c.id === categoryId) || SUPPORT_CATEGORIES[0];
-  const subject = `Lovemeetly Support - ${category.subjectLabel}`;
-  const lines: string[] = [
-    'Hello Lovemeetly Support Team,',
-    '',
-    `Issue Category: ${category.label}`,
-  ];
-  if (accountEmail) lines.push(`Account Email: ${accountEmail}`);
-  lines.push('App: Lovemeetly Web / Android', '', 'Please describe your problem here:', '', '');
-  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`;
-}
-
-// Help & Support UI (no backend, mailto-based for web + Android).
+// Help & Support: in-app support request form.
+// Category + description are POSTed to /api/support/request, which delivers the
+// request to the Lovemeetly support inbox (support@lovemeetly.com) through the
+// existing Nodemailer transport in server/email.ts.
 export const HelpSupportSection: React.FC<{ accountEmail?: string | null }> = ({ accountEmail }) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(SUPPORT_CATEGORIES[0].id);
-  const [copied, setCopied] = useState(false);
+  const [description, setDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
+
   const selected = SUPPORT_CATEGORIES.find((c) => c.id === selectedCategoryId) || SUPPORT_CATEGORIES[0];
-  const mailtoLink = useMemo(() => buildSupportMailto(selectedCategoryId, accountEmail), [selectedCategoryId, accountEmail]);
   const subjectPreview = `Lovemeetly Support - ${selected.subjectLabel}`;
-  const handleContactSupport = () => { window.location.href = mailtoLink; };
-  const handleCopyEmail = async () => {
-    try { await navigator.clipboard.writeText(SUPPORT_EMAIL); }
-    catch {
-      const ta = document.createElement('textarea');
-      ta.value = SUPPORT_EMAIL;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch { /* noop */ }
-      document.body.removeChild(ta);
+  const trimmedDescription = description.trim();
+  const isDescriptionValid = trimmedDescription.length >= SUPPORT_REQUEST_MIN_LENGTH;
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (isSubmitting) return;
+
+    if (!isDescriptionValid) {
+      setErrorMessage(`Please describe your problem in at least ${SUPPORT_REQUEST_MIN_LENGTH} characters.`);
+      return;
     }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    if (!accountEmail) {
+      setErrorMessage('Your account email could not be detected. Please sign in again and retry.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      const result = await api.submitSupportRequest({
+        category: selectedCategoryId,
+        description: trimmedDescription,
+        accountEmail,
+      });
+      setSubmittedRequestId(result?.requestId || 'SENT');
+      setDescription('');
+    } catch (err) {
+      setErrorMessage((err as Error)?.message || 'Support request could not be sent. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSendAnotherRequest = () => {
+    setSubmittedRequestId(null);
+    setErrorMessage('');
+    setDescription('');
   };
 
   return (
@@ -67,58 +87,107 @@ export const HelpSupportSection: React.FC<{ accountEmail?: string | null }> = ({
           <p className="text-xs text-stone-400">Get help with your Lovemeetly account.</p>
         </div>
       </div>
-      <div className="rounded-xl bg-stone-950/60 border border-stone-800/90 p-3.5 sm:p-4 space-y-2">
-        <p className="text-sm font-bold text-white">Need Help?</p>
-        <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">If you are having any problem with your Lovemeetly account, our support team can help.</p>
-        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-xs text-stone-300">
-          {['Account / ID issue','Login / Sign-in issue','Password or account access issue','Payment / Billing issue','Subscription / VIP issue','Profile issue','App technical issue','Other problems'].map((item) => (
-            <li key={item} className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-stone-300 uppercase tracking-wider">Select your issue category</p>
-        <div role="radiogroup" aria-label="Issue category" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {SUPPORT_CATEGORIES.map((cat) => {
-            const isSelected = cat.id === selectedCategoryId;
-            return (
-              <button key={cat.id} type="button" role="radio" aria-checked={isSelected} onClick={() => setSelectedCategoryId(cat.id)}
-                className={`p-2.5 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${isSelected ? 'bg-sky-500/15 border-sky-500 text-white shadow-sm ring-1 ring-sky-500/30' : 'bg-stone-950/60 border-stone-800/90 text-stone-300 hover:bg-stone-800 hover:text-white'}`}>
-                <span className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm leading-none shrink-0">{cat.emoji}</span>
-                  <span className="text-xs font-semibold truncate">{cat.label}</span>
-                </span>
-                {isSelected && <Check className="w-4 h-4 text-sky-400 shrink-0" />}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-[11px] text-stone-500">Email subject: <span className="text-stone-300 font-mono">{subjectPreview}</span></p>
-      </div>
-      <div className="rounded-xl bg-stone-950/60 border border-stone-800/90 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-stone-800 text-stone-200 flex items-center justify-center shrink-0">
-            <Mail className="w-4 h-4" />
+      {submittedRequestId ? (
+        <div className="rounded-xl bg-stone-950/60 border border-emerald-500/30 p-4 space-y-3 text-center">
+          <div className="w-11 h-11 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center mx-auto">
+            <Check className="w-5 h-5" />
           </div>
-          <div className="min-w-0">
-            <p className="text-[11px] text-stone-400 uppercase tracking-wider font-semibold">Contact email</p>
-            <a id="link-support-email" href={mailtoLink} className="text-xs sm:text-sm font-semibold text-sky-300 hover:text-sky-200 break-all">{SUPPORT_EMAIL}</a>
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-white">Support Request Sent</h3>
+            <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">
+              Your request has been submitted to <span className="text-sky-300 font-mono">{SUPPORT_EMAIL}</span>. Our support team will reply to {accountEmail}.
+            </p>
+            {submittedRequestId !== 'SENT' && (
+              <p className="text-[11px] text-stone-500">
+                Reference ID: <span className="text-stone-300 font-mono">{submittedRequestId}</span>
+              </p>
+            )}
           </div>
+          <button
+            type="button"
+            onClick={handleSendAnotherRequest}
+            className="w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>Send Another Request</span>
+          </button>
         </div>
-        <button type="button" onClick={handleCopyEmail} className="px-3 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors">
-          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-          <span>{copied ? 'Copied!' : 'Copy'}</span>
-        </button>
-      </div>
-      <button id="btn-contact-support" type="button" onClick={handleContactSupport} className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-[0.99] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-sky-950/50 cursor-pointer transition-all">
-        <Mail className="w-4 h-4" />
-        <span>Contact Support</span>
-        <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-      </button>
-      <p className="text-center text-[11px] text-stone-500">Tapping Contact Support opens your device email app addressed to {SUPPORT_EMAIL}.</p>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-stone-300 uppercase tracking-wider">1. Select a problem category</p>
+            <div role="radiogroup" aria-label="Problem category" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {SUPPORT_CATEGORIES.map((cat) => {
+                const isSelected = cat.id === selectedCategoryId;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={isSelected}
+                    onClick={() => {
+                      setSelectedCategoryId(cat.id);
+                      if (errorMessage) setErrorMessage('');
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${isSelected ? 'bg-sky-500/15 border-sky-500 text-white shadow-sm ring-1 ring-sky-500/30' : 'bg-stone-950/60 border-stone-800/90 text-stone-300 hover:bg-stone-800 hover:text-white'}`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm leading-none shrink-0">{cat.emoji}</span>
+                      <span className="text-xs font-semibold truncate">{cat.label}</span>
+                    </span>
+                    {isSelected && <Check className="w-4 h-4 text-sky-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-stone-500">Email subject: <span className="text-stone-300 font-mono">{subjectPreview}</span></p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="support-request-description" className="text-xs font-semibold text-stone-300 uppercase tracking-wider block">
+              2. Describe the problem
+            </label>
+            <textarea
+              id="support-request-description"
+              rows={5}
+              value={description}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                if (errorMessage) setErrorMessage('');
+              }}
+              maxLength={SUPPORT_REQUEST_MAX_LENGTH}
+              placeholder="Tell us what happened, including any error message and the steps that led to the problem..."
+              className="w-full bg-stone-950/60 border border-stone-800/90 rounded-xl p-3 text-xs sm:text-sm text-white placeholder-stone-500 focus:outline-none focus:border-sky-500 leading-relaxed resize-y"
+            />
+            <div className="flex items-center justify-between text-[11px] text-stone-500">
+              <span>At least {SUPPORT_REQUEST_MIN_LENGTH} characters</span>
+              <span>{trimmedDescription.length}/{SUPPORT_REQUEST_MAX_LENGTH}</span>
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="rounded-xl bg-rose-500/10 border border-rose-500/30 p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-rose-300 leading-relaxed">{errorMessage}</p>
+            </div>
+          )}
+
+          <button
+            id="btn-send-support-request"
+            type="submit"
+            disabled={isSubmitting || !isDescriptionValid}
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-sky-950/50 cursor-pointer transition-all"
+          >
+            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            <span>{isSubmitting ? 'Sending...' : 'Send Support Request'}</span>
+          </button>
+
+          <p className="text-center text-[11px] text-stone-500 flex items-center justify-center gap-1.5 flex-wrap">
+            <Mail className="w-3 h-3" />
+            <span>Sent in-app to {SUPPORT_EMAIL}{accountEmail ? ` from ${accountEmail}` : ''}</span>
+          </p>
+        </form>
+      )}
     </section>
   );
 };
