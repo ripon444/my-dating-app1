@@ -33,20 +33,21 @@ import {
   RefreshCw,
   Loader2,
   Shield,
-  HelpCircle
+  HelpCircle,
+  Send,
+  Video,
+  FileText
 } from 'lucide-react';
 import { User, Profile, PaymentTransaction } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
 import { api } from '../services/api';
-import { HelpSupportSection } from './HelpSupportSection';
 import { safeStorage } from '../utils/storage';
 import {
   getDesktopNotificationPermission,
   isDesktopNotificationSupported,
   requestDesktopNotificationPermission,
 } from '../utils/desktopNotifications';
-import { registerWebPushForCurrentUser } from '../utils/webPush';
 
 interface ProfileSettingsHubProps {
   currentUser: User | null;
@@ -126,6 +127,48 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [resetMessage, setResetMessage] = useState('');
 
+  // Help & Support Form State
+  const [supportIssueType, setSupportIssueType] = useState<'payment' | 'id_verification' | 'calls_messaging' | 'other'>('payment');
+  const [supportSubject, setSupportSubject] = useState('');
+  const [supportDescription, setSupportDescription] = useState('');
+  const [supportContactEmail, setSupportContactEmail] = useState(currentUser?.email || '');
+  const [isSubmittingSupport, setIsSubmittingSupport] = useState(false);
+  const [supportSuccessMsg, setSupportSuccessMsg] = useState('');
+  const [supportErrorMsg, setSupportErrorMsg] = useState('');
+
+  const handleSupportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSupportErrorMsg('');
+    setSupportSuccessMsg('');
+
+    if (!supportSubject.trim()) {
+      setSupportErrorMsg('Please enter a brief subject for your issue.');
+      return;
+    }
+    if (!supportDescription.trim()) {
+      setSupportErrorMsg('Please describe your issue so our support team can assist you.');
+      return;
+    }
+
+    setIsSubmittingSupport(true);
+    try {
+      const res = await api.submitSupportTicket({
+        issueType: supportIssueType,
+        subject: supportSubject.trim(),
+        description: supportDescription.trim(),
+        userEmail: supportContactEmail.trim() || currentUser?.email || 'support@lovemeetly.com',
+      });
+      setSupportSuccessMsg(res.message || 'Ticket submitted successfully! A copy has been dispatched to support@lovemeetly.com.');
+      setSupportSubject('');
+      setSupportDescription('');
+      setTimeout(() => setSupportSuccessMsg(''), 7000);
+    } catch (err: any) {
+      setSupportErrorMsg(err.message || 'Failed to submit ticket. Please contact support@lovemeetly.com directly.');
+    } finally {
+      setIsSubmittingSupport(false);
+    }
+  };
+
   // Notification Toggles (saved locally and to state)
   const [notifPreferences, setNotifPreferences] = useState(() => {
     try {
@@ -194,6 +237,8 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
         ? 'section-security'
         : section === 'search-settings'
         ? 'section-settings'
+        : section === 'help-support' || section === 'support' || section === 'help'
+        ? 'section-help-support'
         : `section-${section}`;
 
     const timer = window.setTimeout(() => {
@@ -336,12 +381,7 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
     if (!isDesktopNotificationSupported() || desktopNotifBusy) return;
     setDesktopNotifBusy(true);
     try {
-      const result = await requestDesktopNotificationPermission();
-      // Permission may have just been granted — register this browser for
-      // background FCM Web Push for the current user.
-      if (result === 'granted' && currentUser?.id) {
-        await registerWebPushForCurrentUser(currentUser.id);
-      }
+      await requestDesktopNotificationPermission();
     } finally {
       refreshDesktopNotifState();
       setDesktopNotifBusy(false);
@@ -460,8 +500,58 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
                 <Edit3 className="w-4 h-4" />
                 <span>{t('editProfile') || 'Edit Profile'}</span>
               </button>
+
+              <button
+                id="btn-hub-quick-help-support"
+                onClick={() => {
+                  document.getElementById('section-help-support')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 active:bg-rose-900 text-rose-200 border border-rose-500/40 font-medium text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+              >
+                <HelpCircle className="w-4 h-4 text-rose-400" />
+                <span>Help & Support</span>
+              </button>
             </div>
           </div>
+        </div>
+
+        {/* Quick Settings Anchor Navigation Bar */}
+        <div className="mt-4 pt-3 border-t border-stone-800/80 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs">
+          <button
+            onClick={() => document.getElementById('section-subscription')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="px-3 py-1.5 rounded-lg bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-white shrink-0 flex items-center gap-1.5 transition"
+          >
+            <Crown className="w-3.5 h-3.5 text-amber-400" />
+            <span>VIP Pass</span>
+          </button>
+          <button
+            onClick={() => document.getElementById('section-boost')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="px-3 py-1.5 rounded-lg bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-white shrink-0 flex items-center gap-1.5 transition"
+          >
+            <Flame className="w-3.5 h-3.5 text-rose-400" />
+            <span>Boost</span>
+          </button>
+          <button
+            onClick={() => document.getElementById('section-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="px-3 py-1.5 rounded-lg bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-white shrink-0 flex items-center gap-1.5 transition"
+          >
+            <Settings className="w-3.5 h-3.5 text-stone-400" />
+            <span>Preferences</span>
+          </button>
+          <button
+            onClick={() => document.getElementById('section-security')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="px-3 py-1.5 rounded-lg bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-white shrink-0 flex items-center gap-1.5 transition"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+            <span>Security</span>
+          </button>
+          <button
+            onClick={() => document.getElementById('section-help-support')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 font-semibold shrink-0 flex items-center gap-1.5 transition"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-rose-400" />
+            <span>Help & Support</span>
+          </button>
         </div>
       </section>
 
@@ -843,6 +933,26 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
             </div>
           )}
         </div>
+
+        {/* Quick Shortcut to Help & Support */}
+        <div className="pt-2">
+          <button
+            onClick={() => {
+              const el = document.getElementById('section-help-support');
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+            className="w-full p-3.5 sm:p-4 rounded-xl bg-rose-950/20 hover:bg-rose-950/40 border border-rose-500/30 flex items-center justify-between cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <HelpCircle className="w-4 h-4 text-rose-400" />
+              <div className="text-left">
+                <p className="text-xs sm:text-sm font-semibold text-rose-200">Help & Support</p>
+                <p className="text-[11px] text-stone-400">Payment issue, ID issue, Text / Voice / Video call issue &bull; support@lovemeetly.com</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-rose-400" />
+          </button>
+        </div>
       </section>
 
       {/* ========================================================================= */}
@@ -1154,10 +1264,225 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
         </div>
       </section>
 
-      <HelpSupportSection accountEmail={currentUser?.email} />
+      {/* ========================================================================= */}
+      {/* 8. HELP & SUPPORT (Payment issue, ID issue, Text/Voice/Video call issue) */}
+      {/* ========================================================================= */}
+      <section 
+        id="section-help-support"
+        className="w-full bg-stone-900/90 border border-stone-800 rounded-2xl p-4 sm:p-5 shadow-lg space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-stone-800/80">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-500/20 to-pink-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center">
+              <HelpCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                Help & Support
+                <span className="px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[10px] font-semibold">
+                  24/7 Desk
+                </span>
+              </h2>
+              <p className="text-xs text-stone-400">
+                Direct ticketing & resolution for payment, ID verification, and messaging/calls.
+              </p>
+            </div>
+          </div>
+
+          <a
+            href="mailto:support@lovemeetly.com?subject=Support%20Request%20-%20Lovemeetly"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-800/90 hover:bg-stone-800 border border-stone-700 text-stone-300 hover:text-white text-xs font-medium transition-colors w-fit"
+          >
+            <Mail className="w-3.5 h-3.5 text-rose-400" />
+            <span>support@lovemeetly.com</span>
+          </a>
+        </div>
+
+        {/* Issue Category Quick Pickers */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-stone-300 block">Select Issue Category</label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {[
+              {
+                id: 'payment' as const,
+                title: 'Payment Issue',
+                subtitle: 'VIP, Boost, Coins, Refund',
+                icon: CreditCard,
+                color: 'text-amber-400',
+                border: 'border-amber-500/40',
+                bg: 'bg-amber-500/10',
+              },
+              {
+                id: 'id_verification' as const,
+                title: 'ID Issue',
+                subtitle: 'Badge, KYC, Verification, Ban',
+                icon: ShieldCheck,
+                color: 'text-emerald-400',
+                border: 'border-emerald-500/40',
+                bg: 'bg-emerald-500/10',
+              },
+              {
+                id: 'calls_messaging' as const,
+                title: 'Text / Voice / Video Call',
+                subtitle: 'Audio lag, video fail, chat error',
+                icon: PhoneCall,
+                color: 'text-rose-400',
+                border: 'border-rose-500/40',
+                bg: 'bg-rose-500/10',
+              },
+            ].map((cat) => {
+              const Icon = cat.icon;
+              const isSelected = supportIssueType === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => {
+                    setSupportIssueType(cat.id);
+                    if (!supportSubject) {
+                      if (cat.id === 'payment') setSupportSubject('Payment / VIP Transaction Issue');
+                      if (cat.id === 'id_verification') setSupportSubject('ID Verification / Badge Issue');
+                      if (cat.id === 'calls_messaging') setSupportSubject('Text / Voice / Video Call Glitch');
+                    }
+                  }}
+                  className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-stone-850 border-rose-500 ring-2 ring-rose-500/30 shadow-md'
+                      : 'bg-stone-950/70 border-stone-800 hover:bg-stone-900 text-stone-300'
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${cat.bg} border ${cat.border} ${cat.color}`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>{cat.title}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
+                    </p>
+                    <p className="text-[11px] text-stone-400 truncate">{cat.subtitle}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Support Ticket Submission Form */}
+        <form onSubmit={handleSupportSubmit} className="p-4 rounded-xl bg-stone-950/60 border border-stone-800 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-stone-400 block mb-1">Your Registered / Contact Email</label>
+              <div className="relative">
+                <input
+                  type="email"
+                  value={supportContactEmail}
+                  onChange={(e) => setSupportContactEmail(e.target.value)}
+                  placeholder="your.email@example.com"
+                  className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-xs text-white focus:outline-none focus:border-rose-500 pl-8"
+                />
+                <Mail className="w-3.5 h-3.5 text-stone-500 absolute left-2.5 top-2.5" />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-stone-400 block mb-1">Subject / Issue Summary</label>
+              <input
+                type="text"
+                value={supportSubject}
+                onChange={(e) => setSupportSubject(e.target.value)}
+                placeholder="e.g. Payment deducted but VIP not active / Camera failed on call"
+                className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-xs text-white focus:outline-none focus:border-rose-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-stone-400 block mb-1">Detailed Description of the Issue</label>
+            <textarea
+              rows={3}
+              value={supportDescription}
+              onChange={(e) => setSupportDescription(e.target.value)}
+              placeholder="Provide details: transaction ID / screenshot reference / partner ID / browser / device info..."
+              className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-700 text-xs text-white focus:outline-none focus:border-rose-500 resize-none"
+            />
+          </div>
+
+          {/* Quick FAQ / Guidance hints based on selected issue */}
+          <div className="p-2.5 rounded-lg bg-stone-900/80 border border-stone-800 text-[11px] text-stone-400 flex items-start gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              {supportIssueType === 'payment' && (
+                <span>
+                  <strong>Payment Tip:</strong> If your crypto or gateway payment finished, please include the Order ID or transaction hash. Replies will be dispatched to your email and logged in <strong className="text-stone-300">support@lovemeetly.com</strong>.
+                </span>
+              )}
+              {supportIssueType === 'id_verification' && (
+                <span>
+                  <strong>ID Verification Tip:</strong> Make sure your photo matches your government ID and selfie. Our verification officers review queues within 2–6 hours.
+                </span>
+              )}
+              {supportIssueType === 'calls_messaging' && (
+                <span>
+                  <strong>Call/Chat Tip:</strong> Ensure microphone and camera permissions are allowed in your browser settings. WebRTC requires HTTPS and stable connection.
+                </span>
+              )}
+              {supportIssueType === 'other' && (
+                <span>
+                  Our support desk monitors incoming mail directly at <strong className="text-stone-300">support@lovemeetly.com</strong>.
+                </span>
+              )}
+            </div>
+          </div>
+
+          {supportErrorMsg && (
+            <p className="text-xs text-rose-400 flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{supportErrorMsg}</span>
+            </p>
+          )}
+
+          {supportSuccessMsg && (
+            <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/40 text-xs text-emerald-300 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>{supportSuccessMsg}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="text-[11px] text-stone-400 flex items-center gap-1.5">
+              <Mail className="w-3.5 h-3.5 text-stone-400" />
+              <span>Official Support:</span>
+              <a 
+                href="mailto:support@lovemeetly.com" 
+                className="text-rose-400 hover:text-rose-300 font-medium underline font-mono text-[11px]"
+              >
+                support@lovemeetly.com
+              </a>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmittingSupport}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-rose-950 cursor-pointer disabled:opacity-50 transition-all"
+            >
+              {isSubmittingSupport ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Submitting to Support...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Send Ticket to support@lovemeetly.com</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </section>
 
       {/* ========================================================================= */}
-      {/* 8. LOGOUT SECTION (Prominent, Facebook-Style with Confirmation) */}
+      {/* 9. LOGOUT SECTION (Prominent, Facebook-Style with Confirmation) */}
       {/* ========================================================================= */}
       <section id="section-logout" className="pt-2">
         <button

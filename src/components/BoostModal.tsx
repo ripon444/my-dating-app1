@@ -13,10 +13,11 @@ import {
   CheckCircle2, 
   AlertCircle,
   TrendingUp,
-  ShieldCheck
+  ShieldCheck,
+  LogIn
 } from 'lucide-react';
 import { Profile, BoostPackage } from '../types';
-import { api } from '../services/api';
+import { api, getStoredToken } from '../services/api';
 import { useTranslation } from '../i18n/LanguageContext';
 
 interface BoostModalProps {
@@ -24,6 +25,7 @@ interface BoostModalProps {
   onClose: () => void;
   profile: Profile | null;
   onBoostApplied: (updatedProfile: Profile) => void;
+  onRequireAuth?: () => void;
 }
 
 export const BoostModal: React.FC<BoostModalProps> = ({
@@ -31,6 +33,7 @@ export const BoostModal: React.FC<BoostModalProps> = ({
   onClose,
   profile,
   onBoostApplied,
+  onRequireAuth,
 }) => {
   const { t } = useTranslation();
 
@@ -116,6 +119,14 @@ export const BoostModal: React.FC<BoostModalProps> = ({
 
   const handleStartPayment = async () => {
     if (!selectedPkg) return;
+    if (!profile || !getStoredToken()) {
+      if (onRequireAuth) {
+        onRequireAuth();
+      } else {
+        setErrorMsg('Please sign in or create an account to boost your profile.');
+      }
+      return;
+    }
     setIsProcessing(true);
     setErrorMsg('');
 
@@ -165,8 +176,17 @@ export const BoostModal: React.FC<BoostModalProps> = ({
         }
       }
     } catch (err: any) {
-      console.error('Boost purchase error:', err);
-      setErrorMsg(err.message || 'Payment processing failed. Please try again.');
+      const msg = err?.message || '';
+      if (msg.toLowerCase().includes('authentication') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('sign in')) {
+        if (onRequireAuth) {
+          onRequireAuth();
+        } else {
+          setErrorMsg('Please sign in to continue with your boost purchase.');
+        }
+      } else {
+        console.error('Boost purchase error:', err);
+        setErrorMsg(msg || 'Payment processing failed. Please try again.');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -402,22 +422,36 @@ export const BoostModal: React.FC<BoostModalProps> = ({
             </div>
 
             {/* Submit Action Button */}
-            <button
-              onClick={handleStartPayment}
-              disabled={isProcessing || !selectedPkg}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:opacity-95 text-stone-950 font-bold text-sm shadow-xl shadow-amber-900/30 flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              {isProcessing ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <>
-                  <Flame className="w-5 h-5 fill-stone-950" />
-                  <span>
-                    Pay ${selectedPkg ? Number(selectedPkg.price).toFixed(2) : '4.99'} & Boost Profile
-                  </span>
-                </>
-              )}
-            </button>
+            {!profile ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (onRequireAuth) onRequireAuth();
+                }}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:opacity-95 text-stone-950 font-bold text-sm shadow-xl shadow-amber-900/30 flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+              >
+                <LogIn className="w-5 h-5" />
+                <span>Sign In to Boost Profile</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartPayment}
+                disabled={isProcessing || !selectedPkg}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:opacity-95 text-stone-950 font-bold text-sm shadow-xl shadow-amber-900/30 flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {isProcessing ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    <Flame className="w-5 h-5 fill-stone-950" />
+                    <span>
+                      Pay ${selectedPkg ? Number(selectedPkg.price).toFixed(2) : '4.99'} & Boost Profile
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
           </>
         )}
 

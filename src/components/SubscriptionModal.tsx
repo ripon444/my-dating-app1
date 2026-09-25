@@ -17,10 +17,11 @@ import {
   Clock,
   Coins,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  LogIn
 } from 'lucide-react';
 import { User, SubscriptionPlan } from '../types';
-import { api } from '../services/api';
+import { api, getStoredToken } from '../services/api';
 import { useTranslation } from '../i18n/LanguageContext';
 import { subscriptionFeatureLabel } from '../data/subscriptionFeatures';
 
@@ -30,6 +31,7 @@ interface SubscriptionModalProps {
   user: User | null;
   onSubscriptionUpdated: (updatedUser: User) => void;
   initialOrderId?: string | null;
+  onRequireAuth?: () => void;
 }
 
 export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
@@ -38,6 +40,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   user,
   onSubscriptionUpdated,
   initialOrderId,
+  onRequireAuth,
 }) => {
   const { t } = useTranslation();
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -202,6 +205,14 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
   // Handle Free Plan Subscription
   const handleSubscribeFree = async (plan: SubscriptionPlan) => {
+    if (!user || !getStoredToken()) {
+      if (onRequireAuth) {
+        onRequireAuth();
+      } else {
+        setErrorMessage('Please sign in or create an account to activate VIP.');
+      }
+      return;
+    }
     setIsProcessingId(plan.id);
     setErrorMessage('');
     try {
@@ -213,7 +224,16 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         onClose();
       }, 2500);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Could not activate free subscription');
+      const msg = err?.message || '';
+      if (msg.toLowerCase().includes('authentication') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('sign in')) {
+        if (onRequireAuth) {
+          onRequireAuth();
+        } else {
+          setErrorMessage('Please sign in to activate your free VIP trial.');
+        }
+      } else {
+        setErrorMessage(msg || 'Could not activate free subscription');
+      }
     } finally {
       setIsProcessingId(null);
     }
@@ -221,6 +241,14 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
   // Handle NOWPayments Checkout
   const handleCheckoutPaid = async (plan: SubscriptionPlan) => {
+    if (!user || !getStoredToken()) {
+      if (onRequireAuth) {
+        onRequireAuth();
+      } else {
+        setErrorMessage('Please sign in or create an account to upgrade to VIP.');
+      }
+      return;
+    }
     setIsProcessingId(plan.id);
     setErrorMessage('');
     try {
@@ -254,8 +282,17 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         throw new Error('Payment gateway did not return an invoice link');
       }
     } catch (err: any) {
-      console.error('Invoice creation error:', err);
-      setErrorMessage(err.message || 'Failed to initialize payment. Please try again later.');
+      const msg = err?.message || '';
+      if (msg.toLowerCase().includes('authentication') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('sign in')) {
+        if (onRequireAuth) {
+          onRequireAuth();
+        } else {
+          setErrorMessage('Please sign in to continue with payment.');
+        }
+      } else {
+        console.error('Invoice creation error:', err);
+        setErrorMessage(msg || 'Failed to initialize payment. Please try again later.');
+      }
     } finally {
       setIsProcessingId(null);
     }
@@ -414,6 +451,25 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
         {/* Pricing Cards Grid */}
         <div className="p-6 overflow-y-auto flex-1">
+          {!user && (
+            <div className="mb-5 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-rose-500/10 border border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 text-stone-300">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Please sign in or create an account to activate VIP plans and unlock unlimited messaging, calls & perks.</span>
+              </div>
+              {onRequireAuth && (
+                <button
+                  type="button"
+                  onClick={onRequireAuth}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white font-bold text-xs whitespace-nowrap shadow transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Sign In / Register</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {isLoadingPlans ? (
             <div className="py-20 flex flex-col items-center justify-center gap-3 text-stone-400">
               <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
@@ -492,7 +548,24 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
                     {/* Action Button */}
                     <div>
-                      {isFree ? (
+                      {!user ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onRequireAuth) onRequireAuth();
+                          }}
+                          className={`w-full py-3.5 rounded-2xl text-xs font-bold shadow-lg transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer ${
+                            isVip
+                              ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 shadow-amber-900/30'
+                              : isFree
+                              ? 'bg-stone-800 hover:bg-stone-700 text-stone-200'
+                              : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-purple-900/30'
+                          }`}
+                        >
+                          <LogIn className="w-4 h-4" />
+                          <span>Sign In to {isFree ? 'Activate Free VIP' : 'Upgrade'}</span>
+                        </button>
+                      ) : isFree ? (
                         <button
                           type="button"
                           onClick={() => handleSubscribeFree(plan)}

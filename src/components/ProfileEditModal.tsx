@@ -29,7 +29,8 @@ import {
   ExternalLink,
   Link2,
   Music2,
-  AtSign
+  AtSign,
+  HelpCircle
 } from 'lucide-react';
 import { Profile, SocialLinks } from '../types';
 import { api } from '../services/api';
@@ -42,6 +43,7 @@ interface ProfileEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   onProfileUpdated: (updated: Profile) => void;
+  onOpenSupport?: () => void;
 }
 
 const PRESET_COVERS = [
@@ -58,6 +60,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
   isOpen,
   onClose,
   onProfileUpdated,
+  onOpenSupport,
 }) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState<Partial<Profile>>(profile || {});
@@ -361,12 +364,28 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
                 <p className="text-[11px] text-stone-400">Update your photos, cover banner, name, bio, and preferences</p>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-full text-stone-400 hover:text-white hover:bg-stone-800 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              {onOpenSupport && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenSupport();
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-750 text-stone-300 hover:text-rose-300 border border-stone-700 text-xs font-medium flex items-center gap-1.5 transition"
+                  title="Need help with your account or profile?"
+                >
+                  <HelpCircle className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="hidden sm:inline">Help & Support</span>
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-full text-stone-400 hover:text-white hover:bg-stone-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Form Body */}
@@ -1087,23 +1106,40 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 border-t border-stone-800 bg-stone-900 flex items-center justify-end gap-3 sticky bottom-0 z-10">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-stone-400 hover:text-white transition text-xs font-semibold cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs shadow-lg shadow-rose-900/30 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              <span>{isSaving ? 'Saving Changes...' : 'Save Profile'}</span>
-            </button>
+          <div className="px-6 py-4 border-t border-stone-800 bg-stone-900 flex items-center justify-between gap-3 sticky bottom-0 z-10">
+            {onOpenSupport ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenSupport();
+                }}
+                className="text-stone-400 hover:text-rose-400 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <HelpCircle className="w-4 h-4 text-rose-400" />
+                <span>Help & Support (support@lovemeetly.com)</span>
+              </button>
+            ) : (
+              <div />
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-stone-400 hover:text-white transition text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs shadow-lg shadow-rose-900/30 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>{isSaving ? 'Saving Changes...' : 'Save Profile'}</span>
+              </button>
+            </div>
           </div>
 
         </div>

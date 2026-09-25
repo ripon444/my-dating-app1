@@ -34,6 +34,7 @@ import {
   Globe,
   Check,
   AtSign,
+  HelpCircle,
 } from 'lucide-react';
 import { Profile, User } from '../types';
 import { api } from '../services/api';
@@ -59,6 +60,7 @@ interface PublicProfileViewProps {
   onManagePlan?: () => void;
   onBoostProfile?: () => void;
   onNavigateProfile?: (targetUserIdOrProfile: Profile | string) => void;
+  onOpenSupport?: () => void;
 }
 
 export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
@@ -77,6 +79,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
   onManagePlan,
   onBoostProfile,
   onNavigateProfile,
+  onOpenSupport,
 }) => {
   const targetId = profileIdOrUserId || profileId || currentUserId || currentUser?.id || currentUserProfile?.user_id || currentUserProfile?.id || initialProfile?.user_id || initialProfile?.id || '';
   const isSelf = Boolean(
@@ -527,6 +530,20 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                     Share Profile...
                   </button>
 
+                  <button
+                    id="btn-public-profile-help-support"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (onOpenSupport) {
+                        onOpenSupport();
+                      }
+                    }}
+                    className="w-full px-4 py-2.5 text-left text-xs font-medium text-rose-300 hover:bg-rose-950/30 flex items-center gap-2"
+                  >
+                    <HelpCircle className="w-4 h-4 text-rose-400" />
+                    Help & Support (24/7)
+                  </button>
+
                   {!isOwnProfile && currentUser && (
                     <>
                       <button
@@ -785,6 +802,17 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                     <Share2 className="w-4 h-4 text-rose-400" />
                     <span>Share</span>
                   </button>
+
+                  {onOpenSupport && (
+                    <button
+                      id="btn-owner-help-support"
+                      onClick={onOpenSupport}
+                      className="px-3.5 py-2.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-200 hover:text-white font-semibold rounded-xl text-sm transition-all border border-rose-500/40 flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <HelpCircle className="w-4 h-4 text-rose-400" />
+                      <span>Help & Support</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>

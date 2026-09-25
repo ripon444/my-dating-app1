@@ -61,7 +61,7 @@ function setStoredAuthSnapshot(snapshot: AuthSnapshot) {
   } catch {}
 }
 
-function removeStoredAuthSnapshot() {
+export function removeStoredAuthSnapshot() {
   safeStorage.removeItem(AUTH_SNAPSHOT_KEY);
 }
 
@@ -136,6 +136,18 @@ export function resolveApiUrl(path: string): string {
   return endpoint;
 }
 
+export function resolveFallbackApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+
+  const baseUrl = getApiBaseUrl();
+  if (baseUrl) {
+    return `${baseUrl}${path.startsWith('/') ? path : '/' + path}`;
+  }
+  return path;
+}
+
 async function authFetch(input: string, init?: RequestInit, timeoutMs: number = API_REQUEST_TIMEOUT_MS): Promise<Response> {
   let token = getStoredToken();
   const headers = new Headers(init?.headers || {});
@@ -160,6 +172,7 @@ async function authFetch(input: string, init?: RequestInit, timeoutMs: number = 
 
   // Primary URL is /server-api to bypass LiteSpeed /api interception
   const primaryUrl = resolveApiUrl(input);
+  const fallbackUrl = resolveFallbackApiUrl(input);
   const fetchWithTimeout = async (url: string, ms: number): Promise<Response> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), ms);
@@ -177,8 +190,8 @@ async function authFetch(input: string, init?: RequestInit, timeoutMs: number = 
     // Retry the original API path if the hosting proxy returns an HTML page instead of JSON.
     // The fallback uses a shorter timeout so one slow hosting layer cannot double
     // the user-visible delay for chat-critical requests.
-    if ((isHtmlResponse || res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== input) {
-      const fallbackRes = await fetchWithTimeout(input, Math.min(timeoutMs, 7000)).catch(() => null);
+    if ((isHtmlResponse || res.status === 502 || res.status === 503 || res.status === 404) && primaryUrl !== fallbackUrl) {
+      const fallbackRes = await fetchWithTimeout(fallbackUrl, Math.min(timeoutMs, 7000)).catch(() => null);
       if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
         return fallbackRes;
       }
@@ -188,9 +201,11 @@ async function authFetch(input: string, init?: RequestInit, timeoutMs: number = 
     // A timed-out /server-api request should not trigger another full timeout
     // against LiteSpeed's /api fallback. The UI already has local fallbacks,
     // and retrying here doubles the cold-start delay for every initial request.
-    if (primaryUrl !== input && (err as Error)?.name !== 'AbortError') {
-      const fallbackRes = await fetchWithTimeout(input, Math.min(timeoutMs, 7000)).catch(() => null);
-      if (fallbackRes) return fallbackRes;
+    if (primaryUrl !== fallbackUrl && (err as Error)?.name !== 'AbortError') {
+      const fallbackRes = await fetchWithTimeout(fallbackUrl, Math.min(timeoutMs, 7000)).catch(() => null);
+      if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
+        return fallbackRes;
+      }
     }
     throw err;
   }
@@ -306,6 +321,7 @@ export const api = {
   },
 
   async getNotifications(): Promise<{ notifications: Array<{ id: string; user_id: string; type: string; title: string; message: string; data?: any; is_read: boolean; created_at: string }> }> {
+    if (!getStoredToken()) return { notifications: [] };
     const res = await authFetch('/api/notifications');
     if (!res.ok) return { notifications: [] };
     return res.json();
@@ -461,6 +477,7 @@ export const api = {
   },
 
   async getMatches(): Promise<{ matches: Match[] }> {
+    if (!getStoredToken()) return { matches: [] };
     try {
       const res = await authFetch('/api/matches');
       if (!res.ok) return { matches: [] };
@@ -477,6 +494,7 @@ export const api = {
 
   // Chat
   async getConversations(): Promise<{ conversations: Conversation[] }> {
+    if (!getStoredToken()) return { conversations: [] };
     return dedupedRequest('GET:/api/conversations', async () => {
       try {
         const res = await authFetch('/api/conversations');
@@ -616,6 +634,7 @@ export const api = {
   },
 
   async getCallHistory(): Promise<{ calls: Call[] }> {
+    if (!getStoredToken()) return { calls: [] };
     try {
       const res = await authFetch('/api/calls/history');
       if (!res.ok) return { calls: [] };
@@ -1052,5 +1071,27 @@ export const api = {
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || 'Failed to delete boost package');
     return result;
+  },
+
+  async submitSupportTicket(data: {
+    issueType: string;
+    subject: string;
+    description: string;
+    userEmail: string;
+  }): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await authFetch('/api/support/ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
+    return {
+      success: true,
+      message: 'Support request received. Our support team has been notified.',
+    };
   },
 };

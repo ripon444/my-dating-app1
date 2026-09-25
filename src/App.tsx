@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { 
   Flame, 
   Heart, 
@@ -33,21 +33,24 @@ import { DiscoveryGrid } from './components/DiscoveryGrid';
 import { FiltersModal } from './components/FiltersModal';
 import { MatchModal } from './components/MatchModal';
 import { ChatWindow } from './components/ChatWindow';
-import { CallOverlay } from './components/CallOverlay';
 import { IncomingCallModal } from './components/IncomingCallModal';
 import { ProfileViewModal } from './components/ProfileViewModal';
-import { ProfileEditModal } from './components/ProfileEditModal';
-import { SubscriptionModal } from './components/SubscriptionModal';
-import { BoostModal } from './components/BoostModal';
 import { ReportModal } from './components/ReportModal';
 import { PartnerDisclosureModal } from './components/PartnerDisclosureModal';
 import { LegalModal } from './components/LegalModal';
-import { AuthModal } from './components/AuthModal';
-import { AdminView } from './components/AdminView';
-import { AdminPortal } from './components/AdminPortal';
-import { PublicProfileView } from './components/PublicProfileView';
-import { ProfileSettingsHub } from './components/ProfileSettingsHub';
 import { UserSearchModal } from './components/UserSearchModal';
+
+// Code-split / Lazy-loaded heavy and non-critical components
+const CallOverlay = lazy(() => import('./components/CallOverlay').then((m) => ({ default: m.CallOverlay })));
+const ProfileEditModal = lazy(() => import('./components/ProfileEditModal').then((m) => ({ default: m.ProfileEditModal })));
+const SubscriptionModal = lazy(() => import('./components/SubscriptionModal').then((m) => ({ default: m.SubscriptionModal })));
+const BoostModal = lazy(() => import('./components/BoostModal').then((m) => ({ default: m.BoostModal })));
+const AuthModal = lazy(() => import('./components/AuthModal').then((m) => ({ default: m.AuthModal })));
+const AdminView = lazy(() => import('./components/AdminView').then((m) => ({ default: m.AdminView })));
+const AdminPortal = lazy(() => import('./components/AdminPortal').then((m) => ({ default: m.AdminPortal })));
+const PublicProfileView = lazy(() => import('./components/PublicProfileView').then((m) => ({ default: m.PublicProfileView })));
+const ProfileSettingsHub = lazy(() => import('./components/ProfileSettingsHub').then((m) => ({ default: m.ProfileSettingsHub })));
+
 import { Profile, User, Match, Conversation, Call, DiscoveryFilters } from './types';
 import { soundManager } from './utils/sound';
 import {
@@ -66,8 +69,7 @@ import { playIncomingMessageSound, shouldCountUnreadForMessage } from './utils/m
 import { registerWebPushForCurrentUser, unregisterWebPush } from './utils/webPush';
 import { initializeCapacitorApp } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
-import { connectSocket, getSocket, isSocketHealthy } from './services/socket';
-import { startBackgroundRecovery } from './services/backgroundRecovery';
+import { connectSocket, getSocket } from './services/socket';
 import { clearPresence, setPresenceSnapshot, updatePresence, usePresence } from './services/presence';
 import { FALLBACK_PROFILES } from './data/fallbackProfiles';
 
@@ -104,150 +106,32 @@ function getProfileTargetFromUrl(): string | null {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Facebook-style clean-path navigation (no router, no new dependency).
-// The app has always navigated with `activeTab` state; these helpers keep the
-// address bar in sync with that state so URLs are shareable, refreshable and
-// work with browser Back/Forward. `/calls` stays a Messages sub-tab and
-// `/notifications` stays an overlay - no new top-level systems are introduced.
-// ---------------------------------------------------------------------------
-type MessengerTab = 'chats' | 'calls';
-
-// Tab state -> clean path. `home` and `discover` intentionally share one feed.
-const TAB_TO_PATH: Record<string, string> = {
-  home: '/',
-  discover: '/discover',
-  matches: '/matches',
-  messages: '/messages',
-  profile: '/profile',
-};
-
-interface NavLocation {
-  tab: string;
-  /** Profile hub section that owns a URL (`settings` -> `/settings`). */
-  section: string | null;
-  messengerTab: MessengerTab;
-  notificationsOpen: boolean;
-}
-
-const DEFAULT_NAV_LOCATION: NavLocation = {
-  tab: 'home',
-  section: null,
-  messengerTab: 'chats',
-  notificationsOpen: false,
-};
-
-function normalizePath(pathname: string): string {
-  const raw = (pathname || '/').split('?')[0].split('#')[0].toLowerCase();
-  if (raw.length <= 1) return '/';
-  return raw.replace(/\/+$/, '') || '/';
-}
-
-// Drop only the legacy `tab` / `section` params this fix replaces; every other
-// query param (e.g. the `?conversation=` push deep link) is preserved so message
-// notification deep links keep behaving exactly as before.
-function stripLegacyNavParams(search: string): string {
-  try {
-    const params = new URLSearchParams(search || '');
-    params.delete('tab');
-    params.delete('section');
-    return params.toString();
-  } catch {
-    return '';
-  }
-}
-
-// True only for the shareable public-profile URLs `/profile/<id>` and `/@<id>`.
-// Bare `/profile` is the signed-in user's own profile tab.
-function isPublicProfilePath(pathname: string): boolean {
-  return /^\/(?:profile|@)\/[^/?#]+/i.test(pathname || '');
-}
-
-function isAdminUrl(pathname: string, search: string, hash: string): boolean {
-  const path = (pathname || '').toLowerCase();
-  const query = (search || '').toLowerCase();
-  const fragment = (hash || '').toLowerCase();
-  return (
-    path === '/tanvir' ||
-    path.endsWith('/tanvir') ||
-    path === '/admin' ||
-    path.endsWith('/admin') ||
-    fragment === '#tanvir' ||
-    fragment === '#/tanvir' ||
-    fragment === '#admin' ||
-    query.includes('admin=tanvir') ||
-    query.includes('route=tanvir')
-  );
-}
-
-// Legacy `/?tab=...&section=...` links keep working (old bookmarks and push
-// payloads); the URL sync effect normalizes them to their clean path.
-function navLocationFromLegacyQuery(search: string): NavLocation | null {
-  try {
-    const params = new URLSearchParams(search || '');
-    const tab = (params.get('tab') || '').toLowerCase();
-    if (!tab) return null;
-    if (tab === 'calls') return { ...DEFAULT_NAV_LOCATION, tab: 'messages', messengerTab: 'calls' };
-    if (tab === 'notifications') return { ...DEFAULT_NAV_LOCATION, notificationsOpen: true };
-    if (tab === 'settings') return { ...DEFAULT_NAV_LOCATION, tab: 'profile', section: 'settings' };
-    if (tab === 'profile') {
-      return { ...DEFAULT_NAV_LOCATION, tab: 'profile', section: params.get('section') || null };
-    }
-    if (!TAB_TO_PATH[tab]) return null;
-    return { ...DEFAULT_NAV_LOCATION, tab };
-  } catch {
-    return null;
-  }
-}
-
-function navLocationFromPath(pathname: string): NavLocation {
-  const path = normalizePath(pathname);
-  if (path === '/notifications') return { ...DEFAULT_NAV_LOCATION, notificationsOpen: true };
-  if (path === '/settings') return { ...DEFAULT_NAV_LOCATION, tab: 'profile', section: 'settings' };
-  if (path === '/calls') return { ...DEFAULT_NAV_LOCATION, tab: 'messages', messengerTab: 'calls' };
-  if (path === '/messages') return { ...DEFAULT_NAV_LOCATION, tab: 'messages' };
-  if (path === '/matches') return { ...DEFAULT_NAV_LOCATION, tab: 'matches' };
-  if (path === '/profile') return { ...DEFAULT_NAV_LOCATION, tab: 'profile' };
-  if (path === '/discover') return { ...DEFAULT_NAV_LOCATION, tab: 'discover' };
-  // `/`, `/home`, `/profile/<id>`, `/@<id>` and unknown paths fall back to the feed.
-  return DEFAULT_NAV_LOCATION;
-}
-
-function readNavLocationFromUrl(): NavLocation {
-  if (typeof window === 'undefined') return DEFAULT_NAV_LOCATION;
-  return (
-    navLocationFromLegacyQuery(window.location.search) ??
-    navLocationFromPath(window.location.pathname)
-  );
-}
-
-function pathForNavState(state: {
-  tab: string;
-  section: string | null;
-  messengerTab: MessengerTab;
-  notificationsOpen: boolean;
-}): string | null {
-  if (state.notificationsOpen) return '/notifications';
-  if (state.tab === 'profile' && state.section === 'settings') return '/settings';
-  if (state.tab === 'messages' && state.messengerTab === 'calls') return '/calls';
-  return TAB_TO_PATH[state.tab] ?? null;
-}
-
 function MainApp() {
   const { t } = useTranslation();
 
   // Admin Route State (/tanvir or /admin)
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return isAdminUrl(window.location.pathname, window.location.search, window.location.hash);
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    const search = window.location.search.toLowerCase();
+    return (
+      path === '/tanvir' ||
+      path.endsWith('/tanvir') ||
+      path === '/admin' ||
+      path.endsWith('/admin') ||
+      hash === '#tanvir' ||
+      hash === '#/tanvir' ||
+      hash === '#admin' ||
+      search.includes('admin=tanvir') ||
+      search.includes('route=tanvir')
+    );
   });
 
   // App States
   const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredAuthSnapshot()?.user || null);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(() => getStoredAuthSnapshot()?.profile || null);
-  // Navigation state is seeded from the URL (clean path first, legacy `?tab=` link
-  // second) so refreshing/sharing any of the clean URLs opens the right page.
-  const [activeTab, setActiveTab] = useState<string>(() => readNavLocationFromUrl().tab);
+  const [activeTab, setActiveTab] = useState<string>('discover');
   const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('grid');
 
   // Discovery State
@@ -276,29 +160,68 @@ function MainApp() {
   // no duplicate listeners across effect re-runs).
   const activeConversationIdRef = useRef<string | null>(null);
   const conversationsRef = useRef<Conversation[]>([]);
-  useEffect(() => {
-    activeConversationIdRef.current = activeConversationId;
-  }, [activeConversationId]);
-  useEffect(() => {
-    conversationsRef.current = conversations;
-  }, [conversations]);
+  const activeTabRef = useRef<string>('discover');
+  const currentUserRef = useRef<User | null>(currentUser);
+  const currentProfileRef = useRef<Profile | null>(currentProfile);
+  activeConversationIdRef.current = activeConversationId;
+  conversationsRef.current = conversations;
+  activeTabRef.current = activeTab;
+  currentUserRef.current = currentUser;
+  currentProfileRef.current = currentProfile;
+
   const [openingChat, setOpeningChat] = useState<{ targetId: string; profile?: Profile } | null>(null);
   const [chatOpenError, setChatOpenError] = useState<string | null>(null);
   const openingChatRef = useRef<string | null>(null);
-  const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>(
-    () => readNavLocationFromUrl().messengerTab
-  );
-  // Mirror the messenger view so the singleton socket handler can tell whether a
-  // conversation is ACTUALLY on screen. `activeConversationId` alone stays set
-  // after the user navigates away from Messages, which used to suppress the
-  // incoming-message alert for every later message.
-  const messengerViewRef = useRef<{ tab: string; messengerTab: 'chats' | 'calls' }>({
-    tab: activeTab,
-    messengerTab: 'chats',
-  });
+  const [messengerTab, setMessengerTab] = useState<'chats' | 'calls'>('chats');
+  const messengerTabRef = useRef<'chats' | 'calls'>('chats');
+  messengerTabRef.current = messengerTab;
+
+  // When activeConversationId or messages tab is selected, reset local unread badge immediately.
+  // The authoritative server-side mark-read REST call and socket emission are handled by
+  // ChatWindow.tsx upon mounting the conversation, preventing duplicate network requests.
   useEffect(() => {
-    messengerViewRef.current = { tab: activeTab, messengerTab };
-  }, [activeTab, messengerTab]);
+    if (activeConversationId && !activeConversationId.startsWith('pending:') && activeTab === 'messages' && messengerTab === 'chats') {
+      const activeId = activeConversationId.replace(/^pending:/, '');
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === activeId);
+        if (conv && (Number(conv.unread_count) || 0) > 0) {
+          return prev.map((c) => (c.id === activeId ? { ...c, unread_count: 0 } : c));
+        }
+        return prev;
+      });
+    }
+  }, [activeConversationId, activeTab, messengerTab]);
+
+  // When returning to the app window/tab while viewing a conversation, mark it as read immediately
+  useEffect(() => {
+    const handleWindowFocusOrVisible = () => {
+      if (!document.hidden && activeTabRef.current === 'messages' && messengerTabRef.current === 'chats' && activeConversationIdRef.current) {
+        const activeId = activeConversationIdRef.current.replace(/^pending:/, '');
+        if (activeId) {
+          const conv = conversationsRef.current.find((c) => c.id === activeId);
+          if (conv && (Number(conv.unread_count) || 0) > 0) {
+            setConversations((prev) =>
+              prev.map((c) => (c.id === activeId ? { ...c, unread_count: 0 } : c))
+            );
+            const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+            api.markConversationAsRead(activeId).then(() => {
+              const socket = getSocket();
+              socket.emit('message:read', {
+                conversation_id: activeId,
+                read_by: myId,
+              });
+            }).catch(() => {});
+          }
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleWindowFocusOrVisible);
+    window.addEventListener('focus', handleWindowFocusOrVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', handleWindowFocusOrVisible);
+      window.removeEventListener('focus', handleWindowFocusOrVisible);
+    };
+  }, [currentUser?.id, currentProfile?.user_id, currentProfile?.id]);
   const [callHistory, setCallHistory] = useState<Call[]>([]);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
@@ -310,6 +233,20 @@ function MainApp() {
     () => conversations.reduce((acc, c) => acc + (Number(c.unread_count) || 0), 0),
     [conversations]
   );
+
+  // Deduplicate conversations so at most ONE conversation box is rendered per user pair
+  const displayedConversations = useMemo(() => {
+    const seenUsers = new Set<string>();
+    const unique: Conversation[] = [];
+    for (const c of conversations) {
+      const otherKey = c.other_user?.user_id || c.other_user?.id || (c.user_a_id === currentUser?.id ? c.user_b_id : c.user_a_id);
+      if (!otherKey || !seenUsers.has(otherKey)) {
+        if (otherKey) seenUsers.add(otherKey);
+        unique.push(c);
+      }
+    }
+    return unique;
+  }, [conversations, currentUser?.id]);
 
   // Modals
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -332,24 +269,13 @@ function MainApp() {
   // Social & Registered Users Search / Profile
   const [isUserSearchOpen, setIsUserSearchOpen] = useState(false);
   // Mobile Notifications overlay reuses the existing desktop NotificationsPanel.
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(
-    () => readNavLocationFromUrl().notificationsOpen
-  );
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   // Existing Facebook-style Profile Settings slide-out + deep section target.
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [profileSection, setProfileSection] = useState<string | null>(
-    () => readNavLocationFromUrl().section
-  );
+  const [profileSection, setProfileSection] = useState<string | null>(null);
   const [profileSectionNonce, setProfileSectionNonce] = useState(0);
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
-  // Ref mirror: the singleton socket effect must read the live value without
-  // re-subscribing, so a full-screen public-profile overlay correctly counts as
-  // "not viewing the chat".
-  const selectedPublicUserIdRef = useRef<string | null>(selectedPublicUserId);
-  useEffect(() => {
-    selectedPublicUserIdRef.current = selectedPublicUserId;
-  }, [selectedPublicUserId]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const presence = usePresence();
 
@@ -376,17 +302,10 @@ function MainApp() {
   const handleClosePublicProfile = () => {
     setSelectedPublicUserId(null);
     setSelectedPublicProfile(null);
-    if (typeof window === 'undefined') return;
-    if (window.location.pathname.startsWith('/profile/') || window.location.pathname.startsWith('/@')) {
-      // Replace instead of push: closing the overlay returns the address bar to the
-      // tab the profile was opened from without leaving a dead entry in history.
-      const backToTab = pathForNavState({
-        tab: activeTab,
-        section: profileSection,
-        messengerTab,
-        notificationsOpen: isNotificationsOpen,
-      }) ?? '/';
-      window.history.replaceState({}, '', backToTab);
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname.startsWith('/profile/') || window.location.pathname.startsWith('/@')) {
+        window.history.pushState({}, '', '/');
+      }
     }
   };
 
@@ -417,6 +336,7 @@ function MainApp() {
       security: 'security',
       blocked: 'blocked',
       sessions: 'sessions',
+      'help-support': 'help-support',
       help: 'help',
     };
     setActiveTab('profile');
@@ -427,88 +347,53 @@ function MainApp() {
     setIsProfileMenuOpen(false);
   };
 
-  // Shared server-state fetch: used both for the initial load and for
-  // background/visibility recovery. Refresh is additive — a request that fails
-  // leaves the existing state in place instead of blanking the UI, and the demo
-  // discover fallback only applies on the very first (non-silent) load.
-  const lastSyncAtRef = useRef(0);
-  const syncServerState = async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent ?? false;
-    // Coalesce recovery bursts: visibility + reconnect + settle checks can all
-    // land within a few hundred ms of each other. A silent refresh that already
-    // ran moments ago is skipped so one return-to-tab issues one set of requests.
-    if (silent && Date.now() - lastSyncAtRef.current < 1500) return;
-    lastSyncAtRef.current = Date.now();
-
-    // Each request hydrates its own slice as soon as it resolves. Previously all
-    // six were awaited together, so one slow/hung request (a `/server-api` call
-    // pins its full timeout) held back every other slice — the conversation list
-    // in particular, which is what makes Messages look empty after a refresh.
-    // Failures stay isolated per slice and leave existing state in place.
-    const hydrate = <T,>(promise: Promise<T>, apply: (value: T) => void, label: string, onError?: () => void) =>
-      promise
-        .then((value) => {
-          apply(value);
-        })
-        .catch((err) => {
-          console.error(`Failed to load ${label}:`, err);
-          onError?.();
-        });
-
-    const requests = [
-      hydrate(
+  // Initial Data Fetch
+  const loadInitialData = async () => {
+    try {
+      const [meRes, discoverRes, matchesRes, convsRes, callsRes, notifsRes] = await Promise.allSettled([
         api.getMe(),
-        (value) => {
-          if (value && !value.unavailable) {
-            setCurrentUser(value.user);
-            setCurrentProfile(value.profile ? { ...value.profile, is_online: false } : null);
-          }
-        },
-        'current user'
-      ),
-      hydrate(
         api.getDiscoverProfiles(filters),
-        (value) => {
-          if (value?.profiles && value.profiles.length > 0) {
-            setDiscoverProfiles(value.profiles.map((profile) => ({ ...profile, is_online: false })));
-          } else if (!silent) {
-            setDiscoverProfiles(FALLBACK_PROFILES.map((profile) => ({ ...profile, is_online: false })));
-          }
-        },
-        'discover profiles',
-        () => {
-          if (!silent) setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
+        api.getMatches(),
+        api.getConversations(),
+        api.getCallHistory(),
+        api.getNotifications(),
+      ]);
+
+      if (meRes.status === 'fulfilled' && meRes.value) {
+        if (!meRes.value.unavailable) {
+          setCurrentUser(meRes.value.user);
+          setCurrentProfile(meRes.value.profile ? { ...meRes.value.profile, is_online: false } : null);
         }
-      ),
-      hydrate(api.getMatches(), (value) => {
-        if (value) setMatches(value.matches || []);
-      }, 'matches'),
-      hydrate(api.getConversations(), (value) => {
-        if (value) setConversations(value.conversations || []);
-      }, 'conversations'),
-      hydrate(api.getCallHistory(), (value) => {
-        if (value) setCallHistory(value.calls || []);
-      }, 'call history'),
-      hydrate(api.getNotifications(), (value) => {
-        if (value) setNotifications(value.notifications || []);
-      }, 'notifications'),
-    ];
+      }
 
-    // Only used to clear the initial loading flag once the batch has settled;
-    // it does not gate any state update above.
-    await Promise.allSettled(requests);
+      if (discoverRes.status === 'fulfilled' && discoverRes.value?.profiles && discoverRes.value.profiles.length > 0) {
+        setDiscoverProfiles(discoverRes.value.profiles.map((profile) => ({ ...profile, is_online: false })));
+      } else {
+        setDiscoverProfiles(FALLBACK_PROFILES.map((profile) => ({ ...profile, is_online: false })));
+      }
 
-    if (!silent) setIsLoading(false);
+      if (matchesRes.status === 'fulfilled' && matchesRes.value) {
+        setMatches(matchesRes.value.matches || []);
+      }
+
+      if (convsRes.status === 'fulfilled' && convsRes.value) {
+        setConversations(convsRes.value.conversations || []);
+      }
+
+      if (callsRes.status === 'fulfilled' && callsRes.value) {
+        setCallHistory(callsRes.value.calls || []);
+      }
+
+      if (notifsRes.status === 'fulfilled' && notifsRes.value) {
+        setNotifications(notifsRes.value.notifications || []);
+      }
+    } catch (err) {
+      console.error('Failed to load initial app data:', err);
+      setDiscoverProfiles((prev) => (prev && prev.length > 0 ? prev : FALLBACK_PROFILES));
+    } finally {
+      setIsLoading(false);
+    }
   };
-
-  const loadInitialData = () => syncServerState();
-
-  // The recovery listeners outlive individual renders; keep a ref to the latest
-  // sync function so a filter change is picked up without re-subscribing.
-  const syncServerStateRef = useRef(syncServerState);
-  useEffect(() => {
-    syncServerStateRef.current = syncServerState;
-  });
 
   // Capacitor Android Native Integrations (Back Button, Status Bar)
   useEffect(() => {
@@ -595,66 +480,84 @@ function MainApp() {
     activeTab,
   ]);
 
-  // Clean-path URL sync (no router): mirrors the navigation state into the address
-  // bar. pushState adds a history entry so browser Back/Forward move between tabs;
-  // the first sync after load is a replaceState so landing on a legacy `/?tab=` link
-  // is normalized in place instead of polluting history.
-  const didInitUrlSyncRef = useRef(false);
+  // Lightweight URL state sync for existing state navigation (no router).
+  // Best-effort replaceState only: preserves refresh + back behavior, never adds history spam.
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.history?.pushState !== 'function') return;
-    // Never rewrite a shareable public-profile URL while the overlay is open; once it
-    // closes (`selectedPublicUserId` clears) this effect re-runs and re-syncs.
-    if (selectedPublicUserId) return;
-    // Never rewrite the admin routes either.
-    if (isAdminUrl(window.location.pathname, window.location.search, window.location.hash)) return;
-    const desired = pathForNavState({
-      tab: activeTab,
-      section: profileSection,
-      messengerTab,
-      notificationsOpen: isNotificationsOpen,
-    });
-    if (!desired) return;
-    // Keep non-navigation params (e.g. the `?conversation=` push deep link) but drop
-    // the legacy `tab`/`section` params this fix replaces.
-    const rest = stripLegacyNavParams(window.location.search);
-    const target = `${desired}${rest ? `?${rest}` : ''}${window.location.hash || ''}`;
-    const current = `${normalizePath(window.location.pathname)}${window.location.search || ''}${window.location.hash || ''}`;
+    if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return;
+    // Never rewrite shareable public-profile or admin routes.
+    if (getProfileTargetFromUrl()) return;
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/tanvir' || path === '/admin' || path.endsWith('/tanvir') || path.endsWith('/admin')) return;
     try {
-      if (current === target) {
-        didInitUrlSyncRef.current = true;
-        return;
-      }
-      if (didInitUrlSyncRef.current) {
-        window.history.pushState({ navTab: activeTab }, '', target);
+      const params = new URLSearchParams(window.location.search);
+      params.set('tab', activeTab);
+      if (activeTab === 'profile' && profileSection) {
+        params.set('section', profileSection);
       } else {
-        window.history.replaceState({ navTab: activeTab }, '', target);
+        params.delete('section');
       }
-      didInitUrlSyncRef.current = true;
+      const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+      window.history.replaceState({}, '', next);
     } catch {
       // URL sync is best-effort only; state navigation remains source of truth.
     }
-  }, [activeTab, profileSection, messengerTab, isNotificationsOpen, selectedPublicUserId]);
+  }, [activeTab, profileSection]);
+
+  // Initial Data Fetch - executed once on mount to avoid duplicate bursts
+  const initialLoadDoneRef = useRef(false);
+  useEffect(() => {
+    if (!initialLoadDoneRef.current) {
+      initialLoadDoneRef.current = true;
+      loadInitialData();
+    }
+  }, []);
+
+  // Web Push registration when user is authenticated
+  useEffect(() => {
+    if (currentUser?.id) {
+      registerWebPushForCurrentUser(currentUser.id).catch(() => {});
+    }
+  }, [currentUser?.id]);
+
+  // Reactive socket room-join sync on authentication state changes
+  useEffect(() => {
+    const socket = getSocket();
+    const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+    if (myId) {
+      socket.emit('user:join', { userId: myId });
+      socket.emit('user:online', { userId: myId });
+    }
+    if (currentUser?.id && currentUser.id !== myId) {
+      socket.emit('user:join', { userId: currentUser.id });
+    }
+    if (currentProfile?.user_id && currentProfile.user_id !== myId) {
+      socket.emit('user:join', { userId: currentProfile.user_id });
+    }
+    if (currentProfile?.id && currentProfile.id !== myId) {
+      socket.emit('user:join', { userId: currentProfile.id });
+    }
+  }, [currentUser?.id, currentProfile?.user_id, currentProfile?.id]);
 
   useEffect(() => {
-    loadInitialData();
-
     // Socket.io connection and real-time listeners
     const socket = getSocket();
 
     const emitUserJoin = () => {
-      const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+      const curUser = currentUserRef.current;
+      const curProfile = currentProfileRef.current;
+      const myId = curUser?.id || curProfile?.user_id || curProfile?.id;
       if (myId) {
         socket.emit('user:join', { userId: myId });
         socket.emit('user:online', { userId: myId });
       }
-      if (currentUser?.id && currentUser.id !== myId) {
-        socket.emit('user:join', { userId: currentUser.id });
+      if (curUser?.id && curUser.id !== myId) {
+        socket.emit('user:join', { userId: curUser.id });
       }
-      if (currentProfile?.user_id && currentProfile.user_id !== myId) {
-        socket.emit('user:join', { userId: currentProfile.user_id });
+      if (curProfile?.user_id && curProfile.user_id !== myId) {
+        socket.emit('user:join', { userId: curProfile.user_id });
       }
-      if (currentProfile?.id && currentProfile.id !== myId) {
-        socket.emit('user:join', { userId: currentProfile.id });
+      if (curProfile?.id && curProfile.id !== myId) {
+        socket.emit('user:join', { userId: curProfile.id });
       }
     };
 
@@ -682,11 +585,13 @@ function MainApp() {
     });
 
     socket.on('follow:update', (data: any) => {
-      const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+      const curUser = currentUserRef.current;
+      const curProfile = currentProfileRef.current;
+      const myId = curUser?.id || curProfile?.user_id || curProfile?.id;
       const isMe = 
         data?.targetUserId === myId || 
-        data?.targetUserId === currentProfile?.id || 
-        data?.targetUserId === currentProfile?.user_id ||
+        data?.targetUserId === curProfile?.id || 
+        data?.targetUserId === curProfile?.user_id ||
         data?.followerId === myId;
 
       if (isMe) {
@@ -695,7 +600,7 @@ function MainApp() {
             setNotifications(res.notifications);
           }
         }).catch(() => {});
-        if (data?.targetUserId === myId || data?.targetUserId === currentProfile?.id || data?.targetUserId === currentProfile?.user_id) {
+        if (data?.targetUserId === myId || data?.targetUserId === curProfile?.id || data?.targetUserId === curProfile?.user_id) {
           if (typeof data.followersCount === 'number') {
             setCurrentProfile((prev) => prev ? { ...prev, followers_count: data.followersCount } : prev);
           }
@@ -704,12 +609,14 @@ function MainApp() {
     });
 
     socket.on('call:incoming', (callData: Call) => {
-      const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+      const curUser = currentUserRef.current;
+      const curProfile = currentProfileRef.current;
+      const myId = curUser?.id || curProfile?.user_id || curProfile?.id;
       if (!myId) return;
       // If we are the receiver of the call, trigger the incoming call modal
       const isTarget = 
         callData.receiver_id === myId || 
-        (currentProfile && (callData.receiver_id === currentProfile.id || callData.receiver_id === currentProfile.user_id));
+        (curProfile && (callData.receiver_id === curProfile.id || callData.receiver_id === curProfile.user_id));
 
       if (isTarget && callData.caller_id !== myId) {
         setIncomingCall(callData);
@@ -717,12 +624,8 @@ function MainApp() {
     });
 
     socket.on('call:rejected', (callData: Call) => {
-      if (activeCall && activeCall.id === callData.id) {
-        setActiveCall(null);
-      }
-      if (incomingCall && incomingCall.id === callData.id) {
-        setIncomingCall(null);
-      }
+      setActiveCall((prev) => (prev && prev.id === callData.id ? null : prev));
+      setIncomingCall((prev) => (prev && prev.id === callData.id ? null : prev));
     });
 
     socket.on('call:ended', (data: any) => {
@@ -794,7 +697,9 @@ function MainApp() {
     // for the conversation the user is actively viewing.
     const handleGlobalMessageNew = (msg: any) => {
       try {
-        const myId = currentUser?.id || currentProfile?.user_id || currentProfile?.id;
+        const curUser = currentUserRef.current;
+        const curProfile = currentProfileRef.current;
+        const myId = curUser?.id || curProfile?.user_id || curProfile?.id;
         const socketConnected = socket.connected;
         debugNotifLog('message:new received', {
           id: msg?.id,
@@ -814,77 +719,88 @@ function MainApp() {
         const messageId = typeof msg.id === 'string' ? msg.id : '';
 
         const convId = typeof msg.conversation_id === 'string' ? msg.conversation_id : '';
-        // Case A: user is actively viewing this conversation → in-app only.
-        // "Actively viewing" requires the chat thread to actually be on screen:
-        // the Messages tab must be showing the chats list AND a conversation
-        // must be open. `activeConversationId` survives tab switches, so relying
-        // on it alone silenced every later alert after the user left the chat.
-        const messengerView = messengerViewRef.current;
-        const chatOnScreen =
-          messengerView.tab === 'messages' &&
-          messengerView.messengerTab === 'chats' &&
-          !selectedPublicUserIdRef.current;
+        // Case A: user is actively viewing this specific conversation → in-app only.
+        // Must be on 'messages' tab, in 'chats' view, viewing this conversation, and tab is not hidden.
         const viewingConv = (activeConversationIdRef.current || '').replace(/^pending:/, '');
-        if (
-          chatOnScreen &&
-          convId &&
-          viewingConv &&
-          (convId === viewingConv || `pending:${convId}` === activeConversationIdRef.current)
-        ) {
-          debugNotifLog('message-skipped-viewing', { id: messageId, convId, tab: messengerView.tab });
-          return;
-        }
-        // Notify whenever the message is for a conversation the user is NOT
-        // actively viewing — whether the tab is hidden (background/minimized/
-        // unfocused) or visible on another page/conversation. There is no
-        // in-app toast for messages, so this does not duplicate anything.
-        // Short sound too (browser policy allows it after prior interaction).
-        // Both paths dedupe per message id inside their own utilities.
+        const currentActiveConv = conversationsRef.current.find(
+          (c) => c.id === activeConversationIdRef.current
+        );
+        const isViewingThisConv = Boolean(
+          (convId && viewingConv && (convId === viewingConv || `pending:${convId}` === activeConversationIdRef.current)) ||
+          (activeConversationIdRef.current?.startsWith('pending:') &&
+            activeConversationIdRef.current.slice(8) === msg.sender_id) ||
+          (currentActiveConv &&
+            (currentActiveConv.other_user?.id === msg.sender_id ||
+             currentActiveConv.other_user?.user_id === msg.sender_id ||
+             currentActiveConv.user_a_id === msg.sender_id ||
+             currentActiveConv.user_b_id === msg.sender_id))
+        );
+
+        const isActivelyViewing = Boolean(
+          isViewingThisConv &&
+          activeTabRef.current === 'messages' &&
+          messengerTabRef.current === 'chats' &&
+          !isTabHidden()
+        );
+
+        // Always play the notification sound for incoming text messages from other users
         playIncomingMessageSound(msg, myId);
-        const hidden = isTabHidden();
-        debugNotifLog('message-desktop-decision', { id: messageId, convId, hidden });
 
-        const known = conversationsRef.current.find((c) => c.id === convId);
-        const senderName =
-          known?.other_user?.name ||
-          (typeof msg.sender_name === 'string' ? msg.sender_name : '') ||
-          undefined;
-        const preview =
-          typeof msg.content === 'string' && msg.content.trim()
-            ? msg.content
-            : (msg.message_type && msg.message_type !== 'text' ? `[${msg.message_type}]` : '');
-        const result = showDesktopMessageNotification({
-          messageId: messageId || undefined,
-          conversationId: convId || undefined,
-          senderId: typeof msg.sender_id === 'string' ? msg.sender_id : undefined,
-          senderName,
-          preview,
-          photo: known?.other_user?.photos?.[0],
-        });
-        debugNotifLog('message-desktop-result', { id: messageId, shown: result.shown, reason: result.reason });
+        // Desktop OS notification is only displayed if the user is NOT actively viewing this chat
+        if (!isActivelyViewing) {
+          const known = conversationsRef.current.find((c) => c.id === convId);
+          const senderName =
+            known?.other_user?.name ||
+            (typeof msg.sender_name === 'string' ? msg.sender_name : '') ||
+            undefined;
+          const preview =
+            typeof msg.content === 'string' && msg.content.trim()
+              ? msg.content
+              : (msg.message_type && msg.message_type !== 'text' ? `[${msg.message_type}]` : '');
+          showDesktopMessageNotification({
+            messageId: messageId || undefined,
+            conversationId: convId || undefined,
+            senderId: typeof msg.sender_id === 'string' ? msg.sender_id : undefined,
+            senderName,
+            preview,
+            photo: known?.other_user?.photos?.[0],
+          });
+        }
 
-        // Update unread count for non-viewed conversations (realtime badge).
-        // Guarded per message id so a duplicate socket delivery cannot
-        // double-count. Uses functional update so rapid events batch correctly.
-        if (convId && shouldCountUnreadForMessage(msg, myId)) {
-          const knownConv = conversationsRef.current.find((c) => c.id === convId);
-          if (knownConv) {
-            setConversations((prev) =>
-              prev.map((c) =>
-                c.id === convId
-                  ? { ...c, unread_count: (Number(c.unread_count) || 0) + 1 }
-                  : c
-              )
-            );
+        // Update unread count and conversation list order
+        const countUnread = !isActivelyViewing && shouldCountUnreadForMessage(msg, myId);
+
+        setConversations((prev) => {
+          const index = prev.findIndex(
+            (c) =>
+              c.id === convId ||
+              (c.other_user?.id && (c.other_user.id === msg.sender_id || c.other_user.user_id === msg.sender_id)) ||
+              (c.user_a_id === msg.sender_id || c.user_b_id === msg.sender_id)
+          );
+
+          if (index !== -1) {
+            const current = prev[index];
+            const updated = {
+              ...current,
+              last_message: msg,
+              updated_at: msg.created_at || new Date().toISOString(),
+              unread_count: countUnread
+                ? (Number(current.unread_count) || 0) + 1
+                : current.unread_count,
+            };
+            const next = [...prev];
+            next.splice(index, 1);
+            return [updated, ...next];
           } else {
-            // Conversation not in list yet — refresh so the badge/source of truth stays in sync.
+            // New conversation arrived — fetch from server so badge and conversation list stay in sync
             api.getConversations().then((res) => {
               if (Array.isArray(res?.conversations)) {
                 setConversations(res.conversations);
               }
             }).catch(() => {});
+            return prev;
           }
-        }
+        });
       } catch (err) {
         debugNotifLog('message-desktop-error', { error: String(err) });
       }
@@ -934,12 +850,6 @@ function MainApp() {
       }
     };
     window.addEventListener('lovemeetly:open-conversation', handleOpenConversationEvent as EventListener);
-
-    // WEB-only FCM: register/enable background Web Push for the signed-in user
-    // once notification permission is granted. Foreground stays on Socket.IO.
-    if (currentUser?.id) {
-      registerWebPushForCurrentUser(currentUser.id).catch(() => {});
-    }
 
     // Service-worker postMessage (notification click) and `?conversation=`
     // deep link both reuse the existing open-conversation path above.
@@ -992,7 +902,7 @@ function MainApp() {
 
     // Periodic notifications sync to ensure all-time live updates
     const notifSyncInterval = setInterval(async () => {
-      if (currentUser?.id) {
+      if (currentUserRef.current?.id) {
         try {
           const res = await api.getNotifications();
           if (res?.notifications) {
@@ -1011,28 +921,28 @@ function MainApp() {
 
     const handleUrlChange = () => {
       if (typeof window === 'undefined') return;
-      const isTanvir = isAdminUrl(window.location.pathname, window.location.search, window.location.hash);
+      const path = window.location.pathname.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      const isTanvir = 
+        path === '/tanvir' ||
+        path.endsWith('/tanvir') ||
+        path === '/admin' ||
+        path.endsWith('/admin') ||
+        hash === '#tanvir' ||
+        hash === '#/tanvir' ||
+        hash === '#admin' ||
+        search.includes('admin=tanvir') ||
+        search.includes('route=tanvir');
       setIsAdminRoute(isTanvir);
 
       // Check if URL points to a public profile
       const urlProfileTarget = getProfileTargetFromUrl();
       if (urlProfileTarget) {
         setSelectedPublicUserId(urlProfileTarget);
-      } else {
-        // Any non-profile URL (Back out of the overlay, another tab, Home...) closes it.
+      } else if (path === '/' || path === '') {
         setSelectedPublicUserId(null);
         setSelectedPublicProfile(null);
-      }
-
-      // Restore the navigation state from the clean path (legacy `?tab=` links are still
-      // honored) so browser Back/Forward move between tabs. Admin and public-profile
-      // URLs keep their own handling above and are left untouched.
-      if (!isTanvir && !urlProfileTarget && !isPublicProfilePath(window.location.pathname)) {
-        const nav = readNavLocationFromUrl();
-        setActiveTab(nav.tab);
-        setMessengerTab(nav.messengerTab);
-        setProfileSection(nav.section);
-        setIsNotificationsOpen(nav.notificationsOpen);
       }
     };
 
@@ -1060,48 +970,7 @@ function MainApp() {
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
     };
-  }, [currentUser?.id, currentProfile?.user_id, activeCall?.id, incomingCall?.id]);
-
-  // Background/visibility recovery: reconnects the realtime socket and
-  // re-synchronizes server-backed state when the user returns to the tab, or
-  // when the network comes back. One centralized listener — no per-component
-  // visibility handlers — and no full page reload.
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-
-    const refreshAfterRecovery = () => {
-      // Re-read the authoritative state the socket events normally keep live.
-      if (!currentUser?.id) return;
-      syncServerStateRef.current({ silent: true });
-      try {
-        const socket = getSocket();
-        if (socket.connected) {
-          socket.emit('user:join', { userId: currentUser.id });
-          if (currentProfile?.user_id) socket.emit('user:join', { userId: currentProfile.user_id });
-          socket.emit('presence:request');
-        }
-      } catch {}
-      // Ask the open conversation (if any) to re-fetch history so messages
-      // missed while the tab was throttled show up. Reuses ChatWindow's existing
-      // history reload path; no-op when no chat is open.
-      try {
-        window.dispatchEvent(new CustomEvent('lovemeetly:resync-active-chat'));
-      } catch {}
-    };
-
-    const handle = startBackgroundRecovery({
-      reconnect: () => {
-        connectSocket();
-      },
-      resync: () => {
-        if (currentUser?.id) syncServerStateRef.current({ silent: true });
-      },
-      isConnectionHealthy: () => isSocketHealthy(),
-      onRecovered: refreshAfterRecovery,
-    });
-
-    return () => handle.stop();
-  }, [currentUser?.id, currentProfile?.user_id]);
+  }, []);
 
   // Reset all filters and search query to show all global profiles
   const handleResetAllFilters = async () => {
@@ -1226,10 +1095,16 @@ function MainApp() {
       await api.rejectCall(call.id);
     } catch (err) {}
     setIncomingCall(null);
+    if (currentUserRef.current?.id) {
+      api.getCallHistory().then((c) => setCallHistory(c.calls)).catch(() => {});
+    }
   };
 
   const handleEndActiveCall = useCallback(() => {
     setActiveCall(null);
+    if (currentUserRef.current?.id) {
+      api.getCallHistory().then((c) => setCallHistory(c.calls)).catch(() => {});
+    }
   }, []);
 
   // Direct Message Handler from Profile Modal
@@ -1247,11 +1122,13 @@ function MainApp() {
     // Ignore duplicate taps for the same target while a request is in flight.
     if (openingChatRef.current === targetId) return;
 
+    const targetUserId = targetProfile?.user_id;
     const knownConversation = conversations.find((conversation) =>
       conversation.other_user?.user_id === targetId ||
       conversation.other_user?.id === targetId ||
-      (conversation.user_a_id === currentUser?.id && conversation.user_b_id === targetId) ||
-      (conversation.user_b_id === currentUser?.id && conversation.user_a_id === targetId)
+      (targetUserId && (conversation.other_user?.user_id === targetUserId || conversation.other_user?.id === targetUserId)) ||
+      (conversation.user_a_id === currentUser?.id && (conversation.user_b_id === targetId || (targetUserId && conversation.user_b_id === targetUserId))) ||
+      (conversation.user_b_id === currentUser?.id && (conversation.user_a_id === targetId || (targetUserId && conversation.user_a_id === targetUserId)))
     );
 
     // Navigate FIRST — synchronously — before any network request.
@@ -1282,9 +1159,15 @@ function MainApp() {
       if (!res.conversation) throw new Error('The server did not return a conversation.');
       // Always cache the conversation even if the user moved on (stale),
       // so a later tap opens instantly from the known list.
+      const otherPartnerId = res.conversation.other_user?.user_id || res.conversation.other_user?.id;
       setConversations((prev) => [
         res.conversation,
-        ...prev.filter((conversation) => conversation.id !== res.conversation.id),
+        ...prev.filter((c) => {
+          if (c.id === res.conversation.id) return false;
+          const cOtherId = c.other_user?.user_id || c.other_user?.id;
+          if (otherPartnerId && cOtherId && cOtherId === otherPartnerId) return false;
+          return true;
+        }),
       ]);
       // Ignore stale navigation if the user already opened a different chat.
       if (openingChatRef.current !== targetId) return;
@@ -1370,14 +1253,20 @@ function MainApp() {
   // If visiting Admin Route (/tanvir or /admin)
   if (isAdminRoute) {
     return (
-      <AdminPortal
-        onBackToSite={() => {
-          setIsAdminRoute(false);
-          try {
-            window.history.pushState({}, '', '/');
-          } catch (e) {}
-        }}
-      />
+      <Suspense fallback={
+        <div className="min-h-screen bg-stone-950 flex items-center justify-center text-rose-500">
+          <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }>
+        <AdminPortal
+          onBackToSite={() => {
+            setIsAdminRoute(false);
+            try {
+              window.history.pushState({}, '', '/');
+            } catch (e) {}
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -1448,7 +1337,7 @@ function MainApp() {
         onOpenHelpSupport={() => handleProfileMenuAction('help')}
         onResetHome={() => {
           setSelectedPublicUserId(null);
-          setActiveTab('home');
+          setActiveTab('discover');
           setViewMode('grid');
           setSearchQuery('');
         }}
@@ -1484,7 +1373,7 @@ function MainApp() {
           setViewMode={setViewMode}
           onGoHome={() => {
             setSelectedPublicUserId(null);
-            setActiveTab('home');
+            setActiveTab('discover');
             setViewMode('grid');
             setSearchQuery('');
           }}
@@ -1801,14 +1690,7 @@ function MainApp() {
           {/* 3. MESSAGES TAB */}
           {/* ========================================================================= */}
           {activeTab === 'messages' && (
-            /* `grid-rows-1` (= minmax(0, 1fr)) is load-bearing: without it the
-               implicit `auto` row is content-sized, so the chat panel's
-               `h-full` resolves against an indefinite height, the message
-               thread grows to its full content height and never becomes a
-               scroll container. `<main>` scrolls the thread instead and its
-               native scrollbar renders in main's padding gutter, far away from
-               the chat panel's right edge. */
-            <div className="grid grid-cols-1 md:grid-cols-3 grid-rows-1 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
               
               {/* Conversations & Calls List (FB Messenger Style) */}
               <div className={`bg-stone-900 rounded-2xl sm:rounded-3xl border border-stone-800 overflow-hidden flex flex-col shadow-xl ${
@@ -1863,12 +1745,12 @@ function MainApp() {
 
                 <div className="p-1.5 sm:p-2 overflow-y-auto flex-1 space-y-1">
                   {messengerTab === 'chats' ? (
-                    conversations.length === 0 ? (
+                    displayedConversations.length === 0 ? (
                       <div className="p-8 text-center text-stone-500 text-xs">
                         No active conversations. Match with someone to start chatting!
                       </div>
                     ) : (
-                      conversations.map((conv) => {
+                      displayedConversations.map((conv) => {
                         const other = conv.other_user;
                         const isSelected = activeConversationId === conv.id;
 
@@ -1991,7 +1873,7 @@ function MainApp() {
               </div>
 
               {/* Active Conversation Thread */}
-              <div className={`md:col-span-2 h-full min-h-0 min-w-0 ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
+              <div className={`md:col-span-2 h-full ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
                 {activeConversation ? (
                   <ChatWindow
                     key={activeConversation.id}
@@ -2075,35 +1957,41 @@ function MainApp() {
           {/* ========================================================================= */}
           {activeTab === 'profile' && (
             currentUser ? (
-              isViewingFullProfile ? (
-                <PublicProfileView
-                  profileIdOrUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
-                  profileId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
-                  currentUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
-                  currentUser={currentUser}
-                  currentUserProfile={currentProfile}
-                  isOwnProfile={true}
-                  onBack={() => setIsViewingFullProfile(false)}
-                  onEditProfile={() => setIsProfileEditOpen(true)}
-                  onManagePlan={() => setIsSubscriptionOpen(true)}
-                  onBoostProfile={() => setIsBoostOpen(true)}
-                  onStartChat={handleStartChat}
-                  onStartCall={handleStartCall}
-                />
-              ) : (
-                <ProfileSettingsHub
-                  key={`profile-hub-${profileSection || 'main'}-${profileSectionNonce}`}
-                  currentUser={currentUser}
-                  currentProfile={currentProfile}
-                  onViewProfile={() => setIsViewingFullProfile(true)}
-                  onEditProfile={() => setIsProfileEditOpen(true)}
-                  onOpenSubscription={() => setIsSubscriptionOpen(true)}
-                  onOpenBoost={() => setIsBoostOpen(true)}
-                  onLogout={handleLogout}
-                  onUpdateProfile={handleUpdateProfileData}
-                  initialSection={profileSection ? `${profileSection}#${profileSectionNonce}` : null}
-                />
-              )
+              <Suspense fallback={
+                <div className="py-20 flex items-center justify-center">
+                  <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              }>
+                {isViewingFullProfile ? (
+                  <PublicProfileView
+                    profileIdOrUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
+                    profileId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
+                    currentUserId={currentUser.id || currentProfile?.user_id || currentProfile?.id || ''}
+                    currentUser={currentUser}
+                    currentUserProfile={currentProfile}
+                    isOwnProfile={true}
+                    onBack={() => setIsViewingFullProfile(false)}
+                    onEditProfile={() => setIsProfileEditOpen(true)}
+                    onManagePlan={() => setIsSubscriptionOpen(true)}
+                    onBoostProfile={() => setIsBoostOpen(true)}
+                    onStartChat={handleStartChat}
+                    onStartCall={handleStartCall}
+                  />
+                ) : (
+                  <ProfileSettingsHub
+                    key={`profile-hub-${profileSection || 'main'}-${profileSectionNonce}`}
+                    currentUser={currentUser}
+                    currentProfile={currentProfile}
+                    onViewProfile={() => setIsViewingFullProfile(true)}
+                    onEditProfile={() => setIsProfileEditOpen(true)}
+                    onOpenSubscription={() => setIsSubscriptionOpen(true)}
+                    onOpenBoost={() => setIsBoostOpen(true)}
+                    onLogout={handleLogout}
+                    onUpdateProfile={handleUpdateProfileData}
+                    initialSection={profileSection ? `${profileSection}#${profileSectionNonce}` : null}
+                  />
+                )}
+              </Suspense>
             ) : (
               <div className="max-w-md mx-auto my-16 p-8 rounded-3xl bg-stone-900/90 border border-stone-800 text-center space-y-5 shadow-2xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
@@ -2130,7 +2018,13 @@ function MainApp() {
           {/* 6. ADMIN VIEW TAB */}
           {/* ========================================================================= */}
           {activeTab === 'admin' && currentUser?.role === 'ADMIN' && (
-            <AdminView />
+            <Suspense fallback={
+              <div className="py-20 flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            }>
+              <AdminView />
+            </Suspense>
           )}
 
         </main>
@@ -2178,31 +2072,43 @@ function MainApp() {
       />
 
       {/* 4. Profile Editor Modal */}
-      <ProfileEditModal
-        profile={currentProfile}
-        isOpen={isProfileEditOpen}
-        onClose={() => setIsProfileEditOpen(false)}
-        onProfileUpdated={(updated) => {
-          setCurrentProfile(updated);
-          api.getDiscoverProfiles(filters).then((r) => setDiscoverProfiles(r.profiles));
-        }}
-      />
+      {isProfileEditOpen && (
+        <Suspense fallback={null}>
+          <ProfileEditModal
+            profile={currentProfile}
+            isOpen={isProfileEditOpen}
+            onClose={() => setIsProfileEditOpen(false)}
+            onProfileUpdated={(updated) => {
+              setCurrentProfile(updated);
+              api.getDiscoverProfiles(filters).then((r) => setDiscoverProfiles(r.profiles));
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* 5. Subscription Plan Upgrade Modal */}
-      <SubscriptionModal
-        isOpen={isSubscriptionOpen}
-        onClose={() => setIsSubscriptionOpen(false)}
-        user={currentUser}
-        onSubscriptionUpdated={(upd) => setCurrentUser(upd)}
-      />
+      {isSubscriptionOpen && (
+        <Suspense fallback={null}>
+          <SubscriptionModal
+            isOpen={isSubscriptionOpen}
+            onClose={() => setIsSubscriptionOpen(false)}
+            user={currentUser}
+            onSubscriptionUpdated={(upd) => setCurrentUser(upd)}
+          />
+        </Suspense>
+      )}
 
       {/* 6. Profile Boost Modal */}
-      <BoostModal
-        isOpen={isBoostOpen}
-        onClose={() => setIsBoostOpen(false)}
-        profile={currentProfile}
-        onBoostApplied={(upd) => setCurrentProfile(upd)}
-      />
+      {isBoostOpen && (
+        <Suspense fallback={null}>
+          <BoostModal
+            isOpen={isBoostOpen}
+            onClose={() => setIsBoostOpen(false)}
+            profile={currentProfile}
+            onBoostApplied={(upd) => setCurrentProfile(upd)}
+          />
+        </Suspense>
+      )}
 
       {/* 7. Trust & Safety Report Modal */}
       <ReportModal
@@ -2225,15 +2131,19 @@ function MainApp() {
       />
 
       {/* 10. Age Gate Auth Modal */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        onAuthSuccess={(usr, prf) => {
-          setCurrentUser(usr);
-          setCurrentProfile(prf);
-          loadInitialData();
-        }}
-      />
+      {isAuthOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={isAuthOpen}
+            onClose={() => setIsAuthOpen(false)}
+            onAuthSuccess={(usr, prf) => {
+              setCurrentUser(usr);
+              setCurrentProfile(prf);
+              loadInitialData();
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* 11. Incoming Call Ringing Alert Modal */}
       {incomingCall && (
@@ -2246,12 +2156,14 @@ function MainApp() {
 
       {/* 12. Fullscreen WebRTC Voice / Video Call Overlay */}
       {activeCall && (
-        <CallOverlay
-          call={activeCall}
-          currentUser={currentUser}
-          currentUserProfile={currentProfile}
-          onEndCall={handleEndActiveCall}
-        />
+        <Suspense fallback={null}>
+          <CallOverlay
+            call={activeCall}
+            currentUser={currentUser}
+            currentUserProfile={currentProfile}
+            onEndCall={handleEndActiveCall}
+          />
+        </Suspense>
       )}
 
       {/* 13. Registered Members Search Modal */}
@@ -2317,39 +2229,45 @@ function MainApp() {
               <X className="w-4 h-4" />
               <span>Close Profile</span>
             </button>
-            <PublicProfileView
-              profileIdOrUserId={selectedPublicUserId}
-              profileId={selectedPublicUserId}
-              initialProfile={selectedPublicProfile}
-              currentUser={currentUser}
-              currentUserProfile={currentProfile}
-              currentUserId={currentUser?.id || currentProfile?.user_id}
-              isOwnProfile={selectedPublicUserId === currentUser?.id || selectedPublicUserId === currentProfile?.user_id}
-              onBack={handleClosePublicProfile}
-              onNavigateProfile={(target) => {
-                handleOpenPublicProfile(target);
-              }}
-              onStartChat={(otherId) => {
-                handleClosePublicProfile();
-                handleStartChat(otherId);
-              }}
-              onStartCall={(otherId, type) => {
-                handleClosePublicProfile();
-                handleStartCall(otherId, type);
-              }}
-              onEditProfile={() => {
-                handleClosePublicProfile();
-                setIsProfileEditOpen(true);
-              }}
-              onManagePlan={() => {
-                handleClosePublicProfile();
-                setIsSubscriptionOpen(true);
-              }}
-              onBoostProfile={() => {
-                handleClosePublicProfile();
-                setIsBoostOpen(true);
-              }}
-            />
+            <Suspense fallback={
+              <div className="min-h-[400px] flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            }>
+              <PublicProfileView
+                profileIdOrUserId={selectedPublicUserId}
+                profileId={selectedPublicUserId}
+                initialProfile={selectedPublicProfile}
+                currentUser={currentUser}
+                currentUserProfile={currentProfile}
+                currentUserId={currentUser?.id || currentProfile?.user_id}
+                isOwnProfile={selectedPublicUserId === currentUser?.id || selectedPublicUserId === currentProfile?.user_id}
+                onBack={handleClosePublicProfile}
+                onNavigateProfile={(target) => {
+                  handleOpenPublicProfile(target);
+                }}
+                onStartChat={(otherId) => {
+                  handleClosePublicProfile();
+                  handleStartChat(otherId);
+                }}
+                onStartCall={(otherId, type) => {
+                  handleClosePublicProfile();
+                  handleStartCall(otherId, type);
+                }}
+                onEditProfile={() => {
+                  handleClosePublicProfile();
+                  setIsProfileEditOpen(true);
+                }}
+                onManagePlan={() => {
+                  handleClosePublicProfile();
+                  setIsSubscriptionOpen(true);
+                }}
+                onBoostProfile={() => {
+                  handleClosePublicProfile();
+                  setIsBoostOpen(true);
+                }}
+              />
+            </Suspense>
           </div>
         </div>
       )}

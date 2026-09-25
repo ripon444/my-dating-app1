@@ -160,13 +160,14 @@ interface NavbarProps {
   onOpenAuth: () => void;
   onLogout?: () => void;
   onOpenLegal: (tab: string) => void;
+  onOpenSupport?: () => void;
+  onOpenHelpSupport?: () => void;
   notifications?: any[];
   unreadNotificationsCount?: number;
   unreadMessagesCount?: number;
   onSelectNotificationProfile?: (profileIdOrUserId: string) => void;
   onMarkAllNotificationsRead?: () => void;
   onResetHome?: () => void;
-  onOpenHelpSupport?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -185,13 +186,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onLogout,
   onOpenLegal,
+  onOpenSupport,
+  onOpenHelpSupport,
   notifications = [],
   unreadNotificationsCount = 0,
   unreadMessagesCount = 0,
   onSelectNotificationProfile,
   onMarkAllNotificationsRead,
   onResetHome,
-  onOpenHelpSupport,
 }) => {
   const { currentLanguage, setLanguage, t } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -276,16 +278,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Home className="w-4 h-4" />
             <span>Home</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('matches')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'matches'
-                ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
-                : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
-            }`}
-          >
-            {t('matches')}
           </button>
           <button
             onClick={() => setActiveTab('messages')}
@@ -756,15 +748,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>{t('safety')}</span>
                   </button>
                   <button
-                    type="button"
+                    id="btn-nav-help-support"
                     onClick={() => {
-                      onOpenHelpSupport?.();
+                      if (onOpenSupport || onOpenHelpSupport) {
+                        (onOpenSupport || onOpenHelpSupport)!();
+                      } else {
+                        setActiveTab('profile');
+                      }
                       setUserMenuOpen(false);
                     }}
                     className="w-full text-left px-3 py-2 text-xs rounded-lg text-stone-200 hover:bg-stone-800 flex items-center gap-2.5 transition cursor-pointer"
                   >
-                    <HelpCircle className="w-4 h-4 text-sky-400 shrink-0" />
-                    <span>Help &amp; Support</span>
+                    <HelpCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span className="flex items-center gap-1.5 font-medium">
+                      Help & Support
+                      <span className="text-[10px] px-1.5 py-0.2 bg-rose-500/20 text-rose-300 rounded font-normal">24/7</span>
+                    </span>
                   </button>
                 </div>
 

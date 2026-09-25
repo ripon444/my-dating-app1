@@ -32,6 +32,7 @@ import { Logo } from './Logo';
 export type ProfileMenuAction =
   | 'search-settings'
   | 'settings'
+  | 'help-support'
   | 'language'
   | 'notifications'
   | 'privacy'
@@ -75,6 +76,7 @@ const PROFILE_MENU_ITEMS: Array<{
 }> = [
   { id: 'search-settings', emoji: '🔍', label: 'Search Settings', keywords: 'search filter discover age distance', icon: SlidersHorizontal },
   { id: 'settings', emoji: '⚙️', label: 'Settings', keywords: 'settings preferences account profile', icon: Settings },
+  { id: 'help-support', emoji: '💬', label: 'Help & Support', keywords: 'help support payment issue id verification call message report mail', icon: HelpCircle },
   { id: 'language', emoji: '🌐', label: 'Language', keywords: 'language locale translation english bengali', icon: Globe },
   { id: 'notifications', emoji: '🔔', label: 'Notifications', keywords: 'notifications alerts messages matches', icon: Bell },
   { id: 'privacy', emoji: '🔒', label: 'Privacy', keywords: 'privacy visibility hidden incognito', icon: Lock },
@@ -379,6 +381,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
             <span>{t('guidelines')}</span>
+          </button>
+          <button
+            id="btn-sidebar-footer-help-support"
+            onClick={() => onProfileMenuAction?.('help-support')}
+            className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-rose-950/30 text-rose-300 hover:text-rose-200 transition flex items-center gap-2 cursor-pointer font-medium"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-rose-400" />
+            <span>Help & Support (24/7)</span>
           </button>
           <div className="px-3 pt-2 text-[10px] text-stone-600">
             © 2026 Lovemeetly Platform. Licensed integrations strictly adhere to partner syndication agreements.
