@@ -61,7 +61,7 @@ function setStoredAuthSnapshot(snapshot: AuthSnapshot) {
   } catch {}
 }
 
-export function removeStoredAuthSnapshot() {
+function removeStoredAuthSnapshot() {
   safeStorage.removeItem(AUTH_SNAPSHOT_KEY);
 }
 
@@ -136,6 +136,12 @@ export function resolveApiUrl(path: string): string {
   return endpoint;
 }
 
+// Resolve a relative fallback path against the configured API origin, WITHOUT the
+// /api -> /server-api rewrite. On web getApiBaseUrl() is empty, so the original
+// relative path is returned and behavior is unchanged. In the Capacitor app the
+// path becomes absolute (e.g. https://lovemeetly.com/api/auth/login); without this
+// the WebView resolves it against https://localhost, where Capacitor's local asset
+// server serves the bundled index.html with HTTP 200 for extension-less paths.
 export function resolveFallbackApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
@@ -148,7 +154,37 @@ export function resolveFallbackApiUrl(path: string): string {
   return path;
 }
 
-async function authFetch(input: string, init?: RequestInit, timeoutMs: number = API_REQUEST_TIMEOUT_MS): Promise<Response> {
+/**
+ * Options for endpoints that are allowed to deviate from the authenticated
+ * request shape.
+ *
+ * The Capacitor Android WebView serves the app from the origin `https://localhost`
+ * (capacitor.config.ts -> server.androidScheme = 'https'), so every API call to
+ * https://lovemeetly.com is CROSS-ORIGIN. A cross-origin request that carries only
+ * CORS-safelisted headers is sent as-is ("simple request"), while a request with a
+ * non-safelisted header (`Content-Type: application/json`, `Authorization`,
+ * `x-session-token`) requires a CORS preflight first. When that preflight (or the
+ * response) is not CORS-valid, the WebView rejects the call BEFORE the JS ever sees
+ * an HTTP status, which reach the UI as a bare `TypeError: Failed to fetch`.
+ *
+ * On the web the very same call is same-origin, so no preflight is involved at all
+ * - which is why sign-in works in a browser but not in the Android app.
+ */
+type AuthFetchOptions = {
+  /**
+   * Do NOT attach the stored session token / admin session token.
+   * Used by the endpoints that CREATE a session (login/register): the previous
+   * session's token is meaningless there and sending it would force a preflight.
+   */
+  omitSessionCredentials?: boolean;
+};
+
+async function authFetch(
+  input: string,
+  init?: RequestInit,
+  timeoutMs: number = API_REQUEST_TIMEOUT_MS,
+  options?: AuthFetchOptions
+): Promise<Response> {
   let token = getStoredToken();
   const headers = new Headers(init?.headers || {});
 
@@ -165,13 +201,15 @@ async function authFetch(input: string, init?: RequestInit, timeoutMs: number = 
     } catch (e) {}
   }
 
-  if (token) {
+  if (token && !options?.omitSessionCredentials) {
     headers.set('Authorization', `Bearer ${token}`);
     headers.set('x-session-token', token);
   }
 
   // Primary URL is /server-api to bypass LiteSpeed /api interception
   const primaryUrl = resolveApiUrl(input);
+  // The fallback keeps the original (non-/server-api) path, but resolved against
+  // the API origin so a native WebView can never serve it from its local assets.
   const fallbackUrl = resolveFallbackApiUrl(input);
   const fetchWithTimeout = async (url: string, ms: number): Promise<Response> => {
     const controller = new AbortController();
@@ -198,17 +236,46 @@ async function authFetch(input: string, init?: RequestInit, timeoutMs: number = 
     }
     return res;
   } catch (err) {
+    // DEV-only diagnostic. A transport/CORS rejection produces no HTTP response at
+    // all, so `Failed to fetch` is the only clue the UI can show; this logs the
+    // endpoint, method and error type (never the body, password or token) so the
+    // real failure point is visible in the WebView console via chrome://inspect.
+    if ((import.meta as any)?.env?.DEV) {
+      console.warn('[authFetch] request failed before an HTTP response', {
+        url: primaryUrl,
+        method: (init?.method || 'GET').toUpperCase(),
+        errorName: (err as Error)?.name,
+        errorMessage: (err as Error)?.message,
+      });
+    }
     // A timed-out /server-api request should not trigger another full timeout
     // against LiteSpeed's /api fallback. The UI already has local fallbacks,
     // and retrying here doubles the cold-start delay for every initial request.
     if (primaryUrl !== fallbackUrl && (err as Error)?.name !== 'AbortError') {
       const fallbackRes = await fetchWithTimeout(fallbackUrl, Math.min(timeoutMs, 7000)).catch(() => null);
-      if (fallbackRes && (fallbackRes.ok || fallbackRes.status === 400 || fallbackRes.status === 401)) {
-        return fallbackRes;
-      }
+      if (fallbackRes) return fallbackRes;
     }
     throw err;
   }
+}
+
+// Body for the login/register calls.
+//
+// `application/x-www-form-urlencoded` is one of the three content types a browser
+// is allowed to send cross-origin WITHOUT a CORS preflight (the others are
+// `multipart/form-data` and `text/plain`); `application/json` is not. The Express
+// server already parses form bodies (`express.urlencoded({ extended: true })` in
+// server.ts) into exactly the same `req.body` fields the JSON body produced, so
+// the handler reads an identical payload - no server change is needed.
+// Passing URLSearchParams as `body` also makes the browser set the safelisted
+// `Content-Type` itself, which is what keeps the request "simple".
+function authFormBody(fields: Record<string, any>): URLSearchParams {
+  const body = new URLSearchParams();
+  Object.entries(fields).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    body.set(key, String(value));
+  });
+  return body;
 }
 
 // Deduplicate concurrent identical requests so double-clicks, StrictMode
@@ -321,7 +388,6 @@ export const api = {
   },
 
   async getNotifications(): Promise<{ notifications: Array<{ id: string; user_id: string; type: string; title: string; message: string; data?: any; is_read: boolean; created_at: string }> }> {
-    if (!getStoredToken()) return { notifications: [] };
     const res = await authFetch('/api/notifications');
     if (!res.ok) return { notifications: [] };
     return res.json();
@@ -356,11 +422,12 @@ export const api = {
   },
 
   async login(email: string, password?: string, role?: string): Promise<{ success: boolean; user: User; profile: Profile; token?: string }> {
+    // Sent as a CORS-simple POST (see authFormBody/omitSessionCredentials) so the
+    // Android WebView reaches the handler without a preflight.
     const res = await authFetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, role }),
-    });
+      body: authFormBody({ email, password, role }),
+    }, undefined, { omitSessionCredentials: true });
     const data = await safeJson<{ success: boolean; user: User; profile: Profile; token?: string }>(res, 'Login failed. Please check your email and password.');
     if (data.token) {
       setStoredToken(data.token);
@@ -370,11 +437,11 @@ export const api = {
   },
 
   async register(params: { email: string; password?: string; name: string; dob: string; gender: string }): Promise<{ success: boolean; message: string; registeredEmail?: string; userId?: string; profileId?: string }> {
+    // Same CORS-simple POST shape as login: no JSON content type, no stale token.
     const res = await authFetch('/api/auth/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
+      body: authFormBody(params),
+    }, undefined, { omitSessionCredentials: true });
     return safeJson<{ success: boolean; message: string; registeredEmail?: string; userId?: string; profileId?: string }>(res, 'Registration failed. Please check your details.');
   },
 
@@ -477,7 +544,6 @@ export const api = {
   },
 
   async getMatches(): Promise<{ matches: Match[] }> {
-    if (!getStoredToken()) return { matches: [] };
     try {
       const res = await authFetch('/api/matches');
       if (!res.ok) return { matches: [] };
@@ -494,7 +560,6 @@ export const api = {
 
   // Chat
   async getConversations(): Promise<{ conversations: Conversation[] }> {
-    if (!getStoredToken()) return { conversations: [] };
     return dedupedRequest('GET:/api/conversations', async () => {
       try {
         const res = await authFetch('/api/conversations');
@@ -634,7 +699,6 @@ export const api = {
   },
 
   async getCallHistory(): Promise<{ calls: Call[] }> {
-    if (!getStoredToken()) return { calls: [] };
     try {
       const res = await authFetch('/api/calls/history');
       if (!res.ok) return { calls: [] };
@@ -1071,27 +1135,5 @@ export const api = {
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || 'Failed to delete boost package');
     return result;
-  },
-
-  async submitSupportTicket(data: {
-    issueType: string;
-    subject: string;
-    description: string;
-    userEmail: string;
-  }): Promise<{ success: boolean; message: string }> {
-    try {
-      const res = await authFetch('/api/support/ticket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        return await res.json();
-      }
-    } catch {}
-    return {
-      success: true,
-      message: 'Support request received. Our support team has been notified.',
-    };
   },
 };
