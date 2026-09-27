@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "test:server": "node --import tsx --test src/lib/push.test.ts",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android",
     "cap:build": "vite build && npx cap sync android"

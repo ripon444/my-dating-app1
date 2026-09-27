@@ -42,6 +42,14 @@ import { users as pgUsers, profiles as pgProfiles, notifications as pgNotificati
 import { eq, desc } from 'drizzle-orm';
 import { DEFAULT_VIP_PLAN_FEATURES, VIP_FEATURE_KEYS, parseFeatureKeys, type VipFeatureKey } from './server/subscriptionFeatures.ts';
 import { adminMessaging } from './src/lib/firebase-admin.ts';
+import {
+  ANDROID_PLATFORM,
+  maskToken,
+  selectPlatformTokens,
+  sendAndroidChatMessagePush,
+  type ChatMessagePushSource,
+  type PushTokenRow,
+} from './src/lib/push.ts';
 
 const app = express();
 const httpServer = createServer(app);
@@ -643,6 +651,54 @@ async function sendMessagePushToUser(
     }
   } catch (err) {
     console.warn('[FCM] Message push skipped:', (err as Error)?.message);
+  }
+}
+
+/**
+ * Send the same background push for a newly created CHAT MESSAGE to the recipient's ANDROID devices.
+ *
+ * Additive sibling of sendMessagePushToUser (web), which is left untouched. Same semantics:
+ * - targets only the receiver's registered tokens, filtered to platform = 'android'
+ * - data-only payload so LovemeetlyMessagingService (not the SDK) renders the notification
+ * - never touches `is_read` (foreground Socket.IO read flow owns that)
+ * - incoming-call FCM is out of scope: no call payload is ever produced here
+ * Never throws; a push failure must not affect message delivery.
+ */
+async function sendAndroidMessagePushToUser(
+  receiverId: string,
+  message: ChatMessagePushSource
+): Promise<void> {
+  try {
+    if (!receiverId || !message?.id) return;
+    // sender_id and receiver_id are distinct identifiers — never compared.
+    if (message.sender_id === receiverId) return;
+    if (!adminMessaging) return;
+
+    const rows = await SqlHelper.queryAll<PushTokenRow>(
+      'SELECT token, platform FROM push_tokens WHERE user_id = ? AND platform = ?',
+      [receiverId, ANDROID_PLATFORM]
+    );
+    // Platform is re-checked here (not just in SQL) so a mislabeled row can never leak across paths.
+    const tokens = selectPlatformTokens(rows, ANDROID_PLATFORM);
+    if (!tokens.length) return;
+
+    const result = await sendAndroidChatMessagePush(adminMessaging, tokens, message);
+
+    // Prune only tokens FCM reports as permanently invalid/unregistered.
+    for (const stale of result.staleTokens) {
+      await SqlHelper.execute('DELETE FROM push_tokens WHERE token = ?', [stale]).catch(() => {});
+      console.log(`[FCM] Removed stale android token ${maskToken(stale)}`);
+    }
+
+    console.log(
+      `[FCM] Android message push for ${message.id}: delivered=${result.delivered} failed=${result.failed}` +
+        (result.errorCodes.length ? ` codes=[${result.errorCodes.join(', ')}]` : '') +
+        (result.staleTokens.length
+          ? ` removedStale=[${result.staleTokens.map(maskToken).join(', ')}]`
+          : '')
+    );
+  } catch (err) {
+    console.warn('[FCM] Android message push skipped:', (err as Error)?.message);
   }
 }
 
@@ -2571,6 +2627,18 @@ app.post('/api/messages', async (req, res) => {
   // the service worker suppresses itself while a visible tab is present, so
   // there is no double notification. Fire-and-forget — never blocks the response.
   sendMessagePushToUser(targetReceiverId, {
+    id: msgId,
+    conversation_id,
+    sender_id: user.id,
+    content: content || '',
+    message_type,
+    sender_name: (req as any).profile?.name || '',
+  }).catch(() => {});
+
+  // Android devices get the same notification through FCM (platform = 'android'), with the same
+  // data-only field set. Fire-and-forget and independent of the web send above: a failure in either
+  // path never affects the other or the response.
+  sendAndroidMessagePushToUser(targetReceiverId, {
     id: msgId,
     conversation_id,
     sender_id: user.id,
