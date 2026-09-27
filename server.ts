@@ -46,7 +46,9 @@ import {
   ANDROID_PLATFORM,
   maskToken,
   selectPlatformTokens,
+  sendAndroidCallPush,
   sendAndroidChatMessagePush,
+  type CallIncomingPushSource,
   type ChatMessagePushSource,
   type PushTokenRow,
 } from './src/lib/push.ts';
@@ -699,6 +701,62 @@ async function sendAndroidMessagePushToUser(
     );
   } catch (err) {
     console.warn('[FCM] Android message push skipped:', (err as Error)?.message);
+  }
+}
+
+/**
+ * Send a data-only incoming-CALL push to the recipient's ANDROID devices, so a backgrounded or swiped
+ * away app can still ring through the native call notification
+ * ({@code LovemeetlyMessagingService} -> {@code LovemeetlyCallNotifications}).
+ *
+ * Strictly additive sibling of the existing, untouched Socket.IO `call:incoming` emit in
+ * POST /api/calls - the socket event, its payload and the web flow do not change at all. Same
+ * conventions as the Android chat sender above:
+ * - targets only the receiver's platform = 'android' tokens (web delivery stays on its own path)
+ * - data-only payload (the SDK must not auto-display) at Android high priority
+ * - payload fields are the ones the native call parser already reads, so no call protocol is invented
+ * - only tokens FCM reports as permanently invalid are pruned; transient failures are kept
+ * - token prefixes are masked in logs; never throws
+ *
+ * @returns how many Android tokens FCM accepted the ring for. 0 means "no reachable Android device",
+ *     which is what lets POST /api/calls keep its legacy offline/demo auto-accept for everyone else.
+ */
+async function sendAndroidCallPushToUser(
+  receiverId: string,
+  call: CallIncomingPushSource
+): Promise<number> {
+  try {
+    if (!receiverId || !call?.id) return 0;
+    if (!adminMessaging) return 0;
+
+    const rows = await SqlHelper.queryAll<PushTokenRow>(
+      'SELECT token, platform FROM push_tokens WHERE user_id = ? AND platform = ?',
+      [receiverId, ANDROID_PLATFORM]
+    );
+    // Platform is re-checked here (not just in SQL) so a mislabeled row can never leak across paths.
+    const tokens = selectPlatformTokens(rows, ANDROID_PLATFORM);
+    if (!tokens.length) return 0;
+
+    const result = await sendAndroidCallPush(adminMessaging, tokens, call);
+
+    // Prune only tokens FCM reports as permanently invalid/unregistered.
+    for (const stale of result.staleTokens) {
+      await SqlHelper.execute('DELETE FROM push_tokens WHERE token = ?', [stale]).catch(() => {});
+      console.log(`[FCM] Removed stale android token ${maskToken(stale)}`);
+    }
+
+    console.log(
+      `[FCM] Android call push for ${call.id}: delivered=${result.delivered} failed=${result.failed}` +
+        (result.errorCodes.length ? ` codes=[${result.errorCodes.join(', ')}]` : '') +
+        (result.staleTokens.length
+          ? ` removedStale=[${result.staleTokens.map(maskToken).join(', ')}]`
+          : '')
+    );
+
+    return result.delivered;
+  } catch (err) {
+    console.warn('[FCM] Android call push skipped:', (err as Error)?.message);
+    return 0;
   }
 }
 
@@ -2694,9 +2752,42 @@ app.post('/api/calls', async (req, res) => {
 
   console.log(`[SQL Calls] Initiated call ${callId} from ${user.id} to ${targetUserId} (${type})`);
 
-  // If the target recipient is an automated/offline member or demo profile, auto-accept after 2.5s of realistic ringing
+  // Android closed/background ringing. Additive sibling of the Socket.IO emit above, which is left
+  // exactly as it was: a backgrounded or swiped-away app has no socket, so this data-only FCM call
+  // push (type=call_incoming) is what lets the existing native phone-ring UI appear. The payload
+  // carries the identifiers this route already has, in the field names the native parser reads.
+  // Fire-and-forget: the caller's response never waits on FCM.
+  const androidCallPush = sendAndroidCallPushToUser(targetUserId, {
+    id: callId,
+    caller_id: user.id,
+    receiver_id: targetUserId,
+    type,
+    caller_name: callerProfile?.name,
+    caller_photo: callerProfile?.photos?.[0] || callerProfile?.cover_photo,
+  });
+
+  // If the target recipient is an automated/offline member or demo profile, auto-accept after 2.5s of
+  // realistic ringing. Behaviour preserved, with one Android-only guard: once the ring has actually
+  // been handed to an Android device (delivered > 0) the call must NOT be pre-accepted, because on
+  // Android the native Answer/Decline surface owns that decision. The legacy heuristic only ever
+  // applied to recipients that had no reachable client at all.
   const recipientSockets = io.sockets.adapter.rooms.get(`user_${targetUserId}`);
   if (!recipientSockets || recipientSockets.size === 0) {
+    androidCallPush
+      .then((delivered) => {
+        if (delivered === 0) scheduleOfflineAutoAccept();
+      })
+      .catch(() => scheduleOfflineAutoAccept());
+  }
+
+  res.json({ call: newCall });
+
+  /**
+   * Unchanged offline/demo auto-accept (same 2.5s delay, same status check, same events). Only the
+   * moment it is invoked moved: it now waits for the Android delivery result, so it is skipped when a
+   * real Android device is ringing.
+   */
+  function scheduleOfflineAutoAccept() {
     setTimeout(async () => {
       try {
         const checkCall = await SqlHelper.queryOne('SELECT status FROM calls WHERE id = ?', [callId]);
@@ -2719,8 +2810,6 @@ app.post('/api/calls', async (req, res) => {
       }
     }, 2500);
   }
-
-  res.json({ call: newCall });
 });
 
 app.post('/api/calls/:id/accept', async (req, res) => {

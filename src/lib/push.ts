@@ -1,9 +1,10 @@
 // Server-side push delivery helpers for Lovemeetly.
 //
-// Scope: this module only BUILDS and SENDS normal (non-call) push messages. Incoming-call FCM is
-// deliberately out of scope, and the existing web-push sender in server.ts keeps its own logic and
-// payload untouched - the Android payload below mirrors those fields 1:1 so both platforms show the
-// same copy and LovemeetlyMessagingService routes it to the normal message notification path.
+// Scope: this module BUILDS and SENDS the Android data-only payloads (chat messages and incoming-call
+// rings) consumed by LovemeetlyMessagingService. The existing web-push sender in server.ts keeps its
+// own logic and payload untouched: the Android chat payload mirrors those fields 1:1 so both platforms
+// show the same copy, and the Android call payload maps the fields LovemeetlyCallPayload already
+// parses (no new call protocol, no web call behaviour change).
 //
 // Nothing here authenticates or holds credentials: the Firebase Admin credential is configured once
 // in src/lib/firebase-admin.ts (reused, never duplicated) and FCM tokens are opaque device values.
@@ -208,6 +209,91 @@ export async function sendAndroidChatMessagePush(
   message: ChatMessagePushSource
 ): Promise<MulticastClassification> {
   const request = buildAndroidMulticastRequest(tokens, message);
+  const response = await messaging.sendEachForMulticast(request);
+  return classifyMulticastResults(response?.responses, request.tokens);
+}
+
+/** An incoming call exactly as the existing POST /api/calls route stores/emits it. */
+export interface CallIncomingPushSource {
+  /** calls.id */
+  id: string;
+  /** calls.caller_id */
+  caller_id: string;
+  /** calls.receiver_id */
+  receiver_id: string;
+  /** 'voice' | 'video' (defaults to voice, same rule as the native parser). */
+  type?: string | null;
+  /** Caller display name (profiles.name). Display only. */
+  caller_name?: string | null;
+  /** Caller photo URL. Display only. */
+  caller_photo?: string | null;
+}
+
+/**
+ * Discriminator understood by LovemeetlyCallPayload.INCOMING_TYPES
+ * (call_incoming | call:incoming | incoming_call | call:initiate).
+ */
+export const CALL_INCOMING_TYPE = 'call_incoming';
+
+/**
+ * The push `data` map for an incoming call.
+ *
+ * Field names are the ones `LovemeetlyCallPayload.fromData` already reads - callId, callerId,
+ * callerName, callerPhoto, callType, receiverId - and the values come straight from the existing call
+ * record, so the native ringing screen (channel, ringtone, full-screen intent, Answer/Decline) is
+ * reused unchanged. Optional fields are omitted while empty so the native copy falls back to its own
+ * default caller label instead of rendering a blank name.
+ */
+export function buildCallIncomingPushData(call: CallIncomingPushSource): Record<string, string> {
+  const data: Record<string, string> = {
+    type: CALL_INCOMING_TYPE,
+    callId: typeof call?.id === 'string' ? call.id : '',
+    callerId: typeof call?.caller_id === 'string' ? call.caller_id : '',
+    receiverId: typeof call?.receiver_id === 'string' ? call.receiver_id : '',
+    callType:
+      typeof call?.type === 'string' && call.type.trim().toLowerCase() === 'video'
+        ? 'video'
+        : 'voice',
+  };
+
+  const callerName = typeof call?.caller_name === 'string' ? call.caller_name.trim() : '';
+  if (callerName) data.callerName = callerName;
+
+  const callerPhoto = typeof call?.caller_photo === 'string' ? call.caller_photo.trim() : '';
+  if (callerPhoto) data.callerPhoto = callerPhoto;
+
+  return data;
+}
+
+/**
+ * The exact multicast request for an incoming call: identical shape to the chat one - data-only (the
+ * SDK must never auto-display, or the ring could not be intercepted), high priority so a backgrounded
+ * or killed app still rings, and explicitly NO `notification` and NO `webpush` block so web delivery
+ * stays with the untouched web sender in server.ts.
+ */
+export function buildAndroidCallMulticastRequest(
+  tokens: string[],
+  call: CallIncomingPushSource
+): AndroidMulticastMessage {
+  return {
+    tokens: tokens.slice(),
+    data: buildCallIncomingPushData(call),
+    android: { priority: 'high' },
+  };
+}
+
+/**
+ * Sends one incoming-call ring to Android devices through the existing Admin SDK instance.
+ *
+ * @param messaging the shared `adminMessaging` instance (never a second configuration)
+ * @returns the per-token classification; never deletes anything itself
+ */
+export async function sendAndroidCallPush(
+  messaging: MulticastMessaging,
+  tokens: string[],
+  call: CallIncomingPushSource
+): Promise<MulticastClassification> {
+  const request = buildAndroidCallMulticastRequest(tokens, call);
   const response = await messaging.sendEachForMulticast(request);
   return classifyMulticastResults(response?.responses, request.tokens);
 }

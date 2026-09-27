@@ -10,16 +10,21 @@ import assert from 'node:assert/strict';
 
 import {
   ANDROID_PLATFORM,
+  CALL_INCOMING_TYPE,
   WEB_PLATFORM,
+  buildAndroidCallMulticastRequest,
   buildAndroidMulticastRequest,
+  buildCallIncomingPushData,
   buildChatMessagePushData,
   classifyMulticastResults,
   isStaleRegistrationTokenError,
   isUsableToken,
   maskToken,
   selectPlatformTokens,
+  sendAndroidCallPush,
   sendAndroidChatMessagePush,
   type AndroidMulticastMessage,
+  type CallIncomingPushSource,
   type ChatMessagePushSource,
   type MulticastMessaging,
   type PushTokenRow,
@@ -279,4 +284,99 @@ test('token usability matches the registration endpoint minimum', () => {
   assert.equal(isUsableToken('1234567890123456789'), false);
   assert.equal(isUsableToken('   '), false);
   assert.equal(isUsableToken(null), false);
+});
+
+// ------------------------------------------------------------------------------------------------
+// Incoming-call FCM (Android closed/background ringing).
+// ------------------------------------------------------------------------------------------------
+
+const CALL: CallIncomingPushSource = {
+  id: 'call_1727000000_ab12',
+  caller_id: 'user_caller_1',
+  receiver_id: 'user_receiver_2',
+  type: 'video',
+  caller_name: 'Alex',
+  caller_photo: 'https://lovemeetly.com/uploads/alex.jpg',
+};
+
+test('call payload uses the discriminator and field names the native parser reads', () => {
+  const data = buildCallIncomingPushData(CALL);
+
+  // LovemeetlyCallPayload.INCOMING_TYPES / fromData() keys.
+  assert.equal(data.type, CALL_INCOMING_TYPE);
+  assert.equal(data.type, 'call_incoming');
+  assert.equal(data.callId, CALL.id);
+  assert.equal(data.callerId, CALL.caller_id);
+  assert.equal(data.receiverId, CALL.receiver_id);
+  assert.equal(data.callType, 'video');
+  assert.equal(data.callerName, 'Alex');
+  assert.equal(data.callerPhoto, CALL.caller_photo);
+});
+
+test('call payload never looks like a chat message and defaults to a voice call', () => {
+  const data = buildCallIncomingPushData({ ...CALL, type: 'voice' });
+  assert.equal(data.callType, 'voice');
+  assert.equal(buildCallIncomingPushData({ ...CALL, type: undefined }).callType, 'voice');
+  assert.equal(buildCallIncomingPushData({ ...CALL, type: 'VOICE' }).callType, 'voice');
+  assert.equal(buildCallIncomingPushData({ ...CALL, type: 'audio' }).callType, 'voice');
+
+  // The two senders must stay mutually exclusive: a ring can never open a chat notification and a
+  // chat message can never start a ring.
+  assert.notEqual(data.type, buildChatMessagePushData(MESSAGE).type);
+  assert.ok(!('messageId' in data) && !('conversationId' in data));
+  assert.ok(!('callId' in buildChatMessagePushData(MESSAGE)));
+});
+
+test('call payload omits empty optional display fields instead of sending blanks', () => {
+  const minimal = buildCallIncomingPushData({ ...CALL, caller_name: '   ', caller_photo: null });
+
+  assert.equal('callerName' in minimal, false);
+  assert.equal('callerPhoto' in minimal, false);
+  assert.equal(minimal.callId, CALL.id, 'required routing fields are always present');
+  assert.equal(minimal.callerId, CALL.caller_id);
+});
+
+test('call multicast request is data-only, high priority and has no web block', () => {
+  const request = buildAndroidCallMulticastRequest([ANDROID_TOKEN_A, ANDROID_TOKEN_B], CALL);
+
+  assert.deepEqual(request.tokens, [ANDROID_TOKEN_A, ANDROID_TOKEN_B]);
+  assert.deepEqual(request.android, { priority: 'high' });
+  assert.deepEqual(request.data, buildCallIncomingPushData(CALL));
+  // The SDK must not auto-display a ring; LovemeetlyMessagingService renders it so the full-screen
+  // intent / Answer / Decline path is used.
+  assert.equal('notification' in request, false);
+  assert.equal('webpush' in request, false);
+  assert.equal('apns' in request, false);
+});
+
+test('sendAndroidCallPush issues exactly one multicast and reports delivery', async () => {
+  const { messaging, calls } = fakeMessaging(() => [{ success: true }, { success: true }]);
+
+  const result = await sendAndroidCallPush(messaging, [ANDROID_TOKEN_A, ANDROID_TOKEN_B], CALL);
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].tokens, [ANDROID_TOKEN_A, ANDROID_TOKEN_B]);
+  assert.deepEqual(calls[0].android, { priority: 'high' });
+  assert.equal(calls[0].data.type, 'call_incoming');
+  assert.equal(result.delivered, 2);
+  assert.deepEqual(result.staleTokens, []);
+});
+
+test('call push keeps transient failures and only reports genuinely stale tokens', async () => {
+  const transient = fakeMessaging(() => [{ success: false, code: 'messaging/server-unavailable' }]);
+  const offline = await sendAndroidCallPush(transient.messaging, [ANDROID_TOKEN_A], CALL);
+  assert.deepEqual(offline.staleTokens, [], 'an offline device keeps its token');
+  assert.equal(offline.delivered, 0, 'no delivery means the legacy offline auto-accept still applies');
+
+  const stale = fakeMessaging(() => [
+    { success: true },
+    { success: false, code: 'messaging/registration-token-not-registered' },
+  ]);
+  const cleaned = await sendAndroidCallPush(
+    stale.messaging,
+    [ANDROID_TOKEN_A, ANDROID_TOKEN_B],
+    CALL
+  );
+  assert.deepEqual(cleaned.staleTokens, [ANDROID_TOKEN_B]);
+  assert.equal(cleaned.delivered, 1);
 });
