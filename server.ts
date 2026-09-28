@@ -588,6 +588,21 @@ app.delete('/api/push-tokens', async (req, res) => {
   }
 });
 
+// Observability only (no behaviour change): when no server-side Firebase credential is configured,
+// every push path below returns early - previously in complete silence, which made "Android
+// notifications never arrive" indistinguishable from "no device registered". Logged once per process
+// so the send paths stay quiet afterwards.
+let fcmAdminUnavailableWarned = false;
+function warnFcmAdminUnavailableOnce(): void {
+  if (fcmAdminUnavailableWarned) return;
+  fcmAdminUnavailableWarned = true;
+  console.warn(
+    '[FCM] Firebase Admin is not initialized (set FIREBASE_SERVICE_ACCOUNT_PATH, ' +
+      'FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS): web push and Android app ' +
+      'push are being skipped.'
+  );
+}
+
 /**
  * Send a background Web Push (FCM) for a newly created CHAT MESSAGE.
  * - targets only the receiver's registered tokens (never the sender)
@@ -610,7 +625,10 @@ async function sendMessagePushToUser(
     if (!receiverId || !message?.id) return;
     // sender_id and conversation_id are distinct identifiers — never compared.
     if (message.sender_id === receiverId) return;
-    if (!adminMessaging) return;
+    if (!adminMessaging) {
+      warnFcmAdminUnavailableOnce();
+      return;
+    }
 
     const rows = await SqlHelper.queryAll<{ token: string; platform: string }>(
       "SELECT token, platform FROM push_tokens WHERE user_id = ? AND platform = 'web'",
@@ -674,7 +692,10 @@ async function sendAndroidMessagePushToUser(
     if (!receiverId || !message?.id) return;
     // sender_id and receiver_id are distinct identifiers — never compared.
     if (message.sender_id === receiverId) return;
-    if (!adminMessaging) return;
+    if (!adminMessaging) {
+      warnFcmAdminUnavailableOnce();
+      return;
+    }
 
     const rows = await SqlHelper.queryAll<PushTokenRow>(
       'SELECT token, platform FROM push_tokens WHERE user_id = ? AND platform = ?',
@@ -727,7 +748,10 @@ async function sendAndroidCallPushToUser(
 ): Promise<number> {
   try {
     if (!receiverId || !call?.id) return 0;
-    if (!adminMessaging) return 0;
+    if (!adminMessaging) {
+      warnFcmAdminUnavailableOnce();
+      return 0;
+    }
 
     const rows = await SqlHelper.queryAll<PushTokenRow>(
       'SELECT token, platform FROM push_tokens WHERE user_id = ? AND platform = ?',

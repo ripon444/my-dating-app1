@@ -4,4 +4,9 @@
     <string name="title_activity_main">Lovemeetly</string>
     <string name="package_name">com.lovemeetly.app</string>
     <string name="custom_url_scheme">com.lovemeetly.app</string>
+
+    <!-- Notification shown by Android's DownloadManager while the app downloads the APK that the
+         site's Profile > Settings ("Download Android App") and mobile Discover options link to. -->
+    <string name="lovemeetly_apk_download_title">Lovemeetly Android app</string>
+    <string name="lovemeetly_apk_download_description">Downloading the latest Lovemeetly APK...</string>
 </resources>

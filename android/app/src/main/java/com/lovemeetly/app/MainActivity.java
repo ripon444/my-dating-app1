@@ -1,9 +1,6 @@
 package com.lovemeetly.app;
 
-import android.Manifest;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -13,8 +10,6 @@ import com.google.firebase.messaging.FirebaseMessaging;
 public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "LovemeetlyPush";
-
-    private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 4711;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -32,14 +27,21 @@ public class MainActivity extends BridgeActivity {
         // would fall back to the Firebase SDK's generic channel.
         LovemeetlyNotifications.ensureAllChannels(this);
 
+        // The site's "Download APK" / "Download Android App" anchor cannot download anything inside
+        // the Capacitor WebView (the framework installs no DownloadListener, so the tap is a no-op).
+        // This hands APK downloads to Android's DownloadManager instead; every other download keeps
+        // its previous behaviour.
+        LovemeetlyApkDownloads.attach(getBridge() == null ? null : getBridge().getWebView(), this);
+
         // An Answer tap (notification action or the native ringing screen) arrives as
         // Intent extras; publish it so the web layer can continue the existing call flow.
         LovemeetlyCallBridge.publishFromIntent(this, getIntent());
 
         // Android 13+ requires an explicit runtime grant before a notification can be
         // shown at all - including FCM notifications delivered while the app is fully
-        // closed. Requested once at startup; a denial is not re-prompted.
-        requestNotificationPermissionIfNeeded();
+        // closed. Same request as before; its result is now observed (onRequestPermissionsResult)
+        // and one further attempt is allowed later if the user dismissed this first dialog.
+        LovemeetlyNotificationPermission.requestIfNeeded(this, "app-start");
 
         // Cover installations whose token was issued before this feature existed (onNewToken fires
         // only when the token is created/refreshed). Fire-and-forget and never blocking: Task
@@ -95,16 +97,21 @@ public class MainActivity extends BridgeActivity {
     // dismissIncomingCall() plugin method (src/utils/nativeCallHandoff.ts), or natively on
     // answer/decline/ended/timeout.
 
-    private void requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            return;
-        }
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        requestPermissions(
-                new String[] { Manifest.permission.POST_NOTIFICATIONS },
-                NOTIFICATION_PERMISSION_REQUEST_CODE);
+    @Override
+    public void onResume() {
+        super.onResume();
+        // One later chance when a logged-in user is actually back in the app: a dialog dismissed
+        // during start-up must not silence push forever. Bounded by attempts and a minimum interval,
+        // so at most two dialogs are ever shown and never back-to-back.
+        LovemeetlyNotificationPermission.requestIfNeeded(this, "resume");
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] grantResults) {
+        // Capacitor first: BridgeActivity routes plugin permission results through the bridge, so
+        // super must run before the outcome is recorded here.
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        LovemeetlyNotificationPermission.onRequestResult(requestCode, permissions, grantResults);
     }
 }
