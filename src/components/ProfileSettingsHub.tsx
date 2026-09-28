@@ -20,6 +20,7 @@ import {
   Lock,
   KeyRound,
   Smartphone,
+  Download,
   Check,
   AlertCircle,
   CheckCircle2,
@@ -932,6 +933,37 @@ export const ProfileSettingsHub: React.FC<ProfileSettingsHubProps> = ({
               )}
             </div>
           )}
+        </div>
+
+        {/* Android App Download (APK served directly from lovemeetly.com - no store needed) */}
+        <div className="pt-2">
+          <a
+            id="link-settings-download-android-apk"
+            href="https://lovemeetly.com/downloads/lovemeetly.apk"
+            download="lovemeetly.apk"
+            title="Download the Lovemeetly Android app"
+            aria-label="Download the Lovemeetly Android app (APK)"
+            className="group w-full p-3.5 sm:p-4 rounded-xl bg-stone-950/60 hover:bg-stone-950/90 border border-stone-800 hover:border-rose-500/40 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 cursor-pointer transition-colors"
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <span className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                <Smartphone className="w-4 h-4" />
+              </span>
+              <span className="min-w-0 text-left">
+                <span className="block text-xs sm:text-sm font-semibold text-stone-200 group-hover:text-white">
+                  Download Android App
+                </span>
+                <span className="block text-[11px] text-stone-400">
+                  Get the latest Lovemeetly Android app.
+                </span>
+              </span>
+            </span>
+
+            <span className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 group-hover:from-rose-500 group-hover:to-pink-500 text-white text-xs font-semibold shadow-md shadow-rose-950/40 shrink-0 w-full sm:w-auto transition-colors">
+              <Download className="w-3.5 h-3.5" />
+              <span>Download APK</span>
+            </span>
+          </a>
         </div>
 
         {/* Quick Shortcut to Help & Support */}
