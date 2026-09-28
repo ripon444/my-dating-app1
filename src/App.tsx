@@ -23,7 +23,8 @@ import {
   Layers,
   Grid,
   X,
-  Users
+  Users,
+  Download
 } from 'lucide-react';
 import { useTranslation, LanguageProvider } from './i18n/LanguageContext';
 import { Navbar, NotificationsPanel } from './components/Navbar';
@@ -1523,7 +1524,7 @@ function MainApp() {
             >
             <div className="space-y-3.5 sm:space-y-6 w-full">
               {/* Discover | Matches tabs: Matches reuses existing Matches view */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setActiveTab('discover')}
@@ -1544,6 +1545,14 @@ function MainApp() {
                     </span>
                   )}
                 </button>
+                <a
+                  href="https://lovemeetly.com/downloads/lovemeetly.apk"
+                  download="lovemeetly.apk"
+                  className="md:hidden px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 bg-stone-900 text-stone-300 border border-stone-800 hover:text-white"
+                >
+                  <Download className="w-3.5 h-3.5 text-rose-400" />
+                  Download APK
+                </a>
               </div>
               {/* Profile Search & Filter Bar */}
               <div className="w-full bg-stone-900/80 p-2.5 sm:p-4 rounded-2xl border border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-3 shadow-md">
