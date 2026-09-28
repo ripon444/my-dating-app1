@@ -455,7 +455,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const isPendingConversation = conversation.id.startsWith('pending:');
 
   return (
-    <div className="flex flex-col h-full w-full max-w-full min-w-0 bg-stone-900 rounded-3xl border border-stone-800 overflow-hidden shadow-2xl relative">
+    <div className="flex flex-col h-full w-full max-w-full min-w-0 min-h-0 bg-stone-900 rounded-3xl border border-stone-800 overflow-hidden shadow-2xl relative">
       
       {/* Lightbox Modal for Fullscreen Images */}
       {lightboxImage && (

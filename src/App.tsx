@@ -39,6 +39,7 @@ import { ReportModal } from './components/ReportModal';
 import { PartnerDisclosureModal } from './components/PartnerDisclosureModal';
 import { LegalModal } from './components/LegalModal';
 import { UserSearchModal } from './components/UserSearchModal';
+import { PullToRefresh } from './components/PullToRefresh';
 
 // Code-split / Lazy-loaded heavy and non-critical components
 const CallOverlay = lazy(() => import('./components/CallOverlay').then((m) => ({ default: m.CallOverlay })));
@@ -67,7 +68,13 @@ import {
 } from './utils/desktopNotifications';
 import { playIncomingMessageSound, shouldCountUnreadForMessage } from './utils/messageAlerts';
 import { registerWebPushForCurrentUser, unregisterWebPush } from './utils/webPush';
-import { initializeCapacitorApp } from './utils/capacitorApp';
+import { dismissNativeIncomingCall, initializeNativeCallHandoff } from './utils/nativeCallHandoff';
+import {
+  initializeNativePushToken,
+  registerNativePushTokenForUser,
+  unregisterNativePushToken,
+} from './utils/nativePushToken';
+import { initializeCapacitorApp, isAndroidApp, onAndroidAppResume } from './utils/capacitorApp';
 import { api, getStoredAuthSnapshot } from './services/api';
 import { connectSocket, getSocket } from './services/socket';
 import { clearPresence, setPresenceSnapshot, updatePresence, usePresence } from './services/presence';
@@ -163,6 +170,10 @@ function MainApp() {
   const activeTabRef = useRef<string>('discover');
   const currentUserRef = useRef<User | null>(currentUser);
   const currentProfileRef = useRef<Profile | null>(currentProfile);
+  // The page content container (<main>, which owns overflow-y-auto and is where the gesture is
+  // listened for). Pull-to-refresh reads the scroll position from here AND from the document, because
+  // in this layout <main> grows to its content height and the document is what actually scrolls.
+  const mainScrollRef = useRef<HTMLElement | null>(null);
   activeConversationIdRef.current = activeConversationId;
   conversationsRef.current = conversations;
   activeTabRef.current = activeTab;
@@ -395,6 +406,21 @@ function MainApp() {
     }
   };
 
+  // Discover/Home refresh used by the Android pull-to-refresh gesture (see PullToRefresh below).
+  // It reuses the same existing discover fetch the header's "Reset & Refresh" button already calls -
+  // no second data-fetch implementation - and it deliberately keeps the current filters, search query
+  // and swipe-deck position untouched, because a pull must not clear what the user was looking at.
+  const refreshDiscoverData = async (): Promise<void> => {
+    try {
+      const res = await api.getDiscoverProfiles(filters);
+      if (res?.profiles) {
+        setDiscoverProfiles(res.profiles.map((profile) => ({ ...profile, is_online: false })));
+      }
+    } catch (err) {
+      console.warn('Discover refresh failed:', err);
+    }
+  };
+
   // Capacitor Android Native Integrations (Back Button, Status Bar)
   useEffect(() => {
     initializeCapacitorApp({
@@ -519,6 +545,46 @@ function MainApp() {
     }
   }, [currentUser?.id]);
 
+  // Android native FCM token registration (app build). Purely additive: the web push effect above is
+  // untouched and still handles browsers. The token itself comes from the native
+  // `LovemeetlyPush` plugin; registration goes through the existing api.registerPushToken
+  // (POST /api/push-tokens, platform 'android') and is guarded by BOTH user id and token.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    void registerNativePushTokenForUser(currentUser.id);
+    return initializeNativePushToken(() => {
+      // Token refreshed while the app is open: re-register for the current user.
+      void registerNativePushTokenForUser(currentUserRef.current?.id);
+    });
+  }, [currentUser?.id]);
+
+  // ANDROID-ONLY Socket.IO startup + foreground recovery.
+  //
+  // The Capacitor WebView is created and loads the app BEFORE the user signs in, so the mount-time
+  // connectSocket() (see the realtime effect below) runs while no session token is stored yet: the
+  // socket has `autoConnect: false`, connectSocket() finds no token and never connects - and the
+  // WebView is not reloaded after login (it stays alive across background/foreground), so nothing
+  // else ever retried. The account therefore appeared permanently offline and no message/call
+  // socket event arrived.
+  //
+  // This only re-attempts the EXISTING singleton connection (src/services/socket.ts) once a real
+  // user id exists, and again whenever Android brings the app back to the foreground (its 5
+  // reconnect attempts can already be spent while the device was offline/dropped). connectSocket()
+  // is a no-op while the socket is connected or already trying, so no second socket and no
+  // duplicate listeners are created: listeners, unread counts, sounds, desktop notifications and
+  // conversation handling are unchanged. Web browsers are untouched - isAndroidApp() is false there.
+  useEffect(() => {
+    if (!isAndroidApp() || !currentUser?.id) return;
+    connectSocket();
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!isAndroidApp()) return;
+    return onAndroidAppResume(() => {
+      if (currentUserRef.current?.id) connectSocket();
+    });
+  }, []);
+
   // Reactive socket room-join sync on authentication state changes
   useEffect(() => {
     const socket = getSocket();
@@ -620,6 +686,10 @@ function MainApp() {
 
       if (isTarget && callData.caller_id !== myId) {
         setIncomingCall(callData);
+        // The in-app ringing UI is visible, so it already covers the call: let the native
+        // ringing notification go. Guarded by isTabHidden() so a backgrounded WebView can never
+        // cut the native call notification short (that ring is the only surface the user sees).
+        if (!isTabHidden()) dismissNativeIncomingCall();
       }
     });
 
@@ -1066,6 +1136,9 @@ function MainApp() {
     // 1. Immediately transition UI state so the modal closes and call view opens instantly
     setIncomingCall(null);
     setActiveCall({ ...call, status: 'accepted' });
+    // The web call UI now owns this call (this is also the path the native Answer action uses),
+    // so the native ringing notification must not be left behind.
+    dismissNativeIncomingCall();
 
     // 2. Emit real-time WebRTC/Socket acceptance
     try {
@@ -1105,6 +1178,34 @@ function MainApp() {
     if (currentUserRef.current?.id) {
       api.getCallHistory().then((c) => setCallHistory(c.calls)).catch(() => {});
     }
+  }, []);
+
+  // Native Android incoming-call handoff (closed-app FCM calls).
+  // Android-only and purely additive: an Answer/Decline taken in the native ringing notification or
+  // the native call screen is fed back into the EXISTING accept/reject flow defined above.
+  // No call logic is duplicated here.
+  const nativeCallHandlersRef = useRef<{
+    accept: (call: Call) => void;
+    reject: (call: Call) => void;
+  } | null>(null);
+  nativeCallHandlersRef.current = { accept: handleAcceptCall, reject: handleRejectCall };
+
+  useEffect(() => {
+    const callApi = api;
+    return initializeNativeCallHandoff({
+      onAnswer: (call) => nativeCallHandlersRef.current?.accept(call),
+      onDecline: (callId, call) => {
+        // Declined while the app was closed: reuse the existing server-side reject mechanism
+        // (POST /api/calls/:id/reject) exactly as handleRejectCall does.
+        if (call) {
+          nativeCallHandlersRef.current?.reject(call);
+          return;
+        }
+        callApi.rejectCall(callId).catch(() => {});
+        setIncomingCall(null);
+      },
+      currentUserId: () => currentUserRef.current?.id,
+    });
   }, []);
 
   // Direct Message Handler from Profile Modal
@@ -1277,6 +1378,11 @@ function MainApp() {
     try {
       await unregisterWebPush();
     } catch {}
+    // Unbind this device's Android FCM token too (existing unregister endpoint), while the session
+    // is still valid.
+    try {
+      await unregisterNativePushToken();
+    } catch {}
     try {
       await api.logout();
     } catch (e) {}
@@ -1404,12 +1510,17 @@ function MainApp() {
         />
 
         {/* Content View Container */}
-        <main className="flex-1 w-full px-2.5 sm:px-4 md:px-6 lg:px-8 py-2.5 sm:py-6 overflow-y-auto pb-20 md:pb-8">
+        <main ref={mainScrollRef} className="flex-1 w-full px-2.5 sm:px-4 md:px-6 lg:px-8 py-2.5 sm:py-6 overflow-y-auto pb-20 md:pb-8">
           
           {/* ========================================================================= */}
           {/* 1. DISCOVER TAB */}
           {/* ========================================================================= */}
           {(activeTab === 'discover' || activeTab === 'home') && (
+            <PullToRefresh
+              enabled={isAndroidApp() && (activeTab === 'discover' || activeTab === 'home')}
+              onRefresh={refreshDiscoverData}
+              scrollRef={mainScrollRef}
+            >
             <div className="space-y-3.5 sm:space-y-6 w-full">
               {/* Discover | Matches tabs: Matches reuses existing Matches view */}
               <div className="flex items-center gap-2">
@@ -1589,6 +1700,7 @@ function MainApp() {
               )}
 
             </div>
+            </PullToRefresh>
           )}
 
           {/* ========================================================================= */}
@@ -1690,7 +1802,7 @@ function MainApp() {
           {/* 3. MESSAGES TAB */}
           {/* ========================================================================= */}
           {activeTab === 'messages' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6 h-[calc(100vh-8.5rem)] md:h-[calc(100vh-10rem)] w-full min-h-0">
               
               {/* Conversations & Calls List (FB Messenger Style) */}
               <div className={`bg-stone-900 rounded-2xl sm:rounded-3xl border border-stone-800 overflow-hidden flex flex-col shadow-xl ${
@@ -1873,7 +1985,7 @@ function MainApp() {
               </div>
 
               {/* Active Conversation Thread */}
-              <div className={`md:col-span-2 h-full ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
+              <div className={`md:col-span-2 h-full min-h-0 ${!activeConversationId ? 'hidden md:flex' : 'flex'}`}>
                 {activeConversation ? (
                   <ChatWindow
                     key={activeConversation.id}
