@@ -694,9 +694,21 @@ function MainApp() {
       }
     });
 
-    socket.on('call:rejected', (callData: Call) => {
-      setActiveCall((prev) => (prev && prev.id === callData.id ? null : prev));
-      setIncomingCall((prev) => (prev && prev.id === callData.id ? null : prev));
+    socket.on('call:rejected', (data: any) => {
+      // Server emits the canonical `callId`; tolerate the legacy `id` shape.
+      const rejectedCallId = data?.callId || data?.id;
+      if (!rejectedCallId) return;
+      setActiveCall((prev) => (prev && prev.id === rejectedCallId ? null : prev));
+      setIncomingCall((prev) => (prev && prev.id === rejectedCallId ? null : prev));
+    });
+
+    // Pre-answer cancellation from the caller (hang up before the receiver
+    // answers). Delivered to the receiver's `user_<id>` room by the server.
+    socket.on('call:cancelled', (data: any) => {
+      const cancelledCallId = data?.callId || data?.id;
+      if (!cancelledCallId) return;
+      setActiveCall((prev) => (prev && prev.id === cancelledCallId ? null : prev));
+      setIncomingCall((prev) => (prev && prev.id === cancelledCallId ? null : prev));
     });
 
     socket.on('call:ended', (data: any) => {
@@ -1029,6 +1041,7 @@ function MainApp() {
       socket.off('match:created');
       socket.off('call:incoming');
       socket.off('call:rejected');
+      socket.off('call:cancelled');
       socket.off('call:ended');
       socket.off('notification:new');
       socket.off('message:new', handleGlobalMessageNew);
@@ -1042,6 +1055,20 @@ function MainApp() {
       window.removeEventListener('hashchange', handleUrlChange);
     };
   }, []);
+
+  // Safety net: an unanswered incoming call must not ring forever if the
+  // cancellation signal is lost. This only clears local UI/ringtone state; it
+  // never creates, ends or stores a call record, and it is a no-op once the
+  // call is accepted (incomingCall is cleared then, so the timer is cleared).
+  useEffect(() => {
+    if (!incomingCall) return;
+    if (incomingCall.status !== 'ringing') return;
+    const callId = incomingCall.id;
+    const timer = setTimeout(() => {
+      setIncomingCall((prev) => (prev && prev.id === callId ? null : prev));
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [incomingCall?.id, incomingCall?.status]);
 
   // Reset all filters and search query to show all global profiles
   const handleResetAllFilters = async () => {

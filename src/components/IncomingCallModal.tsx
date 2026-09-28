@@ -32,6 +32,9 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const ringIntervalRef = useRef<any>(null);
   const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Declared before the conditional `return null` below so hooks always run in
+  // the same order regardless of whether a call is currently present.
+  const [isProcessing, setIsProcessing] = React.useState(false);
 
   // WhatsApp / FB Messenger Incoming Ringtone & Vibration
   useEffect(() => {
@@ -158,8 +161,6 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
     city: 'New York',
     country: 'United States',
   };
-
-  const [isProcessing, setIsProcessing] = React.useState(false);
 
   const isVideo = call.type === 'video';
 

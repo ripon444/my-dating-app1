@@ -5442,6 +5442,16 @@ io.on('connection', (socket) => {
     if (payload?.receiver_id) socket.to(`user_${payload.receiver_id}`).emit('call:ended', payload);
   });
 
+  socket.on('call:cancel', (payload) => {
+    if (!payload?.callId) return;
+    // Pre-answer cancellation. The receiver is typically only in its
+    // `user_<id>` room (it joins `call_<id>` after accepting), so this must be
+    // delivered to the user room, not only the call room. `socket.to` excludes
+    // the emitting socket; the receiver is a different socket, so it is reached.
+    if (payload?.receiver_id) socket.to(`user_${payload.receiver_id}`).emit('call:cancelled', payload);
+    if (payload?.caller_id) socket.to(`user_${payload.caller_id}`).emit('call:cancelled', payload);
+  });
+
   socket.on('call:leave', (payload) => {
     if (payload?.callId) {
       socket.leave(`call_${payload.callId}`);

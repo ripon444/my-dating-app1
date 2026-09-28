@@ -869,6 +869,15 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       caller_id: call.caller_id,
       receiver_id: call.receiver_id,
     });
+    // If the call was never answered, explicitly cancel so the receiver's
+    // ringing modal/ringtone stops even though it has not joined `call_<id>`.
+    if (callState !== 'connected') {
+      getSocket().emit('call:cancel', {
+        callId: call.id,
+        caller_id: call.caller_id,
+        receiver_id: call.receiver_id,
+      });
+    }
     onEndCall();
   };
 
