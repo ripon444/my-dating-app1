@@ -2,4 +2,16 @@
 <resources>
 
     <style name="Theme.MyApplication" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      Native incoming-call screen (full-screen intent). Dark, no action bar, and
+      shown over the lock screen by LovemeetlyCallActivity.
+    -->
+    <style name="LovemeetlyCallTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0c0a09</item>
+        <item name="android:colorBackground">#0c0a09</item>
+        <item name="android:navigationBarColor">#0c0a09</item>
+        <item name="android:statusBarColor">#0c0a09</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

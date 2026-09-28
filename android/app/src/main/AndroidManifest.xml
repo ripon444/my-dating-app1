@@ -11,7 +11,12 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.VIBRATE" /> <!-- Optional Hardware Features (Allows installation on devices without back-camera/mic) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Incoming calls only: lets the ringing notification open the native call screen while the
+         device is locked / the screen is off. On Android 14+ the user can grant or revoke it in
+         Settings; when it is not granted the call is shown as a high-priority heads-up banner. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Optional Hardware Features (Allows installation on devices without back-camera/mic) -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -45,6 +50,26 @@
             </intent-filter>
         </activity>
 
+        <!-- Native incoming-call screen shown by the call notification's full-screen intent.
+             Answer hands over to MainActivity (existing web call flow); Decline dismisses the ring.
+             showWhenLocked/turnScreenOn let it ring over the lock screen where the platform allows it;
+             LovemeetlyCallActivity also sets the equivalent window flags for API < 27. -->
+        <activity
+            android:name="com.lovemeetly.app.LovemeetlyCallActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.lovemeetly.app.call"
+            android:theme="@style/LovemeetlyCallTheme"
+            android:turnScreenOn="true" />
+
+        <!-- Notification "Decline" action: stops the ring, then hands the rejection to the existing
+             server-side reject mechanism through the running WebView. Never starts an Activity. -->
+        <receiver
+            android:name="com.lovemeetly.app.LovemeetlyCallActionReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -54,6 +79,32 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- FCM: the app's Firebase Messaging service. Declaring a
+             FirebaseMessagingService is what lets the Firebase SDK both
+             auto-display notification-type payloads while the app is in the
+             background or fully closed, and hand data-only payloads to
+             LovemeetlyMessagingService. -->
+        <service
+            android:name="com.lovemeetly.app.LovemeetlyMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Channel used when a push payload does not specify its own channelId,
+             so notifications land in the app's own high-importance channel
+             instead of the SDK's fallback "Miscellaneous" one. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="@string/lovemeetly_notification_channel_id" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_lovemeetly" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/lovemeetly_notification_color" />
     </application>
 
 </manifest>

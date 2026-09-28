@@ -13,6 +13,63 @@ let isInitialized = false;
 let currentHandlers: BackButtonHandlers | null = null;
 let lastBackPressTime = 0;
 
+/** True only inside the Capacitor Android app; every web/desktop build returns false. */
+export function isAndroidApp(): boolean {
+  try {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ANDROID-ONLY: subscribe to the app lifecycle that is already in use here (the same `@capacitor/app`
+ * plugin instance the back-button handler above is registered on - no second lifecycle system) and
+ * invoke `handler` every time Android returns the app to the foreground.
+ *
+ * Unlike a browser tab, the Capacitor WebView is not reloaded when the app is backgrounded, so
+ * anything that must react to "the user is back" (e.g. reviving the existing Socket.IO connection
+ * after its reconnect budget was spent while the device was offline) needs this signal.
+ *
+ * Safe on every platform: returns a no-op unsubscribe function outside Android. Never throws.
+ */
+export function onAndroidAppResume(handler: () => void): () => void {
+  if (!isAndroidApp()) {
+    return () => {};
+  }
+
+  let cancelled = false;
+  let listener: { remove?: () => void } | null = null;
+
+  try {
+    Promise.resolve(
+      App.addListener('appStateChange', (state) => {
+        // `isActive` is true only when the app is in the foreground.
+        if (!cancelled && state?.isActive) handler();
+      }) as Promise<{ remove?: () => void }> | { remove?: () => void }
+    )
+      .then((created) => {
+        if (cancelled) {
+          try {
+            created?.remove?.();
+          } catch {}
+          return;
+        }
+        listener = created || null;
+      })
+      .catch(() => {});
+  } catch (err) {
+    console.debug('App state listener error:', err);
+  }
+
+  return () => {
+    cancelled = true;
+    try {
+      listener?.remove?.();
+    } catch {}
+  };
+}
+
 /**
  * Initialize Capacitor Native Android features safely
  */

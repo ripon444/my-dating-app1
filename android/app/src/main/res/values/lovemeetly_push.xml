@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Single notification channel shared by both notification paths:
+      1. the Firebase SDK's automatic display of notification-type payloads while
+         the app is backgrounded/closed, and
+      2. LovemeetlyMessagingService's display of data-only payloads.
+      IMPORTANCE_HIGH is what allows the heads-up (pop-up) presentation.
+    -->
+    <string name="lovemeetly_notification_channel_id" translatable="false">lovemeetly_messages</string>
+    <string name="lovemeetly_notification_channel_name">Messages</string>
+    <string name="lovemeetly_notification_channel_description">Chat messages and account alerts</string>
+
+    <!--
+      Accent used to tint the notification's small icon.
+      Defined in the app module (rather than reusing the capacitor-android
+      library's colorAccent) because non-transitive R classes make library
+      resources unreachable from app Java code. Matches the existing app accent.
+    -->
+    <color name="lovemeetly_notification_color">#FF4081</color>
+
+    <!--
+      Dedicated incoming-call channel. Separate from the messages channel on
+      purpose: calls need their own ringtone, vibration pattern and importance,
+      and users must be able to silence calls without silencing messages.
+      Created by LovemeetlyNotifications.ensureCallChannel().
+    -->
+    <string name="lovemeetly_call_channel_id" translatable="false">lovemeetly_calls</string>
+    <string name="lovemeetly_call_channel_name">Incoming calls</string>
+    <string name="lovemeetly_call_channel_description">Ringing incoming call alerts with Answer and Decline</string>
+
+    <!-- Incoming-call notification + native call screen copy. -->
+    <string name="lovemeetly_call_default_caller">Lovemeetly member</string>
+    <string name="lovemeetly_call_ongoing_label">Incoming call</string>
+    <string name="lovemeetly_call_voice_label">Voice call</string>
+    <string name="lovemeetly_call_video_label">Video call</string>
+    <string name="lovemeetly_call_content_text">%1$s is calling you · %2$s</string>
+    <string name="lovemeetly_call_incoming_subtitle">%1$s is calling you on Lovemeetly</string>
+    <string name="lovemeetly_call_native_notice">Answering opens your Lovemeetly call screen.</string>
+    <string name="lovemeetly_call_answer">Answer</string>
+    <string name="lovemeetly_call_decline">Decline</string>
+</resources>

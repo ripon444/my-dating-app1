@@ -23,10 +23,12 @@ android {
         }
     }
     buildTypes {
-        release {
+
+        def var = release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+        var
     }
 }
 
@@ -46,6 +48,10 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // Firebase Cloud Messaging: provides the native FirebaseMessagingService base
+    // class plus the SDK's automatic notification display for notification-type
+    // payloads while the app is in the background or fully closed.
+    implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
 }
 
 apply from: 'capacitor.build.gradle'

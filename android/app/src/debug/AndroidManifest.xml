@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY test hook for the closed-app incoming-call path.
+
+  This manifest is merged into the debug variant only, so release APKs contain neither this
+  receiver nor the class behind it. It exists so the native call notification (channel, ringtone,
+  vibration, full-screen intent, Answer/Decline, de-duplication) can be exercised from ADB without
+  needing the server-side FCM send. Example (see LovemeetlyDebugCallReceiver for the full list):
+
+    adb shell am broadcast -a com.lovemeetly.app.debug.CALL_INCOMING -n com.lovemeetly.app/.LovemeetlyDebugCallReceiver -e callId call_test_1 -e callerId user_42 -e callerName TestCaller -e callType video
+
+  It only feeds a payload map into the exact production method the FCM service calls
+  (LovemeetlyCallNotifications.showIncomingCall); it bypasses only the Firebase transport.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <receiver
+            android:name="com.lovemeetly.app.LovemeetlyDebugCallReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.lovemeetly.app.debug.CALL_INCOMING" />
+                <action android:name="com.lovemeetly.app.debug.CALL_ENDED" />
+                <action android:name="com.lovemeetly.app.debug.CALL_DECLINE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
