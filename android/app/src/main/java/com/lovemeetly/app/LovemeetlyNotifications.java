@@ -11,23 +11,49 @@ import android.os.Build;
 /**
  * Owns the Lovemeetly notification channels.
  *
- * <p>Two channels, deliberately separate:
+ * <p>Deliberately separate channels:
  *
  * <ul>
  *   <li>{@link #CHANNEL_ID} - messages/account alerts. Shared by both normal notification paths:
  *       the Firebase SDK's automatic display of notification-type payloads and
- *       {@link LovemeetlyMessagingService}'s display of data-only payloads.
- *   <li>{@link #CALL_CHANNEL_ID} - incoming calls. Dedicated ringtone, vibration pattern and
- *       importance, so a user can silence calls without silencing chat messages.
+ *       {@link LovemeetlyMessagingService}'s display of data-only payloads. Its sound is untouched by
+ *       the incoming-call ringtones.
+ *   <li>{@link #CALL_VOICE_CHANNEL_ID} / {@link #CALL_VIDEO_CHANNEL_ID} - incoming calls, one channel
+ *       per call type, each with its own ringtone plus a vibration pattern and importance of its own,
+ *       so a user can silence calls without silencing chat messages and voice/video calls ring with
+ *       matching ringtones.
  * </ul>
+ *
+ * <p>Why one channel per call type: Android binds a channel's sound when the channel is first
+ * created; afterwards only the user can change it in system settings. A ringtone therefore can never
+ * be swapped in place under an existing channel id. The call ringtones are addressed through these
+ * per-type ids rather than {@link #LEGACY_CALL_CHANNEL_ID}, which earlier builds created together
+ * with the single pre-separation ringtone, so an installed app picks the new ringtones up without
+ * having to be reinstalled. The legacy channel is left in place (never deleted and no longer posted
+ * to) so a channel the user may have configured disappears from nowhere.
  */
 public final class LovemeetlyNotifications {
 
     /** Must stay in sync with {@code lovemeetly_notification_channel_id}. */
     public static final String CHANNEL_ID = "lovemeetly_messages";
 
-    /** Must stay in sync with {@code lovemeetly_call_channel_id}. */
-    public static final String CALL_CHANNEL_ID = "lovemeetly_calls";
+    /**
+     * The single incoming-call channel of earlier builds, whose sound is the one ringtone that
+     * existed before voice/video were separated. Kept as a named constant because that channel still
+     * exists on installed devices and its sound can no longer be changed programmatically.
+     */
+    public static final String LEGACY_CALL_CHANNEL_ID = "lovemeetly_calls";
+
+    /** Incoming voice calls. Must stay in sync with {@code lovemeetly_call_voice_channel_id}. */
+    public static final String CALL_VOICE_CHANNEL_ID = "lovemeetly_calls_voice";
+
+    /** Incoming video calls. Must stay in sync with {@code lovemeetly_call_video_channel_id}. */
+    public static final String CALL_VIDEO_CHANNEL_ID = "lovemeetly_calls_video";
+
+    /** The channel an incoming call of this type rings on. */
+    public static String callChannelId(boolean videoCall) {
+        return videoCall ? CALL_VIDEO_CHANNEL_ID : CALL_VOICE_CHANNEL_ID;
+    }
 
     /** Ringing vibration pattern (wait, vibrate, pause, vibrate, pause). */
     private static final long[] CALL_VIBRATION_PATTERN = { 0, 1000, 1000, 1000, 1000 };
@@ -64,34 +90,44 @@ public final class LovemeetlyNotifications {
     }
 
     /**
-     * Creates the dedicated incoming-call channel if it does not exist yet.
+     * Creates the incoming-call channel of one call type if it does not exist yet. One channel per
+     * type exists only because a channel's sound is frozen at creation time - that is what makes
+     * voice and video calls ring with their own ringtone without the message channel being touched.
      *
      * <p>IMPORTANCE_HIGH is required for both a heads-up call banner and a full-screen intent on
      * Android 14+, where {@code USE_FULL_SCREEN_INTENT} must additionally be granted by the user.
      */
-    public static void ensureCallChannel(Context context) {
+    public static void ensureCallChannel(Context context, boolean videoCall) {
         if (context == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
         }
 
+        String channelId = callChannelId(videoCall);
         NotificationManager manager =
                 (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null || manager.getNotificationChannel(CALL_CHANNEL_ID) != null) {
+        if (manager == null || manager.getNotificationChannel(channelId) != null) {
             return;
         }
 
         NotificationChannel channel =
                 new NotificationChannel(
-                        CALL_CHANNEL_ID,
-                        context.getString(R.string.lovemeetly_call_channel_name),
+                        channelId,
+                        context.getString(
+                                videoCall
+                                        ? R.string.lovemeetly_call_video_channel_name
+                                        : R.string.lovemeetly_call_voice_channel_name),
                         NotificationManager.IMPORTANCE_HIGH);
-        channel.setDescription(context.getString(R.string.lovemeetly_call_channel_description));
+        channel.setDescription(
+                context.getString(
+                        videoCall
+                                ? R.string.lovemeetly_call_video_channel_description
+                                : R.string.lovemeetly_call_voice_channel_description));
         channel.enableVibration(true);
         channel.setVibrationPattern(CALL_VIBRATION_PATTERN);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         channel.setShowBadge(true);
 
-        Uri ringtone = LovemeetlyCallNotifications.callRingtoneUri(context);
+        Uri ringtone = LovemeetlyCallNotifications.callRingtoneUri(context, videoCall);
         if (ringtone != null) {
             AudioAttributes attributes =
                     new AudioAttributes.Builder()
@@ -104,9 +140,15 @@ public final class LovemeetlyNotifications {
         manager.createNotificationChannel(channel);
     }
 
-    /** Both channels, used from MainActivity so they exist before any push arrives. */
+    /** Both incoming-call channels (voice and video). Safe to call repeatedly. */
+    public static void ensureCallChannels(Context context) {
+        ensureCallChannel(context, false);
+        ensureCallChannel(context, true);
+    }
+
+    /** Every Lovemeetly channel, used from MainActivity so they exist before any push arrives. */
     public static void ensureAllChannels(Context context) {
         ensureChannel(context);
-        ensureCallChannel(context);
+        ensureCallChannels(context);
     }
 }

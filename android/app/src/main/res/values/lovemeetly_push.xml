@@ -20,14 +20,32 @@
     <color name="lovemeetly_notification_color">#FF4081</color>
 
     <!--
-      Dedicated incoming-call channel. Separate from the messages channel on
-      purpose: calls need their own ringtone, vibration pattern and importance,
-      and users must be able to silence calls without silencing messages.
-      Created by LovemeetlyNotifications.ensureCallChannel().
+      Dedicated incoming-call channels, one per call type. Separate from the messages
+      channel on purpose: calls need their own ringtone, vibration pattern and
+      importance, and users must be able to silence calls without silencing messages.
+      Two channels (instead of one) exist because Android freezes a channel's sound
+      when it is created, so a distinct voice and video ringtone requires a distinct
+      channel each. Created by LovemeetlyNotifications.ensureCallChannel().
+      The LovemeetlyNotifications.CALL_* constants are the authoritative ids.
+    -->
+    <string name="lovemeetly_call_voice_channel_id" translatable="false">lovemeetly_calls_voice</string>
+    <string name="lovemeetly_call_voice_channel_name">Incoming voice calls</string>
+    <string name="lovemeetly_call_voice_channel_description">Rings with the voice call ringtone (Answer / Decline)</string>
+
+    <string name="lovemeetly_call_video_channel_id" translatable="false">lovemeetly_calls_video</string>
+    <string name="lovemeetly_call_video_channel_name">Incoming video calls</string>
+    <string name="lovemeetly_call_video_channel_description">Rings with the video call ringtone (Answer / Decline)</string>
+
+    <!--
+      The single incoming-call channel created by earlier builds ("lovemeetly_calls",
+      LovemeetlyNotifications.LEGACY_CALL_CHANNEL_ID). It already exists on installed
+      devices and its sound (the pre-separation ringtone) cannot be changed
+      programmatically, so calls no longer ring on it. Kept here only so the legacy id
+      and its user-visible copy stay documented in one place.
     -->
     <string name="lovemeetly_call_channel_id" translatable="false">lovemeetly_calls</string>
-    <string name="lovemeetly_call_channel_name">Incoming calls</string>
-    <string name="lovemeetly_call_channel_description">Ringing incoming call alerts with Answer and Decline</string>
+    <string name="lovemeetly_call_channel_name">Incoming calls (legacy)</string>
+    <string name="lovemeetly_call_channel_description">Legacy incoming-call channel from an earlier app version</string>
 
     <!-- Incoming-call notification + native call screen copy. -->
     <string name="lovemeetly_call_default_caller">Lovemeetly member</string>

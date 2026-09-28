@@ -11,6 +11,7 @@ import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.RawRes;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.Person;
@@ -26,10 +27,11 @@ import java.util.Queue;
  * <p>Deliberately independent of the WebView/Socket.IO runtime: it is built from the raw FCM data
  * map, so a call still rings when the app process was cold-started by FCM (or was swiped away).
  *
- * <p>Differences from the normal message notification (see {@link LovemeetlyMessagingService}):
- * a dedicated {@code lovemeetly_calls} channel, IMPORTANCE_HIGH, the call ringtone, a vibration
- * pattern, an ongoing non-auto-cancel notification, {@code CATEGORY_CALL}, a full-screen intent to
- * {@link LovemeetlyCallActivity} and Answer/Decline actions.
+ * <p>Differences from the normal message notification (see {@link LovemeetlyMessagingService}): a
+ * dedicated per-call-type channel ({@link LovemeetlyNotifications#CALL_VOICE_CHANNEL_ID} /
+ * {@link LovemeetlyNotifications#CALL_VIDEO_CHANNEL_ID}) carrying that call type's own ringtone,
+ * IMPORTANCE_HIGH, a vibration pattern, an ongoing non-auto-cancel notification, {@code
+ * CATEGORY_CALL}, a full-screen intent to {@link LovemeetlyCallActivity} and Answer/Decline actions.
  */
 public final class LovemeetlyCallNotifications {
 
@@ -137,13 +139,17 @@ public final class LovemeetlyCallNotifications {
 
     /** Builds and posts the ringing notification. */
     private static void postRingingNotification(Context context, LovemeetlyCallPayload payload) {
-        LovemeetlyNotifications.ensureCallChannel(context);
+        // The call type drives both the ringtone and the channel that ringtone is bound to, so a
+        // background/closed-app ring sounds like a voice or a video call exactly as it does in the
+        // foreground web UI.
+        boolean videoCall = payload.isVideoCall();
+        LovemeetlyNotifications.ensureCallChannel(context, videoCall);
 
         String callerName =
                 payload.displayName(context.getString(R.string.lovemeetly_call_default_caller));
         String callTypeLabel =
                 context.getString(
-                        payload.isVideoCall()
+                        videoCall
                                 ? R.string.lovemeetly_call_video_label
                                 : R.string.lovemeetly_call_voice_label);
         String contentText =
@@ -186,7 +192,8 @@ public final class LovemeetlyCallNotifications {
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         NotificationCompat.Builder builder =
-                new NotificationCompat.Builder(context, LovemeetlyNotifications.CALL_CHANNEL_ID)
+                new NotificationCompat.Builder(
+                        context, LovemeetlyNotifications.callChannelId(videoCall))
                         .setSmallIcon(R.drawable.ic_stat_lovemeetly)
                         .setColor(
                                 ContextCompat.getColor(
@@ -220,7 +227,7 @@ public final class LovemeetlyCallNotifications {
         }
 // Below Android 8.0 there is no channel, so the alert itself carries sound/vibration.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            Uri sound = callRingtoneUri(context);
+            Uri sound = callRingtoneUri(context, videoCall);
             if (sound != null) {
                 builder.setSound(sound);
             }
@@ -283,24 +290,35 @@ public final class LovemeetlyCallNotifications {
     }
 
     /**
-     * URI of the dedicated incoming-call ringtone in {@code res/raw}. Falls back to the device's
-     * default ringtone URI when the packaged asset cannot be opened. The existing foreground/web
-     * ringtone in {@code IncomingCallModal} is untouched by this.
+     * The packaged ringtone resource belonging to a call type: the voice call ringtone for
+     * {@code voice} calls and the video call ringtone for {@code video} calls. Both are the same
+     * audio files the foreground web UI plays (public/sounds/audio-call-incoming.mp3 and
+     * public/sounds/video-call-incoming.mp3); they are shipped as Android raw resources because a
+     * notification can only play a local resource/URI, never a web URL.
+     *
+     * <p>Deliberately a pure resource mapping with no {@link Context}, so the voice/video routing is
+     * unit testable (see LovemeetlyCallRingtoneTest).
+     */
+    @RawRes
+    public static int callRingtoneResource(boolean videoCall) {
+        return videoCall ? R.raw.video_call_incoming : R.raw.audio_call_incoming;
+    }
+
+    /**
+     * URI of the incoming-call ringtone of this call type in {@code res/raw}. Falls back to the
+     * device's default ringtone URI when the packaged asset cannot be opened. The existing
+     * foreground/web ringtone in {@code IncomingCallModal} is untouched by this.
      */
     @Nullable
-    public static Uri callRingtoneUri(Context context) {
+    public static Uri callRingtoneUri(Context context, boolean videoCall) {
         if (context == null) {
             return null;
         }
+        int resource = callRingtoneResource(videoCall);
         Uri packaged =
-                Uri.parse(
-                        "android.resource://"
-                                + context.getPackageName()
-                                + "/"
-                                + R.raw.lovemeetly_call_ringtone);
+                Uri.parse("android.resource://" + context.getPackageName() + "/" + resource);
         try {
-            AssetFileDescriptor descriptor =
-                    context.getResources().openRawResourceFd(R.raw.lovemeetly_call_ringtone);
+            AssetFileDescriptor descriptor = context.getResources().openRawResourceFd(resource);
             try {
                 if (descriptor != null && descriptor.getLength() > 0) {
                     return packaged;

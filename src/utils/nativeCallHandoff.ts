@@ -1,7 +1,8 @@
 // Native Android incoming-call handoff (closed-app FCM call path).
 //
 // The ringing itself is native: FCM data push -> LovemeetlyCallNotifications
-// (dedicated `lovemeetly_calls` channel, ringtone, vibration, full-screen intent)
+// (the call type's own channel - `lovemeetly_calls_voice` / `lovemeetly_calls_video` -
+// each with its matching ringtone, plus vibration and a full-screen intent)
 // -> LovemeetlyCallActivity. That path must not depend on the WebView runtime.
 //
 // This module is only the return trip. When the user answers or declines there,

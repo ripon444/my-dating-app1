@@ -28,8 +28,9 @@ import java.util.Queue;
  *
  * <ol>
  *   <li><b>Incoming-call payload</b> (data-only, {@code type: call_incoming}). Rendered natively by
- *       {@link LovemeetlyCallNotifications} with the dedicated {@code lovemeetly_calls} channel and
- *       a full-screen intent, so a call rings while the app is backgrounded or swiped away. While
+ *       {@link LovemeetlyCallNotifications} on the call type's own {@code lovemeetly_calls_voice} /
+ *       {@code lovemeetly_calls_video} channel (each with the matching call ringtone) and with a
+ *       full-screen intent, so a call rings while the app is backgrounded or swiped away. While
  *       the app is in the foreground the existing Socket.IO ringing flow stays in charge.
  *   <li><b>Notification-type payload</b> (the payload carries a {@code notification} block). While
  *       the app is in the background or fully closed, the Firebase SDK displays the notification
