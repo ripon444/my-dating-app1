@@ -20,3 +20,7 @@ assets/index-*.js
 assets/index-*.css
 assets/index.esm-*.js
 assets/web-*.js
+
+# Generated frontend chunks
+assets/*.js
+assets/*.css

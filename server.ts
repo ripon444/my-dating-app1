@@ -46,12 +46,22 @@ import {
   ANDROID_PLATFORM,
   maskToken,
   selectPlatformTokens,
+  sendAndroidAppUpdatePush,
   sendAndroidCallPush,
   sendAndroidChatMessagePush,
   type CallIncomingPushSource,
   type ChatMessagePushSource,
   type PushTokenRow,
 } from './src/lib/push.ts';
+import {
+  DEFAULT_ANDROID_APK_URL,
+  isNewerAndroidRelease,
+  parseAndroidReleaseMetadata,
+  readAndroidReleaseMetadata,
+  shouldNotifyAndroidRelease,
+  writeAndroidReleaseMetadata,
+  type AndroidReleaseMetadata,
+} from './src/lib/androidRelease.ts';
 
 const app = express();
 const httpServer = createServer(app);
@@ -405,6 +415,47 @@ async function requireVipFeature(feature: VipFeatureKey, req: any, res: any): Pr
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
+
+// -------------------------------------------------------------
+// Android app update check (public, read-only, no session)
+// -------------------------------------------------------------
+// The Android app compares these values with the versionCode of the INSTALLED APK
+// (read natively through @capacitor/app) and shows an in-app prompt when a newer
+// build has been published. The single source of truth is the repository file
+// android-release.json (src/lib/androidRelease.ts): no database row, no auth and no
+// secrets. Every failure mode is handled by the client as "no prompt", so this
+// endpoint being unavailable can never affect login, chat, calls or FCM.
+//
+// TO PUBLISH A NEW APK RELEASE run the release command (it updates the metadata and
+// sends the FCM app_update notification exactly once):
+//
+//     npm run release:android -- --version-code 2 --version-name 2.0 --notes "..."
+//
+// and bump android/app/build.gradle (versionCode + versionName) when building the APK
+// itself. The APK is uploaded to <cwd>/downloads/lovemeetly.apk, which is what the
+// existing /downloads/lovemeetly.apk route and the site's "Download APK" links serve.
+//
+// `latestVersionCode`/`latestVersionName`/`updateUrl` are the client contract already
+// used by src/utils/appUpdate.ts; `versionCode`/`versionName`/`apkUrl` are the same
+// values under the release-document field names.
+app.get('/api/android/version', (_req, res) => {
+  const release = readAndroidReleaseMetadata();
+  res.json({
+    latestVersionCode: release.versionCode,
+    latestVersionName: release.versionName,
+    updateUrl: release.apkUrl,
+    releaseNotes: release.releaseNotes,
+    forceUpdate: release.forceUpdate,
+    versionCode: release.versionCode,
+    versionName: release.versionName,
+    apkUrl: release.apkUrl,
+  });
+});
+
+// The APK URL must never drift from the fixed public download location.
+if (readAndroidReleaseMetadata().apkUrl !== DEFAULT_ANDROID_APK_URL) {
+  console.warn(`[Android Release] apkUrl in android-release.json is not ${DEFAULT_ANDROID_APK_URL}.`);
+}
 
 // -------------------------------------------------------------
 // Authentication Middleware (Token & Session Based)
@@ -781,6 +832,93 @@ async function sendAndroidCallPushToUser(
   } catch (err) {
     console.warn('[FCM] Android call push skipped:', (err as Error)?.message);
     return 0;
+  }
+}
+
+/** Outcome of one app-update broadcast, reported back to the release action. */
+export interface AndroidAppUpdatePushResult {
+  /** Android tokens the update notification was attempted for. 0 means "no device registered". */
+  attempted: number;
+  delivered: number;
+  failed: number;
+  /** Tokens FCM reported as permanently invalid and that were pruned from push_tokens. */
+  staleRemoved: number;
+  /** Tokens that were present but unusable (too short / malformed) and therefore skipped. */
+  skipped: number;
+  errorCodes: string[];
+}
+
+/**
+ * Broadcasts the app-update notification to EVERY registered Android device.
+ *
+ * Called only by the protected release action (POST /api/admin/android-release) - never on an app
+ * start-up, a page load or a chat/call event, so ordinary usage can never trigger a push.
+ *
+ * Same conventions as the chat/call senders:
+ * - targets only rows with platform = 'android' (web browser tokens are never touched)
+ * - data-only payload, so LovemeetlyMessagingService renders it in every app state
+ * - only tokens FCM reports as permanently invalid are pruned; transient failures are kept
+ * - token values are masked in logs
+ * - never throws
+ */
+async function sendAndroidAppUpdatePushToAllDevices(
+  release: AndroidReleaseMetadata
+): Promise<AndroidAppUpdatePushResult> {
+  const result: AndroidAppUpdatePushResult = {
+    attempted: 0,
+    delivered: 0,
+    failed: 0,
+    staleRemoved: 0,
+    skipped: 0,
+    errorCodes: [],
+  };
+
+  try {
+    if (!adminMessaging) {
+      warnFcmAdminUnavailableOnce();
+      return result;
+    }
+
+    const rows = await SqlHelper.queryAll<PushTokenRow>(
+      'SELECT token, platform FROM push_tokens WHERE platform = ?',
+      [ANDROID_PLATFORM]
+    );
+    const androidRows = Array.isArray(rows) ? rows : [];
+    // Platform is re-checked here (not just in SQL) so a mislabeled row can never leak across paths.
+    const tokens = selectPlatformTokens(androidRows, ANDROID_PLATFORM);
+    result.skipped = androidRows.length - tokens.length;
+    if (!tokens.length) return result;
+
+    result.attempted = tokens.length;
+    const outcome = await sendAndroidAppUpdatePush(adminMessaging, tokens, {
+      versionCode: release.versionCode,
+      versionName: release.versionName,
+      apkUrl: release.apkUrl,
+    });
+    result.delivered = outcome.delivered;
+    result.failed = outcome.failed;
+    result.errorCodes = outcome.errorCodes;
+
+    // Prune only tokens FCM reports as permanently invalid/unregistered.
+    for (const stale of outcome.staleTokens) {
+      await SqlHelper.execute('DELETE FROM push_tokens WHERE token = ?', [stale]).catch(() => {});
+      result.staleRemoved += 1;
+      console.log(`[FCM] Removed stale android token ${maskToken(stale)}`);
+    }
+
+    console.log(
+      `[FCM] Android app-update push for versionCode=${release.versionCode} ` +
+        `(v${release.versionName}): attempted=${result.attempted} delivered=${result.delivered} ` +
+        `failed=${result.failed}` +
+        (result.errorCodes.length ? ` codes=[${result.errorCodes.join(', ')}]` : '') +
+        (result.staleRemoved ? ` removedStale=${result.staleRemoved}` : '') +
+        (result.skipped ? ` skippedUnusable=${result.skipped}` : '')
+    );
+
+    return result;
+  } catch (err) {
+    console.warn('[FCM] Android app-update push skipped:', (err as Error)?.message);
+    return result;
   }
 }
 
@@ -3693,6 +3831,95 @@ const requireAdmin = async (req: any, res: any, next: any) => {
 
   next();
 };
+
+// -------------------------------------------------------------
+// ADMIN: Android APK release publishing (protected, idempotent)
+// -------------------------------------------------------------
+// The ONLY place an app-update FCM notification is ever sent. It is guarded by the same
+// requireAdmin middleware as every other /api/admin route (a valid session of an ADMIN /
+// super-admin user - there is no key bypass), so no visitor can trigger a push, and it holds no
+// credentials of its own: the single Firebase Admin instance from src/lib/firebase-admin.ts is
+// reused. Normal app start-ups, page loads, chats and calls never reach this code.
+//
+// Publishing is idempotent by construction:
+//   * a versionCode older than the published one is always rejected (409),
+//   * the same versionCode is rejected too, unless `resend: true` is passed explicitly,
+//   * the broadcast is recorded as `notifiedVersionCode` in android-release.json, so a retried or
+//     duplicated release request can never send the notification twice.
+app.post('/api/admin/android-release', requireAdmin, async (req: any, res: any) => {
+  const body = req.body || {};
+  const resend = body.resend === true;
+  const shouldNotifyRequested = body.notify !== false;
+  const requestedApkUrl = body.apkUrl ?? body.apk_url;
+
+  const target = parseAndroidReleaseMetadata({
+    versionCode: body.versionCode ?? body.version_code,
+    versionName: body.versionName ?? body.version_name,
+    apkUrl: typeof requestedApkUrl === 'string' && requestedApkUrl.trim() ? requestedApkUrl : DEFAULT_ANDROID_APK_URL,
+    releaseNotes: body.releaseNotes ?? body.release_notes,
+    forceUpdate: body.forceUpdate === true,
+  });
+
+  if (!target) {
+    return res.status(400).json({
+      error: 'A positive integer versionCode and an absolute http(s) apkUrl are required.',
+    });
+  }
+
+  const current = readAndroidReleaseMetadata();
+  const isSameVersion = target.versionCode === current.versionCode;
+  if (!isNewerAndroidRelease(target.versionCode, current.versionCode) && !(resend && isSameVersion)) {
+    return res.status(409).json({
+      error:
+        'A release can never publish a versionCode older than the current one. Pass a newer ' +
+        'versionCode, or { "resend": true } to re-announce the already published versionCode.',
+      published: { versionCode: current.versionCode, versionName: current.versionName },
+    });
+  }
+
+  const next: AndroidReleaseMetadata = {
+    versionCode: target.versionCode,
+    versionName: target.versionName,
+    apkUrl: target.apkUrl,
+    releaseNotes: target.releaseNotes,
+    forceUpdate: target.forceUpdate,
+    publishedAt: new Date().toISOString(),
+    // Kept until the broadcast below has actually happened.
+    notifiedVersionCode: current.notifiedVersionCode,
+  };
+
+  // The metadata is written first, so the public update endpoint serves the new version even if FCM
+  // is temporarily unavailable.
+  if (!writeAndroidReleaseMetadata(next)) {
+    return res.status(500).json({ error: 'The release metadata could not be written on the server.' });
+  }
+
+  const shouldSend = shouldNotifyRequested && (resend || shouldNotifyAndroidRelease(next, current.notifiedVersionCode));
+  let push: AndroidAppUpdatePushResult | null = null;
+
+  if (shouldSend) {
+    push = await sendAndroidAppUpdatePushToAllDevices(next);
+    // Recorded even when no device was reachable: the release has been announced once, and any
+    // further attempt has to be an explicit resend. That is what keeps a retried publish from
+    // spamming every installed app.
+    writeAndroidReleaseMetadata({ ...next, notifiedVersionCode: next.versionCode });
+  }
+
+  const published = readAndroidReleaseMetadata();
+  console.log(
+    `[Android Release] Published versionCode=${published.versionCode} (v${published.versionName}) ` +
+      `by ${req.user?.email || req.user?.id || 'admin'}; fcmSent=${shouldSend}`
+  );
+
+  return res.json({
+    success: true,
+    released: published,
+    previous: { versionCode: current.versionCode, versionName: current.versionName },
+    notifyRequested: shouldNotifyRequested,
+    fcmSent: shouldSend,
+    push,
+  });
+});
 
 const ALL_ADMIN_PERMISSIONS = [
   'kpi',

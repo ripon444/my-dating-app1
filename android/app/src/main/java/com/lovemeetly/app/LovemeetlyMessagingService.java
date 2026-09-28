@@ -43,6 +43,11 @@ import java.util.Queue;
  *       Capacitor WebView has no browser {@code Notification} API, so the app's foreground JS
  *       notification helper cannot pop up on Android at all. Payloads without a message/conversation
  *       id are ignored and re-deliveries are dropped by message id, so nothing is shown twice.
+ *   <li><b>App-update payload</b> (data-only, {@code type: app_update}). Rendered natively by
+ *       {@link LovemeetlyUpdateNotifications} on the dedicated update channel: one fixed slot per
+ *       release, never shown when the installed build is already current, and tapping it hands the
+ *       fixed APK URL to Android's DownloadManager. Additive - the chat and call paths above are
+ *       untouched.
  * </ol>
  *
  * <p>Together those rules give: a data-only chat push shows exactly one notification in every app
@@ -85,6 +90,21 @@ public class LovemeetlyMessagingService extends FirebaseMessagingService {
                 LovemeetlyCallNotifications.showIncomingCall(this, data);
             }
             return;
+        }
+
+        // App-update announcement (data-only, type = app_update). A distinct branch on purpose: an
+        // update must never be treated as a chat message, and the chat/call paths below stay exactly
+        // as they were. Rendered natively in every app state; the tap hands the fixed APK URL to
+        // DownloadManager, so nothing about the running app changes until the user installs it.
+        try {
+            LovemeetlyUpdatePayload update = LovemeetlyUpdatePayload.fromData(data);
+            if (update.isAppUpdate()) {
+                LovemeetlyUpdateNotifications.showUpdateAvailable(this, update);
+                return;
+            }
+        } catch (Exception error) {
+            // A push must never crash the messaging service.
+            Log.w(TAG, "Could not display app update notification: " + error.getMessage());
         }
 
         // Notification-type payloads: the SDK owns display in the background/closed case.

@@ -11,6 +11,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:server": "node --import tsx --test src/lib/push.test.ts",
+    "test:release": "node --import tsx --test src/lib/androidRelease.test.ts",
+    "test:update-check": "node --import tsx --test src/utils/appUpdateConfig.test.ts",
+    "release:android": "tsx scripts/publish-android-release.ts",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android",
     "cap:build": "vite build && npx cap sync android"

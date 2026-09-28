@@ -57,4 +57,20 @@
     <string name="lovemeetly_call_native_notice">Answering opens your Lovemeetly call screen.</string>
     <string name="lovemeetly_call_answer">Answer</string>
     <string name="lovemeetly_call_decline">Decline</string>
+
+    <!--
+      App-update notifications (FCM data payload type = "app_update", built by the server's
+      protected release action and rendered by LovemeetlyUpdateNotifications).
+      A dedicated channel exists so a user can mute update announcements independently of chat
+      messages and calls; it is created by LovemeetlyNotifications.ensureUpdateChannel().
+      The LovemeetlyNotifications.UPDATE_CHANNEL_ID constant is the authoritative id.
+    -->
+    <string name="lovemeetly_update_channel_id" translatable="false">lovemeetly_updates</string>
+    <string name="lovemeetly_update_channel_name">App updates</string>
+    <string name="lovemeetly_update_channel_description">Tells you when a new Lovemeetly version is available</string>
+    <string name="lovemeetly_update_notification_title">Lovemeetly update available</string>
+    <string name="lovemeetly_update_notification_body">Lovemeetly %1$s is now available. Tap to update.</string>
+    <string name="lovemeetly_update_notification_body_generic">A new Lovemeetly update is now available. Tap to update.</string>
+    <string name="lovemeetly_update_action_download">Update now</string>
+    <string name="lovemeetly_update_download_fallback_hint">Could not start the download automatically. Opening the download page instead.</string>
 </resources>

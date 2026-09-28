@@ -169,6 +169,31 @@ type AuthFetchOptions = {
   omitSessionCredentials?: boolean;
 };
 
+/**
+ * Attach the endpoint that failed to a transport-level error.
+ *
+ * The Android WebView reports every failure it cannot map to an HTTP response
+ * (unreachable host, DNS/TLS error, blocked request, or a CORS-rejected reply)
+ * as a bare `TypeError: Failed to fetch`. That hides WHICH origin the APK tried
+ * to reach, so a stale/unreachable API base URL looks exactly like a server
+ * outage in the UI (and in logcat). This keeps the original error untouched for
+ * everything else - notably `AbortError`, which callers branch on - and only
+ * rewrites the bare `TypeError` case.
+ */
+function describeNetworkFailure(err: unknown, targetUrl: string): Error {
+  const original = err as (Error & { cause?: unknown }) | undefined;
+  if (!original || original.name !== 'TypeError') return err as Error;
+
+  const described = new Error(
+    `Could not reach the Lovemeetly server at ${targetUrl} (${original.message}). ` +
+      'Please check your internet connection and try again.'
+  );
+  // Preserve `name` so existing AbortError / error-name checks keep working.
+  described.name = original.name;
+  described.cause = err;
+  return described;
+}
+
 async function authFetch(
   input: string,
   init?: RequestInit,
@@ -233,7 +258,7 @@ async function authFetch(
         return fallbackRes;
       }
     }
-    throw err;
+    throw describeNetworkFailure(err, primaryUrl);
   }
 }
 

@@ -1,10 +1,11 @@
 // Server-side push delivery helpers for Lovemeetly.
 //
-// Scope: this module BUILDS and SENDS the Android data-only payloads (chat messages and incoming-call
-// rings) consumed by LovemeetlyMessagingService. The existing web-push sender in server.ts keeps its
-// own logic and payload untouched: the Android chat payload mirrors those fields 1:1 so both platforms
-// show the same copy, and the Android call payload maps the fields LovemeetlyCallPayload already
-// parses (no new call protocol, no web call behaviour change).
+// Scope: this module BUILDS and SENDS the Android data-only payloads (chat messages, incoming-call
+// rings and app-update announcements) consumed by LovemeetlyMessagingService. The existing web-push
+// sender in server.ts keeps its own logic and payload untouched: the Android chat payload mirrors
+// those fields 1:1 so both platforms show the same copy, the Android call payload maps the fields
+// LovemeetlyCallPayload already parses (no new call protocol, no web call behaviour change), and the
+// app_update payload is a new, additive notification type that never touches the chat/call paths.
 //
 // Nothing here authenticates or holds credentials: the Firebase Admin credential is configured once
 // in src/lib/firebase-admin.ts (reused, never duplicated) and FCM tokens are opaque device values.
@@ -294,6 +295,87 @@ export async function sendAndroidCallPush(
   call: CallIncomingPushSource
 ): Promise<MulticastClassification> {
   const request = buildAndroidCallMulticastRequest(tokens, call);
+  const response = await messaging.sendEachForMulticast(request);
+  return classifyMulticastResults(response?.responses, request.tokens);
+}
+
+// -------------------------------------------------------------
+// Android app-update notification (type = app_update)
+// -------------------------------------------------------------
+// Sent when (and only when) an administrator publishes a new APK release through the protected
+// POST /api/admin/android-release action. Nothing here runs on a normal app start-up, so ordinary
+// usage never sends a push.
+//
+// Conventions are identical to the chat/call senders above, so the existing native delivery path is
+// reused unchanged: data-only (the Firebase SDK must never auto-display it - the app's own
+// LovemeetlyMessagingService renders it, deduplicated per versionCode), Android high priority so a
+// backgrounded or killed app is reached, and no `webpush` block, so web tokens are never targeted.
+
+/** Discriminator the native LovemeetlyUpdatePayload reads. */
+export const APP_UPDATE_TYPE = 'app_update';
+
+/** Notification title - exact copy required by the release notification contract. */
+export const APP_UPDATE_TITLE = 'Lovemeetly update available';
+
+/** Turned into the body, e.g. "Lovemeetly 2.0 is now available. Tap to update." */
+export function buildAppUpdateNotificationBody(versionName: string): string {
+  const name = typeof versionName === 'string' && versionName.trim() ? versionName.trim() : 'update';
+  return `Lovemeetly ${name} is now available. Tap to update.`;
+}
+
+/** The release fields the update push is built from (a subset of AndroidReleaseMetadata). */
+export interface AppUpdatePushSource {
+  versionCode: number;
+  versionName?: string | null;
+  apkUrl: string;
+}
+
+/**
+ * The push `data` map for an update notification.
+ *
+ * `type`, `versionCode`, `versionName` and `apkUrl` are the contract LovemeetlyUpdatePayload parses
+ * (the tap then hands `apkUrl` to Android's DownloadManager); `title`/`body` are carried too so the
+ * native copy is identical to what the server intended, exactly like the chat payload.
+ */
+export function buildAppUpdatePushData(release: AppUpdatePushSource): Record<string, string> {
+  const versionName =
+    typeof release?.versionName === 'string' && release.versionName.trim()
+      ? release.versionName.trim()
+      : String(release?.versionCode ?? '');
+  return {
+    type: APP_UPDATE_TYPE,
+    versionCode: String(release?.versionCode ?? ''),
+    versionName,
+    apkUrl: typeof release?.apkUrl === 'string' ? release.apkUrl.trim() : '',
+    title: APP_UPDATE_TITLE,
+    body: buildAppUpdateNotificationBody(versionName),
+  };
+}
+
+/** Data-only, high-priority request - same shape as the chat/call senders, no `notification` block. */
+export function buildAndroidAppUpdateMulticastRequest(
+  tokens: string[],
+  release: AppUpdatePushSource
+): AndroidMulticastMessage {
+  return {
+    tokens: tokens.slice(),
+    data: buildAppUpdatePushData(release),
+    android: { priority: 'high' },
+  };
+}
+
+/**
+ * Sends one app-update notification to Android devices through the existing Admin SDK instance.
+ *
+ * @param messaging the shared `adminMessaging` instance (never a second configuration)
+ * @returns the per-token classification; never deletes anything itself
+ */
+export async function sendAndroidAppUpdatePush(
+  messaging: MulticastMessaging,
+  tokens: string[],
+  release: AppUpdatePushSource
+): Promise<MulticastClassification> {
+  const request = buildAndroidAppUpdateMulticastRequest(tokens, release);
   const response = await messaging.sendEachForMulticast(request);
   return classifyMulticastResults(response?.responses, request.tokens);
 }

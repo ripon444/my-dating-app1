@@ -22,6 +22,9 @@ import android.os.Build;
  *       per call type, each with its own ringtone plus a vibration pattern and importance of its own,
  *       so a user can silence calls without silencing chat messages and voice/video calls ring with
  *       matching ringtones.
+ *   <li>{@link #UPDATE_CHANNEL_ID} - "a new app version is available" notices from
+ *       {@link LovemeetlyUpdateNotifications}. Separate channel and importance so update
+ *       announcements are never mixed into chat history or the call channels.
  * </ul>
  *
  * <p>Why one channel per call type: Android binds a channel's sound when the channel is first
@@ -36,6 +39,17 @@ public final class LovemeetlyNotifications {
 
     /** Must stay in sync with {@code lovemeetly_notification_channel_id}. */
     public static final String CHANNEL_ID = "lovemeetly_messages";
+
+    /**
+     * Dedicated channel for "a new app version is available" notifications. Must stay in sync with
+     * {@code lovemeetly_update_channel_id}.
+     *
+     * <p>Deliberately its own channel (and its own importance): an app-update notice must never
+     * reuse the chat-message channel - users have to be able to mute update announcements without
+     * losing chat notifications, and vice versa - and nothing about the message/call channels or
+     * their sounds changes because this channel exists.
+     */
+    public static final String UPDATE_CHANNEL_ID = "lovemeetly_updates";
 
     /**
      * The single incoming-call channel of earlier builds, whose sound is the one ringtone that
@@ -146,9 +160,40 @@ public final class LovemeetlyNotifications {
         ensureCallChannel(context, true);
     }
 
+    /**
+     * Creates the app-update channel if it does not exist yet. Safe to call repeatedly.
+     *
+     * <p>IMPORTANCE_DEFAULT (not HIGH) on purpose: an update is never urgent, so it must not pop a
+     * heads-up banner over whatever the user is doing - it belongs in the notification shade and
+     * lets the in-app prompt own the full-screen presentation. The chat/call channels are untouched.
+     */
+    public static void ensureUpdateChannel(Context context) {
+        if (context == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+
+        NotificationManager manager =
+                (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null || manager.getNotificationChannel(UPDATE_CHANNEL_ID) != null) {
+            return;
+        }
+
+        NotificationChannel channel =
+                new NotificationChannel(
+                        UPDATE_CHANNEL_ID,
+                        context.getString(R.string.lovemeetly_update_channel_name),
+                        NotificationManager.IMPORTANCE_DEFAULT);
+        channel.setDescription(
+                context.getString(R.string.lovemeetly_update_channel_description));
+        channel.setShowBadge(true);
+
+        manager.createNotificationChannel(channel);
+    }
+
     /** Every Lovemeetly channel, used from MainActivity so they exist before any push arrives. */
     public static void ensureAllChannels(Context context) {
         ensureChannel(context);
         ensureCallChannels(context);
+        ensureUpdateChannel(context);
     }
 }

@@ -35,6 +35,7 @@ import { FiltersModal } from './components/FiltersModal';
 import { MatchModal } from './components/MatchModal';
 import { ChatWindow } from './components/ChatWindow';
 import { IncomingCallModal } from './components/IncomingCallModal';
+import { AppUpdatePrompt } from './components/AppUpdatePrompt';
 import { ProfileViewModal } from './components/ProfileViewModal';
 import { ReportModal } from './components/ReportModal';
 import { PartnerDisclosureModal } from './components/PartnerDisclosureModal';
@@ -2292,6 +2293,10 @@ function MainApp() {
           />
         </Suspense>
       )}
+
+      {/* 11a. Android-only in-app APK update prompt. Renders nothing on the web and nothing
+          while a call is ringing/active, so it can never obstruct the call UI. */}
+      <AppUpdatePrompt paused={Boolean(incomingCall || activeCall)} />
 
       {/* 11. Incoming Call Ringing Alert Modal */}
       {incomingCall && (

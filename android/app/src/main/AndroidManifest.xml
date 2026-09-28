@@ -70,6 +70,14 @@
             android:name="com.lovemeetly.app.LovemeetlyCallActionReceiver"
             android:exported="false" />
 
+        <!-- Tap on an app-update notification (type = app_update): hands the (validated) APK URL to
+             Android's DownloadManager, so the download works while the app is backgrounded or fully
+             closed. Starts no Activity and is exported=false, so only the app's own notification
+             PendingIntent can reach it. -->
+        <receiver
+            android:name="com.lovemeetly.app.LovemeetlyUpdateDownloadReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
