@@ -15,6 +15,14 @@ interface IncomingCallModalProps {
   onReject: (call: Call) => void;
 }
 
+// Dedicated incoming ringtone files per call type. Types without a mapping
+// fall back to the pre-existing synthesized ringtone so an unknown/missing
+// call type never breaks or silences an incoming call.
+const incomingCallRingtones: Record<string, string> = {
+  voice: '/sounds/audio-call-incoming.mp3',
+  video: '/sounds/video-call-incoming.mp3',
+};
+
 export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
   call,
   onAccept,
@@ -23,6 +31,7 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
   const { t } = useTranslation();
   const audioCtxRef = useRef<AudioContext | null>(null);
   const ringIntervalRef = useRef<any>(null);
+  const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // WhatsApp / FB Messenger Incoming Ringtone & Vibration
   useEffect(() => {
@@ -43,6 +52,17 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
         const ctx = new AudioContextClass();
         audioCtxRef.current = ctx;
 
+        // Ringtone file selected from the actual call type. When the type has
+        // no mapping (missing/unknown) this stays null and the original
+        // synthesized ringtone below is used as the fallback.
+        const ringtoneSrc = incomingCallRingtones[call.type];
+        const ringtoneAudio = ringtoneSrc ? new Audio(ringtoneSrc) : null;
+        if (ringtoneAudio) {
+          ringtoneAudio.loop = true;
+          ringtoneAudio.preload = 'auto';
+          ringtoneAudioRef.current = ringtoneAudio;
+        }
+
         const playRingToneBurst = () => {
           if (!isRunning || !audioCtxRef.current || audioCtxRef.current.state === 'closed') return;
           
@@ -51,32 +71,38 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
               audioCtxRef.current.resume().catch(() => {});
             }
 
-            const now = audioCtxRef.current.currentTime;
-            
-            // Dual frequency standard WhatsApp/FB ring chime
-            const osc1 = audioCtxRef.current.createOscillator();
-            const osc2 = audioCtxRef.current.createOscillator();
-            const gain = audioCtxRef.current.createGain();
+            if (ringtoneAudio) {
+              // Avoid a second simultaneous player for the same call; the
+              // looping <audio> element keeps ringing until cleanup runs.
+              if (!ringtoneAudio.paused) return;
+              ringtoneAudio.play().catch(() => {});
+            } else {
+              // Fallback: original synthesized dual-tone ring chime.
+              const now = audioCtxRef.current.currentTime;
 
-            osc1.type = 'sine';
-            osc2.type = 'sine';
-            osc1.frequency.setValueAtTime(440, now);
-            osc2.frequency.setValueAtTime(480, now);
+              const osc1 = audioCtxRef.current.createOscillator();
+              const osc2 = audioCtxRef.current.createOscillator();
+              const gain = audioCtxRef.current.createGain();
 
-            // Ring sequence
-            gain.gain.setValueAtTime(0, now);
-            gain.gain.linearRampToValueAtTime(0.15, now + 0.08);
-            gain.gain.setValueAtTime(0.15, now + 1.2);
-            gain.gain.linearRampToValueAtTime(0.001, now + 1.5);
+              osc1.type = 'sine';
+              osc2.type = 'sine';
+              osc1.frequency.setValueAtTime(440, now);
+              osc2.frequency.setValueAtTime(480, now);
 
-            osc1.connect(gain);
-            osc2.connect(gain);
-            gain.connect(audioCtxRef.current.destination);
+              gain.gain.setValueAtTime(0, now);
+              gain.gain.linearRampToValueAtTime(0.15, now + 0.08);
+              gain.gain.setValueAtTime(0.15, now + 1.2);
+              gain.gain.linearRampToValueAtTime(0.001, now + 1.5);
 
-            osc1.start(now);
-            osc2.start(now);
-            osc1.stop(now + 1.6);
-            osc2.stop(now + 1.6);
+              osc1.connect(gain);
+              osc2.connect(gain);
+              gain.connect(audioCtxRef.current.destination);
+
+              osc1.start(now);
+              osc2.start(now);
+              osc1.stop(now + 1.6);
+              osc2.stop(now + 1.6);
+            }
 
             // Repeat vibration
             if ('vibrate' in navigator) {
@@ -104,6 +130,14 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
       if (ringIntervalRef.current) {
         clearInterval(ringIntervalRef.current);
         ringIntervalRef.current = null;
+      }
+      if (ringtoneAudioRef.current) {
+        try {
+          ringtoneAudioRef.current.pause();
+          ringtoneAudioRef.current.loop = false;
+          ringtoneAudioRef.current.src = '';
+        } catch {}
+        ringtoneAudioRef.current = null;
       }
       if (audioCtxRef.current) {
         try {
@@ -141,6 +175,14 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
       clearInterval(ringIntervalRef.current);
       ringIntervalRef.current = null;
     }
+    if (ringtoneAudioRef.current) {
+      try {
+        ringtoneAudioRef.current.pause();
+        ringtoneAudioRef.current.loop = false;
+        ringtoneAudioRef.current.src = '';
+      } catch (err) {}
+      ringtoneAudioRef.current = null;
+    }
     if (audioCtxRef.current) {
       audioCtxRef.current.close().catch(() => {});
       audioCtxRef.current = null;
@@ -162,6 +204,14 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
     if (ringIntervalRef.current) {
       clearInterval(ringIntervalRef.current);
       ringIntervalRef.current = null;
+    }
+    if (ringtoneAudioRef.current) {
+      try {
+        ringtoneAudioRef.current.pause();
+        ringtoneAudioRef.current.loop = false;
+        ringtoneAudioRef.current.src = '';
+      } catch (err) {}
+      ringtoneAudioRef.current = null;
     }
     if (audioCtxRef.current) {
       audioCtxRef.current.close().catch(() => {});
