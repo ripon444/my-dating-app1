@@ -45,6 +45,7 @@ import { AdminPaymentsTab } from './admin/AdminPaymentsTab';
 import { AdminLegalDocumentsTab } from './admin/AdminLegalDocumentsTab';
 import { AdminUserSubscriptionModal } from './admin/AdminUserSubscriptionModal';
 import { AdminMembersTab } from './admin/AdminMembersTab';
+import { AdminUserManagementTab } from './admin/AdminUserManagementTab';
 import { AdminPermission } from '../types';
 
 interface AdminPortalProps {
@@ -67,7 +68,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [logoutMessage, setLogoutMessage] = useState('');
 
   // Admin Dashboard State
-  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'boosts' | 'payments' | 'users' | 'providers' | 'moderation' | 'logs' | 'settings' | 'legal' | 'admins'>('kpi');
+  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'boosts' | 'payments' | 'users' | 'user_management' | 'providers' | 'moderation' | 'logs' | 'settings' | 'legal' | 'admins'>('kpi');
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [providers, setProviders] = useState<ExternalProvider[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
@@ -533,6 +534,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
             { id: 'boosts', label: 'Boost Packages & Pricing', icon: Zap, perm: 'boosts' },
             { id: 'payments', label: 'Payments & Billing', icon: Coins, perm: 'payments' },
             { id: 'users', label: `Users & Profiles (${profiles.length})`, icon: Users, perm: 'users' },
+            { id: 'user_management', label: 'User Management (Suspend / Block / Delete)', icon: UserX, perm: 'users' },
             { id: 'moderation', label: `Moderation Queue (${reports.filter(r => r.status === 'PENDING').length})`, icon: AlertTriangle, perm: 'moderation' },
             { id: 'providers', label: 'Partner Syndication Feeds', icon: Globe, perm: 'providers' },
             { id: 'logs', label: 'Sync Audit Logs', icon: Clock, perm: 'logs' },
@@ -861,6 +863,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
               </table>
             </div>
           </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: USER MANAGEMENT (SUSPEND / BLOCK / DELETE) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'user_management' && (
+          <AdminUserManagementTab
+            currentAdminEmail={adminUser?.email}
+            onSuccessMessage={(msg) => {
+              setActionSuccessMsg(msg);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+            }}
+          />
         )}
 
         {/* ------------------------------------------------------------- */}

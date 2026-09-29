@@ -10,12 +10,37 @@ export const users = pgTable('users', {
   isEmailVerified: integer('is_email_verified').default(1),
   isAgeVerified: integer('is_age_verified').default(1),
   isBanned: integer('is_banned').default(0),
+  // Admin account status handling (Suspend / Block). NULL means the legacy row was
+  // never touched by the admin user-management tools and its effective status is
+  // derived from `is_banned` on the server.
+  accountStatus: text('account_status'),
+  suspendedUntil: text('suspended_until'),
+  statusReason: text('status_reason'),
+  statusUpdatedAt: text('status_updated_at'),
+  statusUpdatedBy: text('status_updated_by'),
   subscriptionTier: text('subscription_tier').default('FREE'),
   subscriptionExpiresAt: text('subscription_expires_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => [
   index('idx_users_email').on(table.email),
+]);
+
+// Admin user-status audit trail (suspend / block / activate / delete)
+export const userStatusAudit = pgTable('user_status_audit', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  userEmail: text('user_email'),
+  action: text('action').notNull(),
+  previousStatus: text('previous_status'),
+  newStatus: text('new_status'),
+  reason: text('reason'),
+  performedBy: text('performed_by'),
+  performedById: text('performed_by_id'),
+  performedByRole: text('performed_by_role'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  index('idx_user_status_audit_user').on(table.userId),
 ]);
 
 // 2. Profiles Table (with Facebook-style coverPhoto and social fields)

@@ -21,6 +21,11 @@ export async function initializePostgresTables() {
         is_email_verified INTEGER DEFAULT 1,
         is_age_verified INTEGER DEFAULT 1,
         is_banned INTEGER DEFAULT 0,
+        account_status TEXT,
+        suspended_until TEXT,
+        status_reason TEXT,
+        status_updated_at TEXT,
+        status_updated_by TEXT,
         subscription_tier TEXT DEFAULT 'FREE',
         subscription_expires_at TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -292,12 +297,32 @@ export async function initializePostgresTables() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS user_status_audit (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_email TEXT,
+        action TEXT NOT NULL,
+        previous_status TEXT,
+        new_status TEXT,
+        reason TEXT,
+        performed_by TEXT,
+        performed_by_id TEXT,
+        performed_by_role TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payment_transactions(user_id);
       CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payment_transactions(order_id);
       CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payment_transactions(payment_id);
       CREATE INDEX IF NOT EXISTS idx_user_subs_user_id ON user_subscriptions(user_id);
 
       -- Safe Alter statements for upgrades
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_until TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS status_reason TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS status_updated_at TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS status_updated_by TEXT;
+      CREATE INDEX IF NOT EXISTS idx_user_status_audit_user ON user_status_audit(user_id);
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS username TEXT;
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS social_links_json TEXT DEFAULT '{}';
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS website TEXT DEFAULT '';

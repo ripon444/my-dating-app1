@@ -93,6 +93,13 @@ model User {
   isEmailVerified   Boolean           @default(false)
   isAgeVerified     Boolean           @default(false)
   isBanned          Boolean           @default(false)
+  // Admin user-management status. NULL on legacy rows, where the effective status
+  // is derived from isBanned by the server (resolveStoredAccountStatus).
+  accountStatus     String?           // 'active' | 'suspended' | 'blocked'
+  suspendedUntil    DateTime?
+  statusReason      String?
+  statusUpdatedAt   DateTime?
+  statusUpdatedBy   String?
   subscriptionTier  SubscriptionTier  @default(FREE)
   subscriptionExpiresAt DateTime?
   createdAt         DateTime          @default(now())
@@ -395,4 +402,24 @@ model ExternalSyncLog {
   errorCount        Int              @default(0)
   status            String           @default("SUCCESS")
   errorMessage      String?          @db.Text
+}
+
+// Immutable audit trail of administrative account actions (suspend / block /
+// activate / delete). Deliberately not linked to User so a hard account delete
+// can never erase who performed which action.
+model UserStatusAudit {
+  id              String   @id @default(uuid())
+  userId          String
+  userEmail       String?
+  action          String   // 'suspend' | 'block' | 'activate' | 'delete'
+  previousStatus  String?
+  newStatus       String?
+  reason          String?  @db.Text
+  performedBy     String?
+  performedById   String?
+  performedByRole String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
 }

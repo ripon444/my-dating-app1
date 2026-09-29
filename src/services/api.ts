@@ -18,6 +18,9 @@ import {
   NowPaymentsSettings,
   AdminMember,
   AdminPermission,
+  AdminManagedUser,
+  AdminUserListStats,
+  AdminUserStatusHistoryEntry,
   BoostPackage,
   LegalDocument,
 } from '../types';
@@ -1005,6 +1008,109 @@ export const api = {
   }> {
     const res = await authFetch(`/api/admin/users/${userId}/subscription-history`);
     return res.json();
+  },
+
+  // Admin: User Management (Suspend / Block / Reactivate / Delete)
+  async adminGetUsers(params?: {
+    search?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    success: boolean;
+    users: AdminManagedUser[];
+    total: number;
+    stats: AdminUserListStats;
+    limit: number;
+    offset: number;
+  }> {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.status) q.set('status', params.status);
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.offset) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    const res = await authFetch(`/api/admin/users${qs ? `?${qs}` : ''}`);
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to fetch user accounts');
+    return result;
+  },
+
+  async adminSuspendUser(
+    userId: string,
+    data?: { days?: number; reason?: string }
+  ): Promise<{ success: boolean; message: string; sessionsRevoked: number; user: AdminManagedUser }> {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}/suspend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || {}),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to suspend the account');
+    return result;
+  },
+
+  async adminBlockUser(
+    userId: string,
+    data?: { reason?: string }
+  ): Promise<{ success: boolean; message: string; sessionsRevoked: number; user: AdminManagedUser }> {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}/block`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || {}),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to block the account');
+    return result;
+  },
+
+  async adminActivateUser(
+    userId: string,
+    data?: { reason?: string }
+  ): Promise<{ success: boolean; message: string; sessionsRevoked: number; user: AdminManagedUser }> {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || {}),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to reactivate the account');
+    return result;
+  },
+
+  /**
+   * Permanently deletes an account. The server independently requires an explicit
+   * confirmation ("DELETE" or the account email), which is why `confirm` is always sent.
+   */
+  async adminDeleteUser(
+    userId: string,
+    data: { confirm?: string; confirmEmail?: string; reason?: string }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    deletedUser: { id: string; email: string };
+    sessionsRevoked: number;
+    deletedRows: Record<string, number>;
+  }> {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'DELETE', ...data }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to delete the account');
+    return result;
+  },
+
+  async adminGetUserStatusHistory(userId: string): Promise<{
+    success: boolean;
+    userId: string;
+    history: AdminUserStatusHistoryEntry[];
+  }> {
+    const res = await authFetch(`/api/admin/users/${encodeURIComponent(userId)}/status-history`);
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to fetch the account action history');
+    return result;
   },
 
   // Admin Privilege Verification

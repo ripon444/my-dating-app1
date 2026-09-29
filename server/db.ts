@@ -114,6 +114,11 @@ function initTables(db: Database) {
       is_email_verified INTEGER DEFAULT 1,
       is_age_verified INTEGER DEFAULT 1,
       is_banned INTEGER DEFAULT 0,
+      account_status TEXT,
+      suspended_until TEXT,
+      status_reason TEXT,
+      status_updated_at TEXT,
+      status_updated_by TEXT,
       subscription_tier TEXT DEFAULT 'FREE',
       subscription_expires_at TEXT,
       created_at TEXT NOT NULL,
@@ -547,6 +552,50 @@ function initTables(db: Database) {
   } catch (e) {}
   try {
     db.run('CREATE INDEX IF NOT EXISTS idx_profiles_username ON profiles(username);');
+  } catch (e) {}
+
+  // -------------------------------------------------------------
+  // ADMIN USER MANAGEMENT (Suspend / Block / Delete) — schema upgrades
+  // -------------------------------------------------------------
+  // Account status columns are added WITHOUT a default so that pre-existing rows
+  // stay NULL; a NULL status is resolved from the legacy `is_banned` flag by
+  // resolveStoredAccountStatus() (server.ts). That keeps every historical ban
+  // effective while new suspend/block actions are stored explicitly.
+  const userStatusColumns = [
+    'account_status TEXT',
+    'suspended_until TEXT',
+    'status_reason TEXT',
+    'status_updated_at TEXT',
+    'status_updated_by TEXT',
+  ];
+  for (const columnDefinition of userStatusColumns) {
+    try {
+      db.run(`ALTER TABLE users ADD COLUMN ${columnDefinition};`);
+    } catch (e) {
+      // Column already exists
+    }
+  }
+
+  // Immutable audit trail of every administrative account action. Kept separate
+  // from `users` so a hard account delete can never erase who did what and when.
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS user_status_audit (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_email TEXT,
+        action TEXT NOT NULL,
+        previous_status TEXT,
+        new_status TEXT,
+        reason TEXT,
+        performed_by TEXT,
+        performed_by_id TEXT,
+        performed_by_role TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_status_audit_user ON user_status_audit(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_status_audit_created ON user_status_audit(created_at);
+    `);
   } catch (e) {}
 
   // Seed default payment settings if not existing

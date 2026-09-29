@@ -1,6 +1,26 @@
 import { db } from './index.ts';
-import { users, profiles, subscriptionPlans, paymentTransactions, userSubscriptions, paymentSettings } from './schema.ts';
+import {
+  users,
+  profiles,
+  subscriptionPlans,
+  paymentTransactions,
+  userSubscriptions,
+  paymentSettings,
+  follows,
+  blocks,
+  notifications,
+  pushTokens,
+  sessions,
+  conversations,
+  messages,
+  calls,
+  likes,
+  matches,
+  reports,
+} from './schema.ts';
 import { SqlHelper } from '../../server/db.ts';
+import { eq, or } from 'drizzle-orm';
+import { resolveStoredAccountStatus, toLegacyBannedFlag } from '../lib/accountStatus.ts';
 
 /**
  * Bi-directional PostgreSQL <-> SQLite user and profile sync
@@ -11,12 +31,33 @@ export async function syncPostgresToSqlite() {
   try {
     const pgUsers = await db.select().from(users);
     if (pgUsers && pgUsers.length > 0) {
+      // Status columns are preserved when PostgreSQL does not carry them yet (rows
+      // written before this feature existed), because INSERT OR REPLACE would
+      // otherwise blank out a suspend/block that was applied in SQLite.
+      const existingStatusRows = await SqlHelper.queryAll<any>(
+        'SELECT id, is_banned, account_status, suspended_until, status_reason, status_updated_at, status_updated_by FROM users'
+      );
+      const existingStatusById = new Map<string, any>(
+        existingStatusRows.map((row) => [row.id, row])
+      );
+
       for (const u of pgUsers) {
+        const existing = existingStatusById.get(u.id);
+        // The SQLite row is the authority whenever PostgreSQL has not stored an
+        // explicit status yet, so a suspend/block applied in SQLite is never
+        // silently reverted by a synchronization pass.
+        const mergedStatusRow = {
+          account_status: u.accountStatus || existing?.account_status,
+          is_banned: Number(u.isBanned ?? 0) || Number(existing?.is_banned ?? 0),
+        };
+        const accountStatus = resolveStoredAccountStatus(mergedStatusRow);
+        const bannedFlag = toLegacyBannedFlag(mergedStatusRow);
         await SqlHelper.execute(
           `INSERT OR REPLACE INTO users (
             id, email, password, role, is_email_verified, is_age_verified, is_banned,
-            subscription_tier, subscription_expires_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            subscription_tier, subscription_expires_at, created_at, updated_at,
+            account_status, suspended_until, status_reason, status_updated_at, status_updated_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             u.id,
             u.email,
@@ -24,11 +65,16 @@ export async function syncPostgresToSqlite() {
             u.role || 'USER',
             u.isEmailVerified ?? 1,
             u.isAgeVerified ?? 1,
-            u.isBanned ?? 0,
+            bannedFlag,
             u.subscriptionTier || 'FREE',
             u.subscriptionExpiresAt || null,
             u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
             u.updatedAt ? new Date(u.updatedAt).toISOString() : new Date().toISOString(),
+            accountStatus,
+            accountStatus === 'suspended' ? (u.suspendedUntil || existing?.suspended_until || null) : null,
+            u.statusReason || existing?.status_reason || null,
+            u.statusUpdatedAt || existing?.status_updated_at || null,
+            u.statusUpdatedBy || existing?.status_updated_by || null,
           ]
         );
       }
@@ -121,6 +167,8 @@ export async function syncSqliteWithPostgres() {
     if (!sqliteUsers || sqliteUsers.length === 0) return;
 
     for (const u of sqliteUsers) {
+      const accountStatus = resolveStoredAccountStatus(u);
+      const bannedFlag = toLegacyBannedFlag(u);
       await db.insert(users).values({
         id: u.id,
         email: u.email,
@@ -128,7 +176,12 @@ export async function syncSqliteWithPostgres() {
         role: u.role || 'USER',
         isEmailVerified: Number(u.is_email_verified) || 1,
         isAgeVerified: Number(u.is_age_verified) || 1,
-        isBanned: Number(u.is_banned) || 0,
+        isBanned: bannedFlag,
+        accountStatus,
+        suspendedUntil: u.suspended_until || null,
+        statusReason: u.status_reason || null,
+        statusUpdatedAt: u.status_updated_at || null,
+        statusUpdatedBy: u.status_updated_by || null,
         subscriptionTier: u.subscription_tier || 'FREE',
         subscriptionExpiresAt: u.subscription_expires_at,
       }).onConflictDoUpdate({
@@ -136,6 +189,13 @@ export async function syncSqliteWithPostgres() {
         set: {
           email: u.email,
           role: u.role || 'USER',
+          // Keeps the PostgreSQL mirror in step with an admin suspend/block/activate.
+          isBanned: bannedFlag,
+          accountStatus,
+          suspendedUntil: u.suspended_until || null,
+          statusReason: u.status_reason || null,
+          statusUpdatedAt: u.status_updated_at || null,
+          statusUpdatedBy: u.status_updated_by || null,
         }
       }).catch((e: any) => {
         // Ignore duplicate email if ID differed
@@ -219,6 +279,8 @@ export async function syncSingleUser(userId: string) {
   try {
     const u = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [userId]);
     if (u) {
+      const accountStatus = resolveStoredAccountStatus(u);
+      const bannedFlag = toLegacyBannedFlag(u);
       await db.insert(users).values({
         id: u.id,
         email: u.email,
@@ -226,7 +288,12 @@ export async function syncSingleUser(userId: string) {
         role: u.role || 'USER',
         isEmailVerified: Number(u.is_email_verified) || 1,
         isAgeVerified: Number(u.is_age_verified) || 1,
-        isBanned: Number(u.is_banned) || 0,
+        isBanned: bannedFlag,
+        accountStatus,
+        suspendedUntil: u.suspended_until || null,
+        statusReason: u.status_reason || null,
+        statusUpdatedAt: u.status_updated_at || null,
+        statusUpdatedBy: u.status_updated_by || null,
         subscriptionTier: u.subscription_tier || 'FREE',
         subscriptionExpiresAt: u.subscription_expires_at,
       }).onConflictDoUpdate({
@@ -234,6 +301,13 @@ export async function syncSingleUser(userId: string) {
         set: {
           email: u.email,
           role: u.role || 'USER',
+          // Mirrors an admin suspend/block/activate to PostgreSQL immediately.
+          isBanned: bannedFlag,
+          accountStatus,
+          suspendedUntil: u.suspended_until || null,
+          statusReason: u.status_reason || null,
+          statusUpdatedAt: u.status_updated_at || null,
+          statusUpdatedBy: u.status_updated_by || null,
         }
       }).catch(() => {});
     }
@@ -370,4 +444,57 @@ export async function syncSingleSubscription(subId: string) {
   } catch (err) {
     console.warn('[Sync Engine] syncSingleSubscription notice:', err);
   }
+}
+/**
+ * Removes a permanently deleted account from the PostgreSQL mirror.
+ *
+ * This is required for a *permanent* delete: the startup synchronization
+ * (syncPostgresToSqlite) copies every PostgreSQL user back into SQLite, so an
+ * account deleted only in SQLite would otherwise reappear after a restart.
+ *
+ * The financial ledger (`payment_transactions`) is intentionally NOT deleted —
+ * billing records are retained for accounting/legal reconciliation, exactly like
+ * a payment provider's own ledger. Every user-owned row is removed: the profile,
+ * sessions, push tokens, social graph (follows/blocks/likes/matches), calls,
+ * chat threads, notifications, reports, subscriptions and the account itself.
+ *
+ * Every statement is best-effort: a PostgreSQL outage must never fail (or hang)
+ * the admin request, because SQLite is the authority for the running process.
+ */
+export async function deleteUserFromPostgres(userId: string): Promise<void> {
+  if (!userId) return;
+  if (!process.env.DATABASE_URL && !process.env.SQL_HOST && !process.env.SQL_DB_NAME) {
+    // No PostgreSQL mirror configured: SQLite is the only store.
+    return;
+  }
+
+  const statements = [
+    db.delete(pushTokens).where(eq(pushTokens.userId, userId)),
+    db.delete(sessions).where(eq(sessions.userId, userId)),
+    db.delete(notifications).where(eq(notifications.userId, userId)),
+    db.delete(follows).where(or(eq(follows.followerId, userId), eq(follows.followingId, userId))),
+    db.delete(blocks).where(or(eq(blocks.blockerId, userId), eq(blocks.blockedId, userId))),
+    db.delete(likes).where(or(eq(likes.senderId, userId), eq(likes.receiverId, userId))),
+    db.delete(matches).where(or(eq(matches.userAId, userId), eq(matches.userBId, userId))),
+    db.delete(calls).where(or(eq(calls.callerId, userId), eq(calls.receiverId, userId))),
+    db.delete(messages).where(or(eq(messages.senderId, userId), eq(messages.receiverId, userId))),
+    db.delete(conversations).where(or(eq(conversations.userAId, userId), eq(conversations.userBId, userId))),
+    db.delete(reports).where(or(eq(reports.reporterId, userId), eq(reports.reportedUserId, userId))),
+    db.delete(userSubscriptions).where(eq(userSubscriptions.userId, userId)),
+    db.delete(profiles).where(eq(profiles.userId, userId)),
+  ];
+
+  const results = await Promise.allSettled(statements);
+  const failed = results.filter((result) => result.status === 'rejected');
+  if (failed.length > 0) {
+    console.warn(
+      `[Sync Engine] ${failed.length} PostgreSQL cleanup statement(s) failed for deleted user ${userId}; the account row itself is still removed.`
+    );
+  }
+
+  // The account row goes last: children are already gone, so no foreign key can
+  // block the delete even if a cascade rule is missing in an older deployment.
+  await db.delete(users).where(eq(users.id, userId)).catch((err: any) => {
+    console.warn('[Sync Engine] PostgreSQL account delete failed:', err?.message || err);
+  });
 }

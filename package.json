@@ -13,6 +13,7 @@
     "test:server": "node --import tsx --test src/lib/push.test.ts",
     "test:release": "node --import tsx --test src/lib/androidRelease.test.ts",
     "test:update-check": "node --import tsx --test src/utils/appUpdateConfig.test.ts",
+    "test:account-status": "node --import tsx --test src/lib/accountStatus.test.ts",
     "release:android": "tsx scripts/publish-android-release.ts",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android",

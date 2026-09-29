@@ -35,13 +35,27 @@ import {
   getNowPaymentsPaymentStatus,
   calculateExpirationDate,
 } from './server/nowpayments.ts';
-import { syncSinglePayment, syncSingleSubscription } from './src/db/sync.ts';
+import { syncSinglePayment, syncSingleSubscription, deleteUserFromPostgres } from './src/db/sync.ts';
 import { db } from './src/db/index.ts';
 import { getPool } from './src/db/index.ts';
 import { users as pgUsers, profiles as pgProfiles, notifications as pgNotifications, sessions as pgSessions } from './src/db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
 import { DEFAULT_VIP_PLAN_FEATURES, VIP_FEATURE_KEYS, parseFeatureKeys, type VipFeatureKey } from './server/subscriptionFeatures.ts';
 import { adminMessaging } from './src/lib/firebase-admin.ts';
+import {
+  USER_ACCOUNT_STATUSES,
+  resolveStoredAccountStatus,
+  isSuspensionExpired,
+  resolveEffectiveAccountStatus,
+  isAccountAccessRestricted,
+  clampSuspensionDays,
+  resolveSuspensionEnd,
+  normalizeStatusReason,
+  normalizeStatusFilter,
+  isDeleteConfirmationValid,
+  DELETE_CONFIRMATION_PHRASE,
+  DEFAULT_SUSPEND_DAYS,
+} from './src/lib/accountStatus.ts';
 import {
   ANDROID_PLATFORM,
   maskToken,
@@ -357,11 +371,27 @@ export function isSuperAdminEmail(email?: string): boolean {
   return ADMIN_EMAILS.includes(clean);
 }
 
+// -------------------------------------------------------------
+// Account status resolution (Admin Panel: Suspend / Block / Delete)
+// -------------------------------------------------------------
+// The status rules themselves live in src/lib/accountStatus.ts so that the auth
+// middleware here, the SQLite/PostgreSQL sync engine and the focused unit tests
+// all share one implementation. Re-exported for existing importers of server.ts.
+export {
+  USER_ACCOUNT_STATUSES,
+  resolveStoredAccountStatus,
+  isSuspensionExpired,
+  resolveEffectiveAccountStatus,
+  isAccountAccessRestricted,
+} from './src/lib/accountStatus.ts';
+export type { UserAccountStatus } from './src/lib/accountStatus.ts';
+
 export function formatUserRow(row: any): any {
   if (!row) return null;
   const isAdmin = row.role === 'ADMIN' || isSuperAdminEmail(row.email);
   const isExpired = row.subscription_expires_at && new Date(row.subscription_expires_at) < new Date();
   const effectiveTier = (isExpired && !isAdmin) ? 'FREE' : (isAdmin ? 'VIP' : (row.subscription_tier || 'FREE'));
+  const accountStatus = resolveEffectiveAccountStatus(row);
 
   return {
     id: row.id,
@@ -369,7 +399,14 @@ export function formatUserRow(row: any): any {
     role: isAdmin ? 'ADMIN' : (row.role || 'USER'),
     isEmailVerified: true,
     isAgeVerified: true,
-    isBanned: false,
+    // Kept in sync with the account status so any existing consumer that only
+    // understands `isBanned` still sees a suspended/blocked account as restricted.
+    isBanned: accountStatus !== 'active',
+    accountStatus,
+    suspendedUntil: accountStatus === 'suspended' ? (row.suspended_until || null) : null,
+    statusReason: row.status_reason || '',
+    statusUpdatedAt: row.status_updated_at || null,
+    statusUpdatedBy: row.status_updated_by || null,
     subscriptionTier: effectiveTier,
     subscriptionExpiresAt: row.subscription_expires_at,
     isSubscriptionExpired: Boolean(isExpired),
@@ -477,7 +514,9 @@ app.use(async (req, res, next) => {
 
       if (session && session.user_id) {
         let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [session.user_id]);
-        if (userRow && !userRow.is_banned) {
+        // Admin suspend/block: a restricted account keeps its session row from
+        // being honored (no `req.user`), so every API route stays closed for it.
+        if (userRow && !isAccountAccessRestricted(userRow)) {
           // Admin role is read-only here: resolved from the stored user row.
           // Authorization is enforced by requireAdmin below; we never mutate the
           // user's role based on an email address during a request.
@@ -978,8 +1017,38 @@ app.post('/api/auth/login', async (req, res) => {
       loginAttemptLimits.delete(loginKey);
     }
 
-    if (userRow.is_banned) {
-      return res.status(403).json({ error: 'This account has been suspended.' });
+    if (isSuspensionExpired(userRow)) {
+      // A temporary suspension that has already ended is released here, so an
+      // expired suspension can never lock an account out permanently.
+      const releasedAt = new Date().toISOString();
+      await SqlHelper.execute(
+        "UPDATE users SET account_status = 'active', suspended_until = NULL, status_reason = NULL, status_updated_at = ?, status_updated_by = 'expired-suspension', updated_at = ? WHERE id = ?",
+        [releasedAt, releasedAt, userRow.id]
+      );
+      userRow.account_status = 'active';
+      userRow.suspended_until = null;
+      userRow.status_reason = null;
+      userRow.status_updated_at = releasedAt;
+      userRow.is_banned = 0;
+      await syncSingleUser(userRow.id).catch(() => {});
+      console.log(`[Admin User Management] Temporary suspension expired and released for ${userRow.email}`);
+    }
+
+    // Admin-controlled account status (Suspend / Block). A restricted account can
+    // never obtain a session, which is what keeps chat and realtime access closed.
+    const accountStatus = resolveEffectiveAccountStatus(userRow);
+    if (accountStatus !== 'active' || userRow.is_banned) {
+      const suspendedUntil = accountStatus === 'suspended' && userRow.suspended_until
+        ? new Date(userRow.suspended_until).toISOString()
+        : undefined;
+      return res.status(403).json({
+        error: accountStatus === 'suspended'
+          ? `This account has been suspended${suspendedUntil ? ` until ${new Date(suspendedUntil).toUTCString()}` : ''}.`
+          : 'This account has been blocked by an administrator.',
+        accountStatus: accountStatus === 'suspended' ? 'suspended' : 'blocked',
+        suspendedUntil,
+        statusReason: userRow.status_reason || undefined,
+      });
     }
 
     // Gradual migration: if the stored password is still a legacy plaintext
@@ -1080,8 +1149,8 @@ app.post('/api/auth/register', async (req, res) => {
     await SqlHelper.execute(
       `INSERT INTO users (
         id, email, password, role, is_email_verified, is_age_verified, is_banned,
-        subscription_tier, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 1, 1, 0, ?, ?, ?)`,
+        subscription_tier, created_at, updated_at, account_status
+      ) VALUES (?, ?, ?, ?, 1, 1, 0, ?, ?, ?, 'active')`,
       [newUserId, cleanEmail, passwordHash, initialRole, initialTier, now, now]
     );
 
@@ -3792,7 +3861,7 @@ const requireAdmin = async (req: any, res: any, next: any) => {
         );
         if (session?.user_id) {
           let userRow = await SqlHelper.queryOne('SELECT * FROM users WHERE id = ?', [session.user_id]);
-          if (userRow && !userRow.is_banned) {
+          if (userRow && !isAccountAccessRestricted(userRow)) {
             user = formatUserRow(userRow);
             req.user = user;
           }
@@ -4308,6 +4377,587 @@ app.delete('/api/admin/members/:id', requirePermission('admins'), async (req, re
 // `requirePermission('admins')` member-management routes, and super-admin status
 // is derived solely from the explicit server-side ADMIN_EMAILS allowlist.
 // Normal users cannot self-promote.
+
+// -------------------------------------------------------------
+// ADMIN: User Management (Suspend / Block / Activate / Delete)
+// -------------------------------------------------------------
+// Every route below is guarded by `requirePermission('users')`, which first runs
+// the `requireAdmin` check (a valid session whose user holds an ADMIN role or is
+// on the server-side super-admin allowlist) and then verifies that the caller's
+// admin role actually grants the `users` privilege. There is no key/password
+// bypass, so a normal member can never reach these routes.
+//
+// Status model (resolveStoredAccountStatus / resolveEffectiveAccountStatus):
+//   * 'active'    — normal account, may sign in and use the app.
+//   * 'suspended' — temporarily locked. `suspended_until` holds the expiry and an
+//                   expired suspension is released automatically at login. A NULL
+//                   `suspended_until` means "until an admin reactivates it".
+//   * 'blocked'   — restricted until an admin reactivates it.
+// The legacy `is_banned` flag is maintained (1 while restricted, 0 when active),
+// so login, the REST auth middleware and the Socket.IO handshake — which all
+// relied on that flag — keep working exactly as they did before.
+//
+// The status rules and every clamp/validation helper live in
+// src/lib/accountStatus.ts (pure module, unit tested in accountStatus.test.ts).
+const ACCOUNT_ACTION_HISTORY_LIMIT = 50;
+
+/**
+ * Resolves the account an admin action targets. Accepts either the internal user
+ * id or the account email, which lets the delete confirmation dialog address the
+ * account by the email the administrator just typed.
+ */
+async function loadUserAccountRow(identifier: string): Promise<any | null> {
+  const raw = String(identifier || '').trim();
+  if (!raw) return null;
+  const byId = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [raw]);
+  if (byId) return byId;
+  return SqlHelper.queryOne<any>('SELECT * FROM users WHERE LOWER(email) = ?', [raw.toLowerCase()]);
+}
+
+/**
+ * Guard shared by every account action. An administrator can never target their
+ * own account, another administrator, or a founder super-admin — that keeps staff
+ * accounts (and the platform's own access) out of reach of this module.
+ * Returns an error message to reject with, or null when the action is allowed.
+ */
+async function assertUserManagementTargetAllowed(actor: any, targetRow: any): Promise<string | null> {
+  if (!targetRow) {
+    return 'User account not found.';
+  }
+  if (actor?.id && targetRow.id === actor.id) {
+    return 'You cannot perform this action on your own account.';
+  }
+  if (isSuperAdminEmail(targetRow.email)) {
+    return 'Founder Super Administrator accounts are protected and cannot be suspended, blocked or deleted.';
+  }
+  const targetRole = String(targetRow.role || '').toUpperCase();
+  if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN') {
+    return 'Administrator accounts are protected. Use "Admins & Role Governance" to change administrative access.';
+  }
+  try {
+    const member = await SqlHelper.queryOne<any>(
+      'SELECT id FROM admin_members WHERE user_id = ? OR LOWER(email) = ?',
+      [targetRow.id, String(targetRow.email || '').toLowerCase()]
+    );
+    if (member) {
+      return 'This account is registered as an administrator. Use "Admins & Role Governance" to change administrative access.';
+    }
+  } catch (err) {
+    // admin_members may not exist in a very old database; the role check above still applies.
+  }
+  return null;
+}
+
+/** Records an immutable audit entry for an administrative account action. */
+async function recordUserStatusAudit(entry: {
+  userId: string;
+  userEmail?: string | null;
+  action: 'suspend' | 'block' | 'activate' | 'delete';
+  previousStatus?: string | null;
+  newStatus?: string | null;
+  reason?: string | null;
+  performedBy?: string | null;
+  performedById?: string | null;
+  performedByRole?: string | null;
+}): Promise<void> {
+  try {
+    await SqlHelper.execute(
+      `INSERT INTO user_status_audit (
+        id, user_id, user_email, action, previous_status, new_status,
+        reason, performed_by, performed_by_id, performed_by_role, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        `usa_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`,
+        entry.userId,
+        entry.userEmail || null,
+        entry.action,
+        entry.previousStatus || null,
+        entry.newStatus || null,
+        entry.reason || null,
+        entry.performedBy || null,
+        entry.performedById || null,
+        entry.performedByRole || null,
+        new Date().toISOString(),
+      ]
+    );
+  } catch (err) {
+    // The action itself must never fail because the audit trail could not be written.
+    console.warn('[Admin User Management] Could not write status audit entry:', err);
+  }
+}
+
+/**
+ * Closes every realtime socket of a user. Called right after a suspend/block so
+ * the account stops receiving messages, presence updates and call signaling
+ * immediately instead of at the next socket revalidation tick.
+ */
+function disconnectUserRealtimeSockets(userId: string): void {
+  try {
+    const sockets = presenceSockets.get(userId);
+    // Captured before disconnecting: the server-side 'disconnect' handlers remove
+    // their socket from this same Set, so reading `sockets.size` afterwards would
+    // always report 0.
+    const socketCount = sockets?.size || 0;
+    if (socketCount === 0) return;
+    io.in(`user_${userId}`).disconnectSockets(true);
+    presenceSockets.delete(userId);
+    const lastSeen = new Date().toISOString();
+    presenceLastSeen.set(userId, lastSeen);
+    broadcastPresence(userId, false, lastSeen);
+    console.info(`[Admin User Management] Disconnected ${socketCount} realtime socket(s) of user ${userId}`);
+  } catch (err) {
+    console.warn('[Admin User Management] Could not disconnect realtime sockets:', err);
+  }
+}
+
+/** Deletes all session rows of a user and closes their live sockets. */
+async function terminateUserSessions(userId: string): Promise<number> {
+  const before = await SqlHelper.queryOne<{ count: number }>(
+    'SELECT COUNT(*) as count FROM sessions WHERE user_id = ?',
+    [userId]
+  );
+  await SqlHelper.execute('DELETE FROM sessions WHERE user_id = ?', [userId]);
+  disconnectUserRealtimeSockets(userId);
+  return Number(before?.count) || 0;
+}
+
+/** Admin list payload: the standard user row plus a summary of its profile. */
+function formatAdminManagedUser(row: any) {
+  const base = formatUserRow(row) || {};
+  const isAdminAccount =
+    String(row?.role || '').toUpperCase() === 'ADMIN' || isSuperAdminEmail(row?.email);
+  const photos = (() => {
+    try {
+      const parsed = typeof row?.profile_photos_json === 'string'
+        ? JSON.parse(row.profile_photos_json || '[]')
+        : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  return {
+    ...base,
+    isAdminAccount,
+    profile: row?.profile_id
+      ? {
+          id: row.profile_id,
+          name: row.profile_name || '',
+          username: row.profile_username || '',
+          city: row.profile_city || '',
+          country: row.profile_country || '',
+          gender: row.profile_gender || '',
+          age: Number(row.profile_age) || 0,
+          sourceType: row.profile_source_type || 'native',
+          photos,
+        }
+      : null,
+    lastActiveAt: row?.profile_last_active || null,
+  };
+}
+
+/**
+ * Hard-deletes every row owned by an account from SQLite.
+ *
+ * `payment_transactions` is deliberately NOT touched: billing records are the
+ * financial ledger and are retained for accounting/legal reconciliation (the same
+ * way a payment provider keeps its own ledger). `user_status_audit` is also kept,
+ * because it is the administrative accountability log for this very action.
+ *
+ * The work runs inside one SQLite transaction, so a failure leaves the account
+ * intact instead of half-deleted.
+ */
+async function deleteUserDataFromSqlite(
+  userId: string,
+  userEmail?: string | null
+): Promise<Record<string, number>> {
+  const deletedCounts: Record<string, number> = {};
+
+  await SqlHelper.transaction((sqliteDb) => {
+    const tableResult = sqliteDb.exec("SELECT name FROM sqlite_master WHERE type = 'table'");
+    const existingTables = new Set<string>(
+      (tableResult[0]?.values || []).map((row: any) => String(row[0]))
+    );
+
+    const deleteRows = (table: string, sql: string, params: any[]) => {
+      if (!existingTables.has(table)) return;
+      sqliteDb.run(sql, params);
+      const changes = sqliteDb.exec('SELECT changes() AS count');
+      deletedCounts[table] = Number(changes[0]?.values?.[0]?.[0]) || 0;
+    };
+
+    // Children first, then the profile and finally the account row itself.
+    deleteRows('messages', 'DELETE FROM messages WHERE sender_id = ? OR receiver_id = ?', [userId, userId]);
+    deleteRows('conversations', 'DELETE FROM conversations WHERE user_a_id = ? OR user_b_id = ?', [userId, userId]);
+    deleteRows('calls', 'DELETE FROM calls WHERE caller_id = ? OR receiver_id = ?', [userId, userId]);
+    deleteRows('likes', 'DELETE FROM likes WHERE sender_id = ? OR receiver_id = ?', [userId, userId]);
+    deleteRows('matches', 'DELETE FROM matches WHERE user_a_id = ? OR user_b_id = ?', [userId, userId]);
+    deleteRows('follows', 'DELETE FROM follows WHERE follower_id = ? OR following_id = ?', [userId, userId]);
+    deleteRows('blocks', 'DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?', [userId, userId]);
+    deleteRows('notifications', 'DELETE FROM notifications WHERE user_id = ?', [userId]);
+    deleteRows('push_tokens', 'DELETE FROM push_tokens WHERE user_id = ?', [userId]);
+    deleteRows('sessions', 'DELETE FROM sessions WHERE user_id = ?', [userId]);
+    deleteRows('attachments', 'DELETE FROM attachments WHERE user_id = ?', [userId]);
+    deleteRows('user_subscriptions', 'DELETE FROM user_subscriptions WHERE user_id = ?', [userId]);
+    deleteRows('reports', 'DELETE FROM reports WHERE reporter_id = ? OR reported_user_id = ?', [userId, userId]);
+    if (userEmail) {
+      deleteRows('password_reset_tokens', 'DELETE FROM password_reset_tokens WHERE LOWER(email) = ?', [userEmail.toLowerCase()]);
+    }
+    deleteRows('profiles', 'DELETE FROM profiles WHERE user_id = ?', [userId]);
+    deleteRows('users', 'DELETE FROM users WHERE id = ?', [userId]);
+  });
+
+  return deletedCounts;
+}
+
+// U1. Admin: List member accounts with their account status
+app.get('/api/admin/users', requirePermission('users'), async (req: any, res: any) => {
+  try {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    // A malformed/missing status never hides accounts: it simply means "no filter".
+    const statusFilter = normalizeStatusFilter(req.query.status);
+    const requestedLimit = Number(req.query.limit);
+    const limit = Math.min(
+      Math.max(Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.floor(requestedLimit) : 100, 1),
+      500
+    );
+    const requestedOffset = Number(req.query.offset);
+    const offset = Number.isFinite(requestedOffset) && requestedOffset > 0 ? Math.floor(requestedOffset) : 0;
+    const currentAdminId = (req as any).user?.id;
+
+    // One read-only join: the account row plus a summary of its profile. No
+    // existing query (discovery, chat, matches, presence) is modified.
+    const rows = await SqlHelper.queryAll<any>(
+      `SELECT u.*,
+              p.id AS profile_id,
+              p.name AS profile_name,
+              p.username AS profile_username,
+              p.city AS profile_city,
+              p.country AS profile_country,
+              p.gender AS profile_gender,
+              p.age AS profile_age,
+              p.source_type AS profile_source_type,
+              p.photos_json AS profile_photos_json,
+              p.last_active AS profile_last_active
+       FROM users u
+       LEFT JOIN profiles p ON p.user_id = u.id
+       ORDER BY u.created_at DESC`
+    );
+
+    const allUsers = rows.map((row) => ({
+      ...formatAdminManagedUser(row),
+      isSelf: Boolean(currentAdminId && row.id === currentAdminId),
+    }));
+
+    const stats = {
+      total: allUsers.length,
+      active: allUsers.filter((u) => u.accountStatus === 'active').length,
+      suspended: allUsers.filter((u) => u.accountStatus === 'suspended').length,
+      blocked: allUsers.filter((u) => u.accountStatus === 'blocked').length,
+    };
+
+    const filtered = allUsers.filter((user) => {
+      if (statusFilter && user.accountStatus !== statusFilter) {
+        return false;
+      }
+      if (!search) return true;
+      const haystack = [
+        user.email,
+        user.id,
+        user.profile?.name,
+        user.profile?.username,
+        user.profile?.city,
+        user.profile?.country,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(search);
+    });
+
+    res.json({
+      success: true,
+      users: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+      stats,
+      limit,
+      offset,
+    });
+  } catch (err: any) {
+    console.error('[Admin User Management] List error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to retrieve user accounts.' });
+  }
+});
+
+// U2. Admin: Suspend (temporarily lock) an account
+app.post('/api/admin/users/:userId/suspend', requirePermission('users'), async (req: any, res: any) => {
+  try {
+    const actor = (req as any).user;
+    const target = await loadUserAccountRow(req.params.userId);
+    const denial = await assertUserManagementTargetAllowed(actor, target);
+    if (denial) {
+      return res.status(target ? 403 : 404).json({ error: denial });
+    }
+
+    const body = req.body || {};
+    const days = clampSuspensionDays(body.days ?? body.durationDays ?? DEFAULT_SUSPEND_DAYS);
+    const reason = normalizeStatusReason(body.reason) || `Suspended for ${days} day(s) by an administrator`;
+    const previousStatus = resolveEffectiveAccountStatus(target);
+    const now = new Date().toISOString();
+    const suspendedUntil = resolveSuspensionEnd(days);
+
+    await SqlHelper.execute(
+      `UPDATE users
+       SET account_status = 'suspended', suspended_until = ?, status_reason = ?,
+           status_updated_at = ?, status_updated_by = ?, is_banned = 1, updated_at = ?
+       WHERE id = ?`,
+      [suspendedUntil, reason, now, actor?.email || 'admin', now, target.id]
+    );
+
+    const sessionsRevoked = await terminateUserSessions(target.id);
+    await recordUserStatusAudit({
+      userId: target.id,
+      userEmail: target.email,
+      action: 'suspend',
+      previousStatus,
+      newStatus: 'suspended',
+      reason,
+      performedBy: actor?.email,
+      performedById: actor?.id,
+      performedByRole: actor?.role,
+    });
+    await syncSingleUser(target.id).catch(() => {});
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [target.id]);
+    console.log(`[Admin User Management] ${actor?.email || 'admin'} suspended ${target.email} until ${suspendedUntil}`);
+
+    res.json({
+      success: true,
+      message: `${target.email} has been suspended until ${new Date(suspendedUntil).toUTCString()}.`,
+      sessionsRevoked,
+      user: formatAdminManagedUser(updated),
+    });
+  } catch (err: any) {
+    console.error('[Admin User Management] Suspend error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to suspend the account.' });
+  }
+});
+
+// U3. Admin: Block (permanently restrict) an account
+app.post('/api/admin/users/:userId/block', requirePermission('users'), async (req: any, res: any) => {
+  try {
+    const actor = (req as any).user;
+    const target = await loadUserAccountRow(req.params.userId);
+    const denial = await assertUserManagementTargetAllowed(actor, target);
+    if (denial) {
+      return res.status(target ? 403 : 404).json({ error: denial });
+    }
+
+    const body = req.body || {};
+    const reason = normalizeStatusReason(body.reason) || 'Blocked by an administrator';
+    const previousStatus = resolveEffectiveAccountStatus(target);
+    const now = new Date().toISOString();
+
+    await SqlHelper.execute(
+      `UPDATE users
+       SET account_status = 'blocked', suspended_until = NULL, status_reason = ?,
+           status_updated_at = ?, status_updated_by = ?, is_banned = 1, updated_at = ?
+       WHERE id = ?`,
+      [reason, now, actor?.email || 'admin', now, target.id]
+    );
+
+    const sessionsRevoked = await terminateUserSessions(target.id);
+    await recordUserStatusAudit({
+      userId: target.id,
+      userEmail: target.email,
+      action: 'block',
+      previousStatus,
+      newStatus: 'blocked',
+      reason,
+      performedBy: actor?.email,
+      performedById: actor?.id,
+      performedByRole: actor?.role,
+    });
+    await syncSingleUser(target.id).catch(() => {});
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [target.id]);
+    console.log(`[Admin User Management] ${actor?.email || 'admin'} blocked ${target.email}`);
+
+    res.json({
+      success: true,
+      message: `${target.email} has been blocked and can no longer sign in.`,
+      sessionsRevoked,
+      user: formatAdminManagedUser(updated),
+    });
+  } catch (err: any) {
+    console.error('[Admin User Management] Block error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to block the account.' });
+  }
+});
+
+// U4. Admin: Reactivate a suspended/blocked account
+app.post('/api/admin/users/:userId/activate', requirePermission('users'), async (req: any, res: any) => {
+  try {
+    const actor = (req as any).user;
+    const target = await loadUserAccountRow(req.params.userId);
+    const denial = await assertUserManagementTargetAllowed(actor, target);
+    if (denial) {
+      return res.status(target ? 403 : 404).json({ error: denial });
+    }
+
+    const previousStatus = resolveEffectiveAccountStatus(target);
+    if (previousStatus === 'active') {
+      return res.json({
+        success: true,
+        message: `${target.email} is already an active account.`,
+        sessionsRevoked: 0,
+        user: formatAdminManagedUser(target),
+      });
+    }
+
+    const body = req.body || {};
+    const reason = normalizeStatusReason(body.reason) || `Reactivated by ${actor?.email || 'an administrator'}`;
+    const now = new Date().toISOString();
+
+    await SqlHelper.execute(
+      `UPDATE users
+       SET account_status = 'active', suspended_until = NULL, status_reason = NULL,
+           status_updated_at = ?, status_updated_by = ?, is_banned = 0, updated_at = ?
+       WHERE id = ?`,
+      [now, actor?.email || 'admin', now, target.id]
+    );
+
+    await recordUserStatusAudit({
+      userId: target.id,
+      userEmail: target.email,
+      action: 'activate',
+      previousStatus,
+      newStatus: 'active',
+      reason,
+      performedBy: actor?.email,
+      performedById: actor?.id,
+      performedByRole: actor?.role,
+    });
+    await syncSingleUser(target.id).catch(() => {});
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM users WHERE id = ?', [target.id]);
+    console.log(`[Admin User Management] ${actor?.email || 'admin'} reactivated ${target.email}`);
+
+    res.json({
+      success: true,
+      message: `${target.email} has been reactivated and can sign in again.`,
+      sessionsRevoked: 0,
+      user: formatAdminManagedUser(updated),
+    });
+  } catch (err: any) {
+    console.error('[Admin User Management] Activate error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to reactivate the account.' });
+  }
+});
+
+// U5. Admin: Permanently delete an account (explicit confirmation required)
+app.delete('/api/admin/users/:userId', requirePermission('users'), async (req: any, res: any) => {
+  try {
+    const actor = (req as any).user;
+    const target = await loadUserAccountRow(req.params.userId);
+    const denial = await assertUserManagementTargetAllowed(actor, target);
+    if (denial) {
+      return res.status(target ? 403 : 404).json({ error: denial });
+    }
+
+    // Confirmation is enforced server-side as well: the Admin Panel asks the
+    // administrator to type the account email, and this route independently
+    // requires the "DELETE" phrase (or that same email) in the request body.
+    const body = req.body || {};
+    if (!isDeleteConfirmationValid({
+      confirm: body.confirm,
+      confirmation: body.confirmation,
+      confirmEmail: body.confirmEmail,
+      targetEmail: target.email,
+    })) {
+      return res.status(400).json({
+        error: `Permanent deletion requires an explicit confirmation. Send { "confirm": "${DELETE_CONFIRMATION_PHRASE}" } or the account email in "confirmEmail".`,
+        requiredConfirmation: DELETE_CONFIRMATION_PHRASE,
+      });
+    }
+
+    const reason = normalizeStatusReason(body.reason) || 'Permanently deleted by an administrator';
+    const previousStatus = resolveEffectiveAccountStatus(target);
+
+    // Close the account's sessions/sockets before the rows disappear.
+    const sessionsRevoked = await terminateUserSessions(target.id);
+
+    // SQLite is the live store: remove the account and every owned row, then mirror
+    // the removal to PostgreSQL so the startup sync cannot resurrect the account.
+    const deletedCounts = await deleteUserDataFromSqlite(target.id, target.email);
+    await deleteUserFromPostgres(target.id).catch((err: any) => {
+      console.warn('[Admin User Management] PostgreSQL mirror delete warning:', err?.message || err);
+    });
+
+    // Written after the delete, so the accountability record always survives.
+    await recordUserStatusAudit({
+      userId: target.id,
+      userEmail: target.email,
+      action: 'delete',
+      previousStatus,
+      newStatus: 'deleted',
+      reason,
+      performedBy: actor?.email,
+      performedById: actor?.id,
+      performedByRole: actor?.role,
+    });
+
+    console.log(
+      `[Admin User Management] ${actor?.email || 'admin'} permanently deleted ${target.email} (${target.id}); rows removed: ${JSON.stringify(deletedCounts)}`
+    );
+
+    res.json({
+      success: true,
+      message: `${target.email} has been permanently deleted.`,
+      deletedUser: { id: target.id, email: target.email },
+      sessionsRevoked,
+      deletedRows: deletedCounts,
+    });
+  } catch (err: any) {
+    console.error('[Admin User Management] Delete error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to delete the account.' });
+  }
+});
+
+// U6. Admin: Audit history of the account actions (suspend/block/activate/delete)
+app.get('/api/admin/users/:userId/status-history', requirePermission('users'), async (req: any, res: any) => {
+  try {
+    const target = await loadUserAccountRow(req.params.userId);
+    const userId = target?.id || String(req.params.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ error: 'A user id or email is required.' });
+    }
+
+    const entries = await SqlHelper.queryAll<any>(
+      `SELECT * FROM user_status_audit WHERE user_id = ? ORDER BY created_at DESC LIMIT ${ACCOUNT_ACTION_HISTORY_LIMIT}`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      userId,
+      history: (entries || []).map((row) => ({
+        id: row.id,
+        action: row.action,
+        previousStatus: row.previous_status || null,
+        newStatus: row.new_status || null,
+        reason: row.reason || '',
+        performedBy: row.performed_by || '',
+        performedByRole: row.performed_by_role || '',
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (err: any) {
+    console.error('[Admin User Management] History error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to retrieve the account action history.' });
+  }
+});
 
 // A1. Admin: Get All Subscription Plans (Active & Inactive)
 app.get('/api/admin/subscriptions/plans', requireAdmin, async (_req, res) => {
@@ -5499,11 +6149,13 @@ io.use(async (socket, next) => {
       console.warn(`[PRESENCE] AUTH FAILED socket=${socket.id}`);
       return next(new Error('Invalid or expired session'));
     }
-    const user = await SqlHelper.queryOne<{ id: string; is_banned: number }>(
-      'SELECT id, is_banned FROM users WHERE id = ?',
+    const user = await SqlHelper.queryOne<any>(
+      'SELECT id, is_banned, account_status, suspended_until FROM users WHERE id = ?',
       [session.user_id]
     );
-    if (!user || user.is_banned) {
+    // Restricted (suspended/blocked) accounts can never open a realtime socket,
+    // which keeps presence, chat and call signaling closed for them.
+    if (!user || isAccountAccessRestricted(user)) {
       console.warn(`[PRESENCE] AUTH FAILED socket=${socket.id}`);
       return next(new Error('Authentication required'));
     }

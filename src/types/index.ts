@@ -37,10 +37,63 @@ export interface User {
   isEmailVerified: boolean;
   isAgeVerified: boolean;
   isBanned: boolean;
+  /** Admin-managed account status: 'active' | 'suspended' | 'blocked'. */
+  accountStatus?: AccountStatus;
+  /** ISO date on which a temporary suspension ends (null = until reactivated). */
+  suspendedUntil?: string | null;
+  /** Reason recorded by the administrator for the current status. */
+  statusReason?: string;
+  statusUpdatedAt?: string | null;
+  statusUpdatedBy?: string | null;
   subscriptionTier: SubscriptionTier;
   subscriptionExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Account status assigned from the Admin Panel's User Management tab.
+ *  - 'active'    — normal account with full access.
+ *  - 'suspended' — temporarily locked; released automatically when it expires.
+ *  - 'blocked'   — restricted until an administrator reactivates it.
+ */
+export type AccountStatus = 'active' | 'suspended' | 'blocked';
+
+/** A member account as returned by GET /api/admin/users. */
+export interface AdminManagedUser extends User {
+  isAdminAccount: boolean;
+  isSelf: boolean;
+  lastActiveAt?: string | null;
+  profile: {
+    id: string;
+    name: string;
+    username?: string;
+    city?: string;
+    country?: string;
+    gender?: string;
+    age?: number;
+    sourceType?: SourceType;
+    photos?: string[];
+  } | null;
+}
+
+export interface AdminUserListStats {
+  total: number;
+  active: number;
+  suspended: number;
+  blocked: number;
+}
+
+/** One entry of the administrative account-action audit trail. */
+export interface AdminUserStatusHistoryEntry {
+  id: string;
+  action: 'suspend' | 'block' | 'activate' | 'delete';
+  previousStatus: AccountStatus | null;
+  newStatus: AccountStatus | string | null;
+  reason: string;
+  performedBy: string;
+  performedByRole?: string;
+  createdAt: string;
 }
 
 export interface ProfilePhoto {
