@@ -410,7 +410,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({
               <div className="flex items-center justify-between">
                 <label className="font-bold text-stone-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
                   <Camera className="w-4 h-4 text-rose-400" />
-                  COVER PHOTO BANNER (ফেসবুক-স্টাইল কভার ফটো)
+                  COVER PHOTO BANNER
                 </label>
                 <span className="text-[10px] text-rose-400 font-medium">Device Upload & Gallery</span>
               </div>
