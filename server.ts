@@ -5925,6 +5925,331 @@ app.put('/api/admin/legal/documents/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// ==========================================
+// ADS MANAGER: ADVERTISEMENTS & AFFILIATE ADS
+// ==========================================
+
+function formatAdRow(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    network: row.network || 'AliExpress',
+    adType: row.ad_type || 'affiliate_url',
+    codeOrUrl: row.code_or_url || '',
+    placement: row.placement || 'home',
+    deviceTarget: row.device_target || 'all',
+    status: row.status || 'active',
+    priority: Number(row.priority) || 1,
+    startDate: row.start_date || null,
+    endDate: row.end_date || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// Public: Get eligible active advertisements for a placement/device
+app.get('/api/ads/active', async (req, res) => {
+  try {
+    const placement = (req.query.placement as string || '').trim().toLowerCase();
+    const device = (req.query.device as string || '').trim().toLowerCase();
+    const now = new Date().toISOString();
+
+    let query = `
+      SELECT * FROM advertisements
+      WHERE status = 'active'
+        AND (start_date IS NULL OR start_date = '' OR start_date <= ?)
+        AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
+    `;
+    const params: any[] = [now, now];
+
+    if (placement) {
+      query += ` AND (LOWER(placement) = ? OR placement = 'all'`;
+      params.push(placement);
+
+      // If querying general home or feed, also match related placements
+      if (placement === 'home') {
+        query += ` OR LOWER(placement) = 'in_feed' OR LOWER(placement) = 'before_profiles' OR LOWER(placement) = 'after_profiles'`;
+      }
+      query += `)`;
+    }
+
+    if (device === 'mobile') {
+      query += ` AND (device_target = 'all' OR device_target = 'mobile') AND placement != 'desktop_only'`;
+    } else if (device === 'desktop') {
+      query += ` AND (device_target = 'all' OR device_target = 'desktop') AND placement != 'mobile_only'`;
+    }
+
+    query += ` ORDER BY priority ASC, created_at DESC`;
+
+    const rows = await SqlHelper.queryAll<any>(query, params);
+    const ads = rows.map(formatAdRow);
+    res.json({ success: true, ads });
+  } catch (err: any) {
+    console.error('[Get Active Ads Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve active advertisements' });
+  }
+});
+
+// Admin: Get all advertisements with search & filtering
+app.get('/api/admin/ads', requireAdmin, async (req, res) => {
+  try {
+    const search = ((req.query.search as string) || '').trim().toLowerCase();
+    const status = ((req.query.status as string) || '').trim().toLowerCase();
+    const network = ((req.query.network as string) || '').trim();
+    const placement = ((req.query.placement as string) || '').trim().toLowerCase();
+
+    let query = 'SELECT * FROM advertisements WHERE 1=1';
+    const params: any[] = [];
+
+    if (status && status !== 'all') {
+      query += ' AND LOWER(status) = ?';
+      params.push(status);
+    }
+
+    if (network && network !== 'all') {
+      query += ' AND network = ?';
+      params.push(network);
+    }
+
+    if (placement && placement !== 'all') {
+      query += ' AND LOWER(placement) = ?';
+      params.push(placement);
+    }
+
+    if (search) {
+      query += ' AND (LOWER(name) LIKE ? OR LOWER(network) LIKE ? OR LOWER(code_or_url) LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s);
+    }
+
+    query += ' ORDER BY priority ASC, created_at DESC';
+
+    const rows = await SqlHelper.queryAll<any>(query, params);
+    const ads = rows.map(formatAdRow);
+    res.json({ success: true, ads });
+  } catch (err: any) {
+    console.error('[Admin Get Ads Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve advertisements' });
+  }
+});
+
+// Admin: Get single advertisement by ID
+app.get('/api/admin/ads/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await SqlHelper.queryOne<any>('SELECT * FROM advertisements WHERE id = ?', [id]);
+    if (!row) {
+      return res.status(404).json({ error: 'Advertisement not found' });
+    }
+    res.json({ success: true, ad: formatAdRow(row) });
+  } catch (err: any) {
+    console.error('[Admin Get Single Ad Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve advertisement' });
+  }
+});
+
+// Admin: Create new advertisement
+app.post('/api/admin/ads', requireAdmin, async (req, res) => {
+  try {
+    const {
+      name,
+      network = 'AliExpress',
+      adType = 'affiliate_url',
+      codeOrUrl,
+      placement = 'home',
+      deviceTarget = 'all',
+      status = 'active',
+      priority = 1,
+      startDate,
+      endDate,
+    } = req.body || {};
+
+    const cleanName = (name || '').trim();
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Ad Name is required' });
+    }
+
+    const cleanCode = (codeOrUrl || '').trim();
+    if (!cleanCode) {
+      return res.status(400).json({ error: 'Ad Code or URL is required' });
+    }
+
+    // Validate date order if both are supplied
+    if (startDate && endDate) {
+      const sDate = new Date(startDate);
+      const eDate = new Date(endDate);
+      if (!isNaN(sDate.getTime()) && !isNaN(eDate.getTime()) && sDate > eDate) {
+        return res.status(400).json({ error: 'End Date cannot be before Start Date' });
+      }
+    }
+
+    const id = 'ad_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const now = new Date().toISOString();
+    const cleanPriority = Math.max(1, parseInt(String(priority), 10) || 1);
+
+    await SqlHelper.execute(
+      `INSERT INTO advertisements (
+        id, name, network, ad_type, code_or_url, placement,
+        device_target, status, priority, start_date, end_date,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        cleanName,
+        network,
+        adType,
+        cleanCode,
+        placement,
+        deviceTarget,
+        status === 'inactive' ? 'inactive' : 'active',
+        cleanPriority,
+        startDate || null,
+        endDate || null,
+        now,
+        now,
+      ]
+    );
+
+    const created = await SqlHelper.queryOne<any>('SELECT * FROM advertisements WHERE id = ?', [id]);
+    res.status(201).json({ success: true, ad: formatAdRow(created) });
+  } catch (err: any) {
+    console.error('[Admin Create Ad Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to create advertisement' });
+  }
+});
+
+// Admin: Update existing advertisement
+app.put('/api/admin/ads/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await SqlHelper.queryOne<any>('SELECT * FROM advertisements WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Advertisement not found' });
+    }
+
+    const {
+      name,
+      network,
+      adType,
+      codeOrUrl,
+      placement,
+      deviceTarget,
+      status,
+      priority,
+      startDate,
+      endDate,
+    } = req.body || {};
+
+    const cleanName = (name !== undefined ? name : existing.name).trim();
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Ad Name cannot be empty' });
+    }
+
+    const cleanCode = (codeOrUrl !== undefined ? codeOrUrl : existing.code_or_url).trim();
+    if (!cleanCode) {
+      return res.status(400).json({ error: 'Ad Code or URL cannot be empty' });
+    }
+
+    const finalStartDate = startDate !== undefined ? startDate : existing.start_date;
+    const finalEndDate = endDate !== undefined ? endDate : existing.end_date;
+
+    if (finalStartDate && finalEndDate) {
+      const sDate = new Date(finalStartDate);
+      const eDate = new Date(finalEndDate);
+      if (!isNaN(sDate.getTime()) && !isNaN(eDate.getTime()) && sDate > eDate) {
+        return res.status(400).json({ error: 'End Date cannot be before Start Date' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const cleanPriority = Math.max(
+      1,
+      parseInt(String(priority !== undefined ? priority : existing.priority), 10) || 1
+    );
+
+    await SqlHelper.execute(
+      `UPDATE advertisements SET
+        name = ?,
+        network = ?,
+        ad_type = ?,
+        code_or_url = ?,
+        placement = ?,
+        device_target = ?,
+        status = ?,
+        priority = ?,
+        start_date = ?,
+        end_date = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        cleanName,
+        network !== undefined ? network : existing.network,
+        adType !== undefined ? adType : existing.ad_type,
+        cleanCode,
+        placement !== undefined ? placement : existing.placement,
+        deviceTarget !== undefined ? deviceTarget : existing.device_target,
+        status !== undefined ? status : existing.status,
+        cleanPriority,
+        finalStartDate || null,
+        finalEndDate || null,
+        now,
+        id,
+      ]
+    );
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM advertisements WHERE id = ?', [id]);
+    res.json({ success: true, ad: formatAdRow(updated) });
+  } catch (err: any) {
+    console.error('[Admin Update Ad Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to update advertisement' });
+  }
+});
+
+// Admin: Toggle or update advertisement status
+app.patch('/api/admin/ads/:id/status', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await SqlHelper.queryOne<any>('SELECT * FROM advertisements WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Advertisement not found' });
+    }
+
+    const targetStatus = req.body?.status
+      ? req.body.status
+      : (existing.status === 'active' ? 'inactive' : 'active');
+
+    const now = new Date().toISOString();
+    await SqlHelper.execute(
+      'UPDATE advertisements SET status = ?, updated_at = ? WHERE id = ?',
+      [targetStatus, now, id]
+    );
+
+    const updated = await SqlHelper.queryOne<any>('SELECT * FROM advertisements WHERE id = ?', [id]);
+    res.json({ success: true, ad: formatAdRow(updated) });
+  } catch (err: any) {
+    console.error('[Admin Toggle Ad Status Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to update ad status' });
+  }
+});
+
+// Admin: Delete advertisement
+app.delete('/api/admin/ads/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await SqlHelper.queryOne<any>('SELECT id FROM advertisements WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Advertisement not found' });
+    }
+
+    await SqlHelper.execute('DELETE FROM advertisements WHERE id = ?', [id]);
+    res.json({ success: true, deletedId: id });
+  } catch (err: any) {
+    console.error('[Admin Delete Ad Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete advertisement' });
+  }
+});
+
 // 10. Reports & Safety
 app.post('/api/reports', async (req, res) => {
   const user = (req as any).user;

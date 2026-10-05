@@ -1,5 +1,5 @@
 // API Service Layer with Token-Based Session Storage
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import {
   Profile,
   User,
@@ -23,6 +23,7 @@ import {
   AdminUserStatusHistoryEntry,
   BoostPackage,
   LegalDocument,
+  Advertisement,
 } from '../types';
 import { safeStorage } from '../utils/storage';
 import { FALLBACK_PROFILES } from '../data/fallbackProfiles';
@@ -232,6 +233,44 @@ async function authFetch(
     const timeoutId = window.setTimeout(() => controller.abort(), ms);
     try {
       return await fetch(url, { ...init, headers, signal: controller.signal });
+    } catch (fetchErr) {
+      // If standard WebView fetch fails on native Android (e.g. CORS or WebView sandbox),
+      // execute directly via native CapacitorHttp to bypass WebView CORS restrictions.
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const method = (init?.method || 'GET').toUpperCase();
+          const headersObj: Record<string, string> = {};
+          headers.forEach((val, key) => { headersObj[key] = val; });
+
+          let data = init?.body;
+          if (typeof data === 'string') {
+            try {
+              data = JSON.parse(data);
+            } catch {}
+          }
+
+          const nativeRes = await CapacitorHttp.request({
+            url,
+            method,
+            headers: headersObj,
+            data,
+            connectTimeout: ms,
+            readTimeout: ms,
+          });
+
+          const responseBody = typeof nativeRes.data === 'string'
+            ? nativeRes.data
+            : JSON.stringify(nativeRes.data ?? '');
+
+          return new Response(responseBody, {
+            status: nativeRes.status,
+            headers: nativeRes.headers as HeadersInit,
+          });
+        } catch (nativeErr) {
+          console.warn('[authFetch] Native CapacitorHttp fallback failed:', nativeErr);
+        }
+      }
+      throw fetchErr;
     } finally {
       window.clearTimeout(timeoutId);
     }
@@ -1262,5 +1301,80 @@ export const api = {
       success: true,
       message: 'Support request received. Our support team has been notified.',
     };
+  },
+
+  // Advertisements & Affiliate Ads
+  async getActiveAds(placement?: string, device?: string): Promise<{ success: boolean; ads: Advertisement[] }> {
+    const params = new URLSearchParams();
+    if (placement) params.set('placement', placement);
+    if (device) params.set('device', device);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await authFetch(`/api/ads/active${query}`);
+    return res.json();
+  },
+
+  async getAdminAds(filters?: {
+    search?: string;
+    status?: string;
+    network?: string;
+    placement?: string;
+  }): Promise<{ success: boolean; ads: Advertisement[] }> {
+    const params = new URLSearchParams();
+    if (filters?.search) params.set('search', filters.search);
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.network) params.set('network', filters.network);
+    if (filters?.placement) params.set('placement', filters.placement);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await authFetch(`/api/admin/ads${query}`);
+    return res.json();
+  },
+
+  async getAdminAd(id: string): Promise<{ success: boolean; ad: Advertisement }> {
+    const res = await authFetch(`/api/admin/ads/${id}`);
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to fetch advertisement');
+    return result;
+  },
+
+  async adminCreateAd(data: Partial<Advertisement>): Promise<{ success: boolean; ad: Advertisement }> {
+    const res = await authFetch('/api/admin/ads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to create advertisement');
+    return result;
+  },
+
+  async adminUpdateAd(id: string, data: Partial<Advertisement>): Promise<{ success: boolean; ad: Advertisement }> {
+    const res = await authFetch(`/api/admin/ads/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to update advertisement');
+    return result;
+  },
+
+  async adminToggleAdStatus(id: string, status?: string): Promise<{ success: boolean; ad: Advertisement }> {
+    const res = await authFetch(`/api/admin/ads/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to update ad status');
+    return result;
+  },
+
+  async adminDeleteAd(id: string): Promise<{ success: boolean; deletedId: string }> {
+    const res = await authFetch(`/api/admin/ads/${id}`, {
+      method: 'DELETE',
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to delete advertisement');
+    return result;
   },
 };

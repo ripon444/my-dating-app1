@@ -345,3 +345,25 @@ export const paymentSettings = pgTable('payment_settings', {
   payoutCurrency: text('payout_currency').default('USDT'),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
+
+// 17. Advertisements Table (Admin Ads Manager for affiliate/network ads)
+export const advertisements = pgTable('advertisements', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  network: text('network').default('AliExpress').notNull(),
+  adType: text('ad_type').default('affiliate_url').notNull(),
+  codeOrUrl: text('code_or_url').notNull(),
+  placement: text('placement').default('home').notNull(),
+  deviceTarget: text('device_target').default('all').notNull(),
+  status: text('status').default('active').notNull(),
+  priority: integer('priority').default(1).notNull(),
+  startDate: text('start_date'),
+  endDate: text('end_date'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  index('idx_ads_status').on(table.status),
+  index('idx_ads_placement').on(table.placement),
+  index('idx_ads_priority').on(table.priority),
+]);
+

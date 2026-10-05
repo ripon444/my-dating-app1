@@ -439,6 +439,22 @@ function initTables(db: Database) {
       last_updated_by TEXT DEFAULT 'Administrator',
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS advertisements (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      network TEXT NOT NULL DEFAULT 'AliExpress',
+      ad_type TEXT NOT NULL DEFAULT 'affiliate_url',
+      code_or_url TEXT NOT NULL,
+      placement TEXT NOT NULL DEFAULT 'home',
+      device_target TEXT NOT NULL DEFAULT 'all',
+      status TEXT NOT NULL DEFAULT 'active',
+      priority INTEGER NOT NULL DEFAULT 1,
+      start_date TEXT,
+      end_date TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Run safe schema migrations for existing databases
@@ -876,6 +892,21 @@ function initTables(db: Database) {
         content TEXT NOT NULL,
         version TEXT DEFAULT '1.0',
         last_updated_by TEXT DEFAULT 'Administrator',
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS advertisements (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        network TEXT NOT NULL DEFAULT 'AliExpress',
+        ad_type TEXT NOT NULL DEFAULT 'affiliate_url',
+        code_or_url TEXT NOT NULL,
+        placement TEXT NOT NULL DEFAULT 'home',
+        device_target TEXT NOT NULL DEFAULT 'all',
+        status TEXT NOT NULL DEFAULT 'active',
+        priority INTEGER NOT NULL DEFAULT 1,
+        start_date TEXT,
+        end_date TEXT,
+        created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
     `);

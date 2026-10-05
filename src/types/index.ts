@@ -545,7 +545,8 @@ export type AdminPermission =
   | 'settings' 
   | 'admins'
   | 'boosts'
-  | 'legal';
+  | 'legal'
+  | 'ads';
 
 export interface AdminMember {
   id: string;
@@ -586,4 +587,42 @@ export interface LegalDocument {
   last_updated_by?: string;
   updated_at?: string;
 }
+
+// Advertisements & Affiliate Ads Manager
+export type AdNetwork = 'AliExpress' | 'Google' | 'Other Affiliate Network' | 'Custom';
+
+export type AdType = 'affiliate_url' | 'html' | 'javascript' | 'banner' | 'custom';
+
+export type AdPlacement = 
+  | 'home' 
+  | 'profile' 
+  | 'messages' 
+  | 'footer' 
+  | 'top_banner' 
+  | 'in_feed' 
+  | 'before_profiles' 
+  | 'after_profiles' 
+  | 'mobile_only' 
+  | 'desktop_only';
+
+export type AdDeviceTarget = 'all' | 'mobile' | 'desktop';
+
+export type AdStatus = 'active' | 'inactive';
+
+export interface Advertisement {
+  id: string;
+  name: string;
+  network: AdNetwork;
+  adType: AdType;
+  codeOrUrl: string;
+  placement: AdPlacement;
+  deviceTarget: AdDeviceTarget;
+  status: AdStatus;
+  priority: number;
+  startDate?: string | null;
+  endDate?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 
