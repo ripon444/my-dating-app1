@@ -42,6 +42,7 @@ import { PartnerDisclosureModal } from './components/PartnerDisclosureModal';
 import { LegalModal } from './components/LegalModal';
 import { UserSearchModal } from './components/UserSearchModal';
 import { PullToRefresh } from './components/PullToRefresh';
+import { AdDisplay } from './components/AdDisplay';
 
 // Code-split / Lazy-loaded heavy and non-critical components
 const CallOverlay = lazy(() => import('./components/CallOverlay').then((m) => ({ default: m.CallOverlay })));
@@ -1541,6 +1542,11 @@ function MainApp() {
         {/* Content View Container */}
         <main ref={mainScrollRef} className="flex-1 w-full px-2.5 sm:px-4 md:px-6 lg:px-8 py-2.5 sm:py-6 overflow-y-auto pb-20 md:pb-8">
           
+          {/* Top Banner Advertisement */}
+          {activeTab !== 'admin' && (
+            <AdDisplay placement="top_banner" className="mb-3 sm:mb-4 max-w-7xl mx-auto" />
+          )}
+
           {/* ========================================================================= */}
           {/* 1. DISCOVER TAB */}
           {/* ========================================================================= */}
@@ -1551,6 +1557,11 @@ function MainApp() {
               scrollRef={mainScrollRef}
             >
             <div className="space-y-3.5 sm:space-y-6 w-full">
+              {/* Home & Device Specific Ads */}
+              <AdDisplay placement="home" className="mb-2" />
+              <AdDisplay placement="mobile_only" className="mb-2 block md:hidden" />
+              <AdDisplay placement="desktop_only" className="mb-2 hidden md:block" />
+
               {/* Discover | Matches tabs: Matches reuses existing Matches view */}
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1659,6 +1670,9 @@ function MainApp() {
                 </div>
               </div>
 
+              {/* Before Profile List Ad */}
+              <AdDisplay placement="before_profiles" className="my-2" />
+
               {/* View Content: Swipe Deck or Grid */}
               {viewMode === 'swipe' ? (
                 <div className="flex items-center justify-center w-full min-h-[520px] sm:min-h-[660px]">
@@ -1735,6 +1749,9 @@ function MainApp() {
                   onResetFilters={handleResetAllFilters}
                 />
               )}
+
+              {/* After Profile List Ad */}
+              <AdDisplay placement="after_profiles" className="mt-4" />
 
             </div>
             </PullToRefresh>
@@ -2088,12 +2105,17 @@ function MainApp() {
                     )}
                   </div>
                 ) : (
-                  <div className="flex-1 bg-stone-900/40 rounded-3xl border border-stone-800 flex flex-col items-center justify-center text-center p-8 text-stone-500 space-y-2">
+                  <div className="flex-1 bg-stone-900/40 rounded-3xl border border-stone-800 flex flex-col items-center justify-center text-center p-8 text-stone-500 space-y-4">
                     <MessageCircle className="w-12 h-12 text-stone-700" />
-                    <h3 className="font-bold text-stone-300 text-sm">Select a Conversation</h3>
-                    <p className="text-xs text-stone-500 max-w-xs">
-                      Choose a match from the left to start sending messages and initiating voice/video calls.
-                    </p>
+                    <div>
+                      <h3 className="font-bold text-stone-300 text-sm">Select a Conversation</h3>
+                      <p className="text-xs text-stone-500 max-w-xs mt-1">
+                        Choose a match from the left to start sending messages and initiating voice/video calls.
+                      </p>
+                    </div>
+                    <div className="w-full max-w-md pt-2">
+                      <AdDisplay placement="messages" />
+                    </div>
                   </div>
                 )}
               </div>
@@ -2140,6 +2162,10 @@ function MainApp() {
                     initialSection={profileSection ? `${profileSection}#${profileSectionNonce}` : null}
                   />
                 )}
+                {/* Profile View Ad Placement */}
+                <div className="mt-6 max-w-4xl mx-auto">
+                  <AdDisplay placement="profile" />
+                </div>
               </Suspense>
             ) : (
               <div className="max-w-md mx-auto my-16 p-8 rounded-3xl bg-stone-900/90 border border-stone-800 text-center space-y-5 shadow-2xl">
@@ -2174,6 +2200,11 @@ function MainApp() {
             }>
               <AdminView />
             </Suspense>
+          )}
+
+          {/* Footer Advertisement */}
+          {activeTab !== 'admin' && (
+            <AdDisplay placement="footer" className="mt-8 mb-4 max-w-5xl mx-auto" />
           )}
 
         </main>

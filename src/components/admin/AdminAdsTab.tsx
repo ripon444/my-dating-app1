@@ -67,7 +67,11 @@ const DEVICE_TARGET_OPTIONS: { value: AdDeviceTarget; label: string }[] = [
   { value: 'desktop', label: 'Desktop Only' }
 ];
 
-export const AdminAdsTab: React.FC = () => {
+interface AdminAdsTabProps {
+  onSuccessMessage?: (msg: string) => void;
+}
+
+export const AdminAdsTab: React.FC<AdminAdsTabProps> = ({ onSuccessMessage }) => {
   const [ads, setAds] = useState<Advertisement[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
@@ -206,10 +210,14 @@ export const AdminAdsTab: React.FC = () => {
 
       if (editingAd) {
         await api.adminUpdateAd(editingAd.id, payload);
-        setSuccessMsg(`Advertisement "${formName}" updated successfully`);
+        const msg = `Advertisement "${formName}" updated successfully`;
+        setSuccessMsg(msg);
+        onSuccessMessage?.(msg);
       } else {
         await api.adminCreateAd(payload);
-        setSuccessMsg(`Advertisement "${formName}" created and published`);
+        const msg = `Advertisement "${formName}" created and published`;
+        setSuccessMsg(msg);
+        onSuccessMessage?.(msg);
       }
 
       setIsFormOpen(false);
@@ -226,7 +234,9 @@ export const AdminAdsTab: React.FC = () => {
     try {
       const nextStatus = ad.status === 'active' ? 'inactive' : 'active';
       await api.adminToggleAdStatus(ad.id, nextStatus);
-      setSuccessMsg(`Advertisement "${ad.name}" marked as ${nextStatus}`);
+      const msg = `Advertisement "${ad.name}" marked as ${nextStatus}`;
+      setSuccessMsg(msg);
+      onSuccessMessage?.(msg);
       setAds(prev => prev.map(a => a.id === ad.id ? { ...a, status: nextStatus } : a));
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to update ad status');
@@ -239,7 +249,9 @@ export const AdminAdsTab: React.FC = () => {
     try {
       setIsDeleting(true);
       await api.adminDeleteAd(adToDelete.id);
-      setSuccessMsg(`Advertisement "${adToDelete.name}" deleted successfully`);
+      const msg = `Advertisement "${adToDelete.name}" deleted successfully`;
+      setSuccessMsg(msg);
+      onSuccessMessage?.(msg);
       setAds(prev => prev.filter(a => a.id !== adToDelete.id));
       setAdToDelete(null);
     } catch (err: any) {

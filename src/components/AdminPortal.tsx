@@ -33,7 +33,8 @@ import {
   Crown,
   Coins,
   Zap,
-  FileText
+  FileText,
+  Megaphone
 } from 'lucide-react';
 import { AdminAnalytics, ExternalProvider, ExternalSyncLog, Report, User, Profile } from '../types';
 import { api, getStoredToken, setStoredToken } from '../services/api';
@@ -46,6 +47,7 @@ import { AdminLegalDocumentsTab } from './admin/AdminLegalDocumentsTab';
 import { AdminUserSubscriptionModal } from './admin/AdminUserSubscriptionModal';
 import { AdminMembersTab } from './admin/AdminMembersTab';
 import { AdminUserManagementTab } from './admin/AdminUserManagementTab';
+import { AdminAdsTab } from './admin/AdminAdsTab';
 import { AdminPermission } from '../types';
 
 interface AdminPortalProps {
@@ -68,7 +70,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
   const [logoutMessage, setLogoutMessage] = useState('');
 
   // Admin Dashboard State
-  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'boosts' | 'payments' | 'users' | 'user_management' | 'providers' | 'moderation' | 'logs' | 'settings' | 'legal' | 'admins'>('kpi');
+  const [activeTab, setActiveTab] = useState<'kpi' | 'subscriptions' | 'boosts' | 'payments' | 'users' | 'user_management' | 'providers' | 'moderation' | 'logs' | 'settings' | 'legal' | 'ads' | 'admins'>('kpi');
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [providers, setProviders] = useState<ExternalProvider[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
@@ -79,7 +81,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
 
   // Admin Role & Permission State
   const [adminPermissions, setAdminPermissions] = useState<AdminPermission[]>([
-    'kpi', 'subscriptions', 'boosts', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings', 'legal', 'admins'
+    'kpi', 'subscriptions', 'boosts', 'payments', 'users', 'moderation', 'providers', 'logs', 'settings', 'legal', 'ads', 'admins'
   ]);
   const [adminRole, setAdminRole] = useState<string>('SUPER_ADMIN');
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(true);
@@ -540,6 +542,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
             { id: 'logs', label: 'Sync Audit Logs', icon: Clock, perm: 'logs' },
             { id: 'settings', label: 'System Configuration', icon: Settings, perm: 'settings' },
             { id: 'legal', label: 'Privacy & Terms Editor', icon: FileText, perm: 'legal' },
+            { id: 'ads', label: 'Ads Manager', icon: Megaphone, perm: 'ads' },
             { id: 'admins', label: 'Admins & Role Governance', icon: ShieldCheck, perm: 'admins' },
           ]
             .filter((tab) => isSuperAdmin || adminPermissions.includes(tab.perm as AdminPermission))
@@ -1182,6 +1185,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToSite }) => {
         {/* ------------------------------------------------------------- */}
         {activeTab === 'legal' && (
           <AdminLegalDocumentsTab
+            onSuccessMessage={(msg) => {
+              setActionSuccessMsg(msg);
+              setTimeout(() => setActionSuccessMsg(''), 4000);
+            }}
+          />
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: ADS & AFFILIATE MANAGER */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'ads' && (
+          <AdminAdsTab
             onSuccessMessage={(msg) => {
               setActionSuccessMsg(msg);
               setTimeout(() => setActionSuccessMsg(''), 4000);

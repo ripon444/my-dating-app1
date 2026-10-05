@@ -18,6 +18,7 @@ import { Profile } from '../types';
 import { useTranslation } from '../i18n/LanguageContext';
 import { api } from '../services/api';
 import { usePresenceFor } from '../services/presence';
+import { AdDisplay } from './AdDisplay';
 
 interface DiscoveryGridProps {
   profiles: Profile[];
@@ -326,14 +327,20 @@ export const DiscoveryGrid: React.FC<DiscoveryGridProps> = ({
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5 w-full">
-      {profiles.map((profile) => (
-        <GridCardItem
-          key={profile.id}
-          profile={profile}
-          onLike={onLike}
-          onPass={onPass}
-          onViewDetails={onViewDetails}
-        />
+      {profiles.map((profile, index) => (
+        <React.Fragment key={profile.id}>
+          <GridCardItem
+            profile={profile}
+            onLike={onLike}
+            onPass={onPass}
+            onViewDetails={onViewDetails}
+          />
+          {index === 2 && (
+            <div className="col-span-1 sm:col-span-2 lg:col-span-3">
+              <AdDisplay placement="in_feed" />
+            </div>
+          )}
+        </React.Fragment>
       ))}
     </div>
   );
