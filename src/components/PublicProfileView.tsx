@@ -137,7 +137,27 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
   const [showShareModal, setShowShareModal] = useState(false);
   const [copiedDirectLink, setCopiedDirectLink] = useState(false);
 
+  // Auto-detected IP location for profile view if profile has no location set
+  const [detectedIpLoc, setDetectedIpLoc] = useState<{ city: string; country: string; region?: string } | null>(null);
+
   const isOwnProfile = isSelf;
+
+  // If user profile has no location saved, auto-detect location from IP
+  useEffect(() => {
+    if (profile && !profile.city && !profile.country) {
+      let isMounted = true;
+      api.getIpLocation().then((loc) => {
+        if (isMounted && (loc.city || loc.country)) {
+          setDetectedIpLoc(loc);
+        }
+      }).catch(() => {});
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      setDetectedIpLoc(null);
+    }
+  }, [profile?.city, profile?.country]);
 
   // Real-time socket listener for follower/following count updates
   useEffect(() => {
@@ -594,7 +614,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
               className="w-full h-full bg-gradient-to-br from-rose-600/20 via-neutral-900 to-neutral-950"
             />
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-transparent to-black/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-transparent to-black/30 pointer-events-none" />
 
           {/* Edit Cover Photo Button (Owner only) */}
           {isOwnProfile && (
@@ -604,7 +624,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                 setCustomCoverUrl(profile.cover_photo || '');
                 setShowCoverEditModal(true);
               }}
-              className="absolute top-3 right-3 sm:top-4 sm:right-4 bg-black/60 hover:bg-black/80 backdrop-blur-md text-white px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border border-white/20 shadow-md"
+              className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 bg-black/60 hover:bg-black/80 backdrop-blur-md text-white px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border border-white/20 shadow-md cursor-pointer"
             >
               <Camera className="w-3.5 h-3.5" />
               <span>Edit Cover Photo</span>
@@ -708,12 +728,17 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
 
                 {/* City & Country / Profession */}
                 <div className="flex items-center justify-center md:justify-start gap-3 text-xs md:text-sm text-neutral-400 flex-wrap">
-                  {(profile.city || profile.country) && (
+                  {(profile.city || profile.country) ? (
                     <span className="flex items-center gap-1">
                       <MapPin className="w-3.5 h-3.5 text-rose-400" />
                       {profile.city ? `${profile.city}, ` : ''}{profile.region ? `${profile.region}, ` : ''}{profile.country}
                     </span>
-                  )}
+                  ) : detectedIpLoc && (detectedIpLoc.city || detectedIpLoc.country) ? (
+                    <span className="flex items-center gap-1" title="Estimated from IP address">
+                      <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                      {detectedIpLoc.city ? `${detectedIpLoc.city}, ` : ''}{detectedIpLoc.region ? `${detectedIpLoc.region}, ` : ''}{detectedIpLoc.country}
+                    </span>
+                  ) : null}
                   {profile.profession && (
                     <span className="flex items-center gap-1">
                       <Briefcase className="w-3.5 h-3.5 text-neutral-500" />
@@ -1032,7 +1057,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                     </div>
                   )}
 
-                  {(profile.city || profile.country) && (
+                  {(profile.city || profile.country) ? (
                     <div className="flex items-start gap-3">
                       <MapPin className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                       <div>
@@ -1042,7 +1067,20 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
                         </div>
                       </div>
                     </div>
-                  )}
+                  ) : detectedIpLoc && (detectedIpLoc.city || detectedIpLoc.country) ? (
+                    <div className="flex items-start gap-3">
+                      <MapPin className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-neutral-500 font-medium flex items-center gap-1">
+                          <span>Location</span>
+                          <span className="text-[10px] text-cyan-400/80 font-normal">(Auto IP)</span>
+                        </div>
+                        <div className="font-semibold text-white">
+                          {detectedIpLoc.city ? `${detectedIpLoc.city}, ` : ''}{detectedIpLoc.region ? `${detectedIpLoc.region}, ` : ''}{detectedIpLoc.country}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {profile.education && (
                     <div className="flex items-start gap-3">
@@ -1397,7 +1435,7 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-bold text-white flex items-center gap-2 font-serif">
                   <Camera className="w-5 h-5 text-rose-500" />
-                  Change Cover Banner
+                  Cover Photo Banner
                 </h3>
                 <button
                   onClick={() => setShowCoverEditModal(false)}

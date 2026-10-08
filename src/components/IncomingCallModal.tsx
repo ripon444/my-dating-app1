@@ -158,8 +158,8 @@ export const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
     // Never fabricate a profile picture: no photo means an empty list, so the
     // avatar below renders a neutral initials state instead of a demo image.
     photos: [],
-    city: 'New York',
-    country: 'United States',
+    city: '',
+    country: '',
   };
 
   const isVideo = call.type === 'video';

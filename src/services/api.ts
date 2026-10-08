@@ -544,6 +544,23 @@ export const api = {
     return res.json();
   },
 
+  async getIpLocation(): Promise<{ city: string; country: string; region?: string }> {
+    try {
+      const res = await fetch('/api/ip-location');
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          city: data.city || '',
+          country: data.country || '',
+          region: data.region || '',
+        };
+      }
+    } catch (e) {
+      console.debug('[getIpLocation] error:', e);
+    }
+    return { city: '', country: '', region: '' };
+  },
+
   // Discovery
   async getDiscoverProfiles(filters?: Partial<DiscoveryFilters>): Promise<{ profiles: Profile[] }> {
     try {

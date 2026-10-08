@@ -1157,8 +1157,8 @@ app.post('/api/auth/register', async (req, res) => {
     // New accounts start with NO profile picture and NO default cover image.
     // Both stay empty until the member explicitly uploads/selects one; the UI
     // shows initials meanwhile. Never auto-assign a demo/fallback image URL here.
-    const userCountry = (country || 'United States').trim();
-    const userCity = (city || 'New York').trim();
+    const userCountry = (country || '').trim();
+    const userCity = (city || '').trim();
     const baseUsername = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'member';
     const uniqueUsername = `${baseUsername}_${uniqueHex.slice(0, 4)}`;
 
@@ -1172,7 +1172,7 @@ app.post('/api/auth/register', async (req, res) => {
         compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
         show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
       ) VALUES (
-        ?, ?, 'native', ?, ?, ?, ?, ?, ?, 'Downtown',
+        ?, ?, 'native', ?, ?, ?, ?, ?, ?, '',
         15, 'Hello! I just joined Lovemeetly to connect with genuine people worldwide.', ?, ?, '{}', '',
         ?, '["Travel", "Music", "Food", "Culture"]', '["English"]', 'Long-term relationship',
         92, 0, ?, 1, 0, 1, 1, 1, 1, 1, ?, ?
@@ -2222,7 +2222,7 @@ app.put('/api/profiles/me', async (req, res) => {
         compatibility_score, is_online, last_active, is_verified, is_boosted, is_visible,
         show_age, show_approx_location, allow_calls, allow_messages, created_at, updated_at
       ) VALUES (
-        ?, ?, 'native', ?, 25, '1999-01-01', 'FEMALE', 'Global', 'New York', 'Downtown',
+        ?, ?, 'native', ?, 25, '1999-01-01', 'FEMALE', '', '', '',
         15, '', '', ?, '{}', '', ?, '["Travel", "Music"]', '["English"]', 'Long-term relationship',
         90, 1, ?, 1, 0, 1, 1, 1, 1, 1, ?, ?
       )`,
@@ -2334,6 +2334,57 @@ app.put('/api/profiles/me', async (req, res) => {
 
   const updated = await SqlHelper.queryOne('SELECT * FROM profiles WHERE user_id = ? OR id = ?', [user.id, user.id]);
   res.json({ profile: formatProfileRow(updated) });
+});
+
+// Automatic IP-based Geolocation endpoint (returns detected city, country, region)
+app.get('/api/ip-location', async (req, res) => {
+  try {
+    // Detect client IP
+    const forwarded = req.headers['x-forwarded-for'];
+    let clientIp = '';
+    if (typeof forwarded === 'string') {
+      clientIp = forwarded.split(',')[0].trim();
+    } else if (Array.isArray(forwarded) && forwarded.length > 0) {
+      clientIp = forwarded[0].trim();
+    } else {
+      clientIp = req.socket?.remoteAddress || '';
+    }
+
+    // Strip IPv6 prefix if present
+    if (clientIp.startsWith('::ffff:')) {
+      clientIp = clientIp.substring(7);
+    }
+
+    const isLocal = !clientIp || clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost';
+    const queryIp = isLocal ? '' : clientIp;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    try {
+      const geoUrl = queryIp ? `http://ip-api.com/json/${queryIp}` : 'http://ip-api.com/json/';
+      const response = await fetch(geoUrl, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (response.ok) {
+        const data: any = await response.json();
+        if (data && data.status === 'success') {
+          return res.json({
+            city: data.city || '',
+            country: data.country || '',
+            region: data.regionName || data.region || '',
+            countryCode: data.countryCode || '',
+            ip: data.query || clientIp,
+          });
+        }
+      }
+    } catch {
+      clearTimeout(timeout);
+    }
+
+    return res.json({ city: '', country: '', region: '', ip: clientIp });
+  } catch (err: any) {
+    return res.json({ city: '', country: '', region: '', error: err?.message || 'Lookup failed' });
+  }
 });
 
 // 3. Discovery & Real SQL Search

@@ -8,7 +8,9 @@ import {
   Layers, 
   X,
   Sparkles,
-  Building
+  Building,
+  Navigation,
+  Loader2
 } from 'lucide-react';
 import { 
   WORLD_COUNTRIES, 
@@ -17,6 +19,7 @@ import {
   getStatesForCountry, 
   getCitiesForState 
 } from '../data/worldLocations';
+import { api } from '../services/api';
 
 interface LocationSelectorProps {
   country?: string;
@@ -34,7 +37,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
   region = '',
   onChange,
   label = 'Current City & Country',
-  placeholder = 'Type city name e.g. Gazipur, Dhaka, New York, Tokyo...',
+  placeholder = 'Type city name e.g. Gazipur, Dhaka, Tokyo...',
   className = '',
 }) => {
   // Facebook search state
@@ -43,15 +46,42 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<LocationItem[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isDetectingIp, setIsDetectingIp] = useState(false);
 
-  // Cascading state
-  const [selectedCountry, setSelectedCountry] = useState(country || 'Bangladesh');
-  const [selectedState, setSelectedState] = useState(region || 'Dhaka Division');
-  const [selectedCity, setSelectedCity] = useState(city || 'Gazipur');
+  // Cascading state - no hardcoded default country/city
+  const [selectedCountry, setSelectedCountry] = useState(country || '');
+  const [selectedState, setSelectedState] = useState(region || '');
+  const [selectedCity, setSelectedCity] = useState(city || '');
   const [availableStates, setAvailableStates] = useState<string[]>([]);
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [customCityInput, setCustomCityInput] = useState(city);
   const [showCascading, setShowCascading] = useState(false);
+
+  // Detect location via IP
+  const handleAutoDetectIpLocation = async () => {
+    setIsDetectingIp(true);
+    try {
+      const detected = await api.getIpLocation();
+      if (detected.city || detected.country) {
+        setSelectedCountry(detected.country || '');
+        setSelectedState(detected.region || '');
+        setSelectedCity(detected.city || '');
+        setCustomCityInput(detected.city || '');
+
+        const parts = [detected.city, detected.region, detected.country].filter(Boolean);
+        setSearchInput(parts.join(', '));
+        onChange({
+          country: detected.country || '',
+          city: detected.city || '',
+          region: detected.region || '',
+        });
+      }
+    } catch (err) {
+      console.debug('Failed to auto-detect IP location:', err);
+    } finally {
+      setIsDetectingIp(false);
+    }
+  };
 
   // Sync external props with internal state
   useEffect(() => {
@@ -185,7 +215,7 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
   return (
     <div className={`space-y-3.5 ${className}`} ref={containerRef}>
       {/* 1. Header with Facebook Pill Badge */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-1.5">
           <div className="w-5 h-5 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center">
             <Globe className="w-3.5 h-3.5" />
@@ -194,15 +224,27 @@ export const LocationSelector: React.FC<LocationSelectorProps> = ({
             {label}
           </label>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCascading(!showCascading)}
-          className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 bg-stone-900 px-2.5 py-1 rounded-lg border border-stone-800 transition cursor-pointer"
-        >
-          <Layers className="w-3 h-3" />
-          <span>{showCascading ? 'Hide Dropdowns' : 'Choose by Country / State'}</span>
-          <ChevronDown className={`w-3 h-3 transition-transform ${showCascading ? 'rotate-180' : ''}`} />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleAutoDetectIpLocation}
+            disabled={isDetectingIp}
+            title="Auto detect location from your IP address"
+            className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 bg-stone-900 px-2.5 py-1 rounded-lg border border-stone-800 hover:border-cyan-500/50 transition cursor-pointer disabled:opacity-60"
+          >
+            {isDetectingIp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Navigation className="w-3 h-3" />}
+            <span>{isDetectingIp ? 'Detecting...' : 'Auto IP Location'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCascading(!showCascading)}
+            className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 bg-stone-900 px-2.5 py-1 rounded-lg border border-stone-800 transition cursor-pointer"
+          >
+            <Layers className="w-3 h-3" />
+            <span>{showCascading ? 'Hide Dropdowns' : 'Choose by Country / State'}</span>
+            <ChevronDown className={`w-3 h-3 transition-transform ${showCascading ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* 2. FACEBOOK SMART SEARCH INPUT (Matches FB Profile UI) */}

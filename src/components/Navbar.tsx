@@ -262,7 +262,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center Quick Navigation (Desktop) with Facebook-style Home, Discover & Messages */}
+        {/* Center Quick Navigation (Desktop) with Facebook-style Home & Messages */}
         <nav className="hidden md:flex items-center gap-1 bg-stone-800/60 p-1 rounded-xl border border-stone-700/50">
           <button
             onClick={() => {
@@ -279,21 +279,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Home className="w-4 h-4" />
             <span>Home</span>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('discover');
-              setViewMode('grid');
-            }}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'discover'
-                ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
-                : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
-            }`}
-            title="Discover Worldwide"
-          >
-            <Compass className="w-4 h-4" />
-            <span>Discover</span>
           </button>
           <button
             onClick={() => setActiveTab('messages')}
