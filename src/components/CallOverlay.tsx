@@ -550,6 +550,7 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
       if (isCaller) {
         // Accepts can be delivered multiple times (REST + socket + room echoes).
         // ensureInitialOfferRef is idempotent per peer connection.
+        havePeerSignaledRef.current = true;
         ensureInitialOfferRef.current();
       }
     };
@@ -578,6 +579,15 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
     socket.on('call:ready', handlePeerReady);
     socket.on('call:peer-joined', handlePeerReady);
     socket.on('call:ended', handleCallEnded);
+
+    // Join Call Room via Socket immediately so caller and callee room membership
+    // is never delayed behind local camera/microphone media permission requests
+    console.log(`[WebRTC] Emitting call:join for room call_${call.id}`);
+    socket.emit('call:join', {
+      callId: call.id,
+      userId: myUserId,
+      isCaller,
+    });
 
     // F. Acquire Local Media (getUserMedia) with smooth, stable mobile & web constraints
     const initLocalMedia = async () => {
@@ -667,14 +677,6 @@ const CallOverlayComponent: React.FC<CallOverlayProps> = ({
           }
         });
       }
-
-      // Join Call Room via Socket
-      console.log(`[WebRTC] Emitting call:join for room call_${call.id}`);
-      socket.emit('call:join', {
-        callId: call.id,
-        userId: myUserId,
-        isCaller,
-      });
 
       // If Callee, notify Caller that Callee has camera/mic ready
       if (!isCaller) {

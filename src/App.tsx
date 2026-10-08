@@ -696,6 +696,15 @@ function MainApp() {
       }
     });
 
+    socket.on('call:accepted', (data: any) => {
+      setActiveCall((prev) =>
+        prev &&
+        (prev.id === data?.callId || prev.id === data?.call?.id || prev.id === data?.id)
+          ? { ...prev, status: 'accepted' }
+          : prev
+      );
+    });
+
     socket.on('call:rejected', (data: any) => {
       // Server emits the canonical `callId`; tolerate the legacy `id` shape.
       const rejectedCallId = data?.callId || data?.id;
@@ -1042,6 +1051,7 @@ function MainApp() {
       socket.off('connect_error');
       socket.off('match:created');
       socket.off('call:incoming');
+      socket.off('call:accepted');
       socket.off('call:rejected');
       socket.off('call:cancelled');
       socket.off('call:ended');
