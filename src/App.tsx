@@ -116,6 +116,47 @@ function getProfileTargetFromUrl(): string | null {
   return null;
 }
 
+// Helper function to extract current tab from URL pathname or query
+export function getTabFromUrl(): string {
+  if (typeof window === 'undefined') return 'home';
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  if (path === '/messages' || path.startsWith('/messages/')) return 'messages';
+  if (path === '/discover' || path.startsWith('/discover/')) return 'discover';
+  if (path === '/matches' || path.startsWith('/matches/')) return 'matches';
+  if (path === '/profile' && !getProfileTargetFromUrl()) return 'profile';
+  if (path === '/' || path === '/home' || path.startsWith('/home/')) return 'home';
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const qTab = params.get('tab')?.toLowerCase();
+    if (qTab === 'messages') return 'messages';
+    if (qTab === 'discover') return 'discover';
+    if (qTab === 'matches') return 'matches';
+    if (qTab === 'profile') return 'profile';
+    if (qTab === 'home') return 'home';
+  } catch {}
+
+  return 'home';
+}
+
+// Canonical URL pathname for a given tab
+export function getPathForTab(tab: string, section?: string | null): string {
+  switch (tab) {
+    case 'home':
+      return '/';
+    case 'messages':
+      return '/messages';
+    case 'discover':
+      return '/discover';
+    case 'matches':
+      return '/matches';
+    case 'profile':
+      return section ? `/profile?section=${encodeURIComponent(section)}` : '/profile';
+    default:
+      return '/';
+  }
+}
+
 function MainApp() {
   const { t } = useTranslation();
 
@@ -141,7 +182,10 @@ function MainApp() {
   // App States
   const [currentUser, setCurrentUser] = useState<User | null>(() => getStoredAuthSnapshot()?.user || null);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(() => getStoredAuthSnapshot()?.profile || null);
-  const [activeTab, setActiveTab] = useState<string>('discover');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (getProfileTargetFromUrl()) return 'home';
+    return getTabFromUrl();
+  });
   const [viewMode, setViewMode] = useState<'swipe' | 'grid'>('grid');
 
   // Discovery State
@@ -290,6 +334,23 @@ function MainApp() {
   const [profileSectionNonce, setProfileSectionNonce] = useState(0);
   const [selectedPublicUserId, setSelectedPublicUserId] = useState<string | null>(() => getProfileTargetFromUrl());
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
+
+  const navigateTab = useCallback((tab: string, replace = false) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined' && typeof window.history !== 'undefined') {
+      if (!getProfileTargetFromUrl() && !isAdminRoute) {
+        const targetPath = getPathForTab(tab, tab === 'profile' ? profileSection : null);
+        if (window.location.pathname !== targetPath) {
+          if (replace) {
+            window.history.replaceState({ tab }, '', targetPath);
+          } else {
+            window.history.pushState({ tab }, '', targetPath);
+          }
+        }
+      }
+    }
+  }, [isAdminRoute, profileSection]);
+
   const [notifications, setNotifications] = useState<any[]>([]);
   const presence = usePresence();
 
@@ -318,7 +379,8 @@ function MainApp() {
     setSelectedPublicProfile(null);
     if (typeof window !== 'undefined') {
       if (window.location.pathname.startsWith('/profile/') || window.location.pathname.startsWith('/@')) {
-        window.history.pushState({}, '', '/');
+        const backPath = getPathForTab(activeTab, activeTab === 'profile' ? profileSection : null);
+        window.history.pushState({}, '', backPath);
       }
     }
   };
@@ -353,7 +415,7 @@ function MainApp() {
       'help-support': 'help-support',
       help: 'help',
     };
-    setActiveTab('profile');
+    navigateTab('profile');
     setIsViewingFullProfile(false);
     setProfileSection(sectionMap[action]);
     // Bump nonce so selecting the same menu item re-triggers Hub scroll/load.
@@ -467,7 +529,7 @@ function MainApp() {
           isProfileMenuOpen ||
           isNotificationsOpen ||
           (activeTab === 'profile' && (isViewingFullProfile || profileSection)) ||
-          (activeTab !== 'discover' && activeTab !== 'home')
+          (activeTab !== 'home')
         );
       },
       goBack: () => {
@@ -484,8 +546,23 @@ function MainApp() {
           setProfileSection(null);
           return;
         }
-        setActiveTab('discover');
+        navigateTab('home');
         setViewMode('grid');
+      },
+      onUrlOpen: (url: string) => {
+        try {
+          const urlObj = new URL(url);
+          const path = urlObj.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+          if (path === '/messages' || path.startsWith('/messages/')) {
+            navigateTab('messages');
+          } else if (path === '/discover' || path.startsWith('/discover/')) {
+            navigateTab('discover');
+          } else if (path === '/' || path === '/home' || path.startsWith('/home/')) {
+            navigateTab('home');
+          } else if (path === '/matches' || path.startsWith('/matches/')) {
+            navigateTab('matches');
+          }
+        } catch {}
       },
     });
   }, [
@@ -507,10 +584,10 @@ function MainApp() {
     selectedPublicUserId,
     incomingCall,
     activeTab,
+    navigateTab,
   ]);
 
-  // Lightweight URL state sync for existing state navigation (no router).
-  // Best-effort replaceState only: preserves refresh + back behavior, never adds history spam.
+  // Synchronize URL pathname with activeTab
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return;
     // Never rewrite shareable public-profile or admin routes.
@@ -518,19 +595,41 @@ function MainApp() {
     const path = window.location.pathname.toLowerCase();
     if (path === '/tanvir' || path === '/admin' || path.endsWith('/tanvir') || path.endsWith('/admin')) return;
     try {
-      const params = new URLSearchParams(window.location.search);
-      params.set('tab', activeTab);
-      if (activeTab === 'profile' && profileSection) {
-        params.set('section', profileSection);
-      } else {
-        params.delete('section');
+      const targetPath = getPathForTab(activeTab, activeTab === 'profile' ? profileSection : null);
+      if (window.location.pathname !== targetPath) {
+        window.history.replaceState({ tab: activeTab }, '', targetPath);
       }
-      const next = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-      window.history.replaceState({}, '', next);
     } catch {
       // URL sync is best-effort only; state navigation remains source of truth.
     }
   }, [activeTab, profileSection]);
+
+  // Handle browser back/forward and deep link navigation via popstate
+  useEffect(() => {
+    const handlePopState = () => {
+      // 1. Check if public profile URL
+      const profileTarget = getProfileTargetFromUrl();
+      if (profileTarget) {
+        setSelectedPublicUserId(profileTarget);
+      } else {
+        setSelectedPublicUserId(null);
+        setSelectedPublicProfile(null);
+      }
+
+      // 2. Check admin route
+      const path = window.location.pathname.toLowerCase();
+      const isAdmin = path === '/tanvir' || path === '/admin' || path.endsWith('/tanvir') || path.endsWith('/admin');
+      setIsAdminRoute(isAdmin);
+      if (isAdmin) return;
+
+      // 3. Update active tab from URL pathname
+      const nextTab = getTabFromUrl();
+      setActiveTab(nextTab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Initial Data Fetch - executed once on mount to avoid duplicate bursts
   const initialLoadDoneRef = useRef(false);
@@ -1461,7 +1560,7 @@ function MainApp() {
         user={currentUser}
         profile={currentProfile}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={navigateTab}
         viewMode={viewMode}
         setViewMode={setViewMode}
         searchQuery={searchQuery}
@@ -1483,7 +1582,7 @@ function MainApp() {
         onOpenHelpSupport={() => handleProfileMenuAction('help')}
         onResetHome={() => {
           setSelectedPublicUserId(null);
-          setActiveTab('discover');
+          navigateTab('home');
           setViewMode('grid');
           setSearchQuery('');
         }}
@@ -1498,13 +1597,13 @@ function MainApp() {
           setActiveTab={(tab) => {
             if (tab === 'calls') {
               setMessengerTab('calls');
-              setActiveTab('messages');
+              navigateTab('messages');
               return;
             }
             if (tab === 'messages') {
               setMessengerTab('chats');
             }
-            setActiveTab(tab);
+            navigateTab(tab);
             if (tab === 'profile') {
               setIsViewingFullProfile(false);
               setProfileSection(null);
@@ -1519,13 +1618,13 @@ function MainApp() {
           setViewMode={setViewMode}
           onGoHome={() => {
             setSelectedPublicUserId(null);
-            setActiveTab('discover');
+            navigateTab('home');
             setViewMode('grid');
             setSearchQuery('');
           }}
           isProfileMenuOpen={isProfileMenuOpen}
           onOpenProfileMenu={() => {
-            setActiveTab('profile');
+            navigateTab('profile');
             setIsViewingFullProfile(false);
             setProfileSection(null);
             setIsProfileMenuOpen(true);
@@ -1539,7 +1638,7 @@ function MainApp() {
             setIsNotificationsOpen(false);
             setIsProfileMenuOpen(false);
             setCurrentDeckIndex(0);
-            setActiveTab('discover');
+            navigateTab('discover');
             setViewMode('grid');
             setSearchQuery('');
           }}
@@ -1576,14 +1675,18 @@ function MainApp() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('discover')}
-                  className="px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow"
+                  onClick={() => navigateTab('discover')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeTab === 'discover'
+                      ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
+                      : 'bg-stone-900 text-stone-300 border border-stone-800 hover:text-white'
+                  }`}
                 >
                   Discover
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('matches')}
+                  onClick={() => navigateTab('matches')}
                   className="px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 bg-stone-900 text-stone-300 border border-stone-800 hover:text-white"
                 >
                   <Heart className="w-3.5 h-3.5 text-rose-400" />
@@ -1785,7 +1888,7 @@ function MainApp() {
                     Keep swiping and liking profiles on Discover. When someone likes you back, they will appear here!
                   </p>
                   <button
-                    onClick={() => setActiveTab('discover')}
+                    onClick={() => navigateTab('discover')}
                     className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 text-white font-bold text-xs shadow-lg shadow-rose-900/30"
                   >
                     Start Discovering
@@ -1842,7 +1945,7 @@ function MainApp() {
                             onClick={() => {
                               if (match.conversation_id) {
                                 setActiveConversationId(match.conversation_id);
-                                setActiveTab('messages');
+                                navigateTab('messages');
                               } else {
                                 handleStartChat(prof);
                               }
@@ -2242,7 +2345,7 @@ function MainApp() {
           if (convId) {
             setActiveConversationId(convId);
           }
-          setActiveTab('messages');
+          navigateTab('messages');
         }}
       />
 

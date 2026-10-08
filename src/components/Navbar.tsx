@@ -20,7 +20,8 @@ import {
   Bell,
   X,
   UserPlus,
-  HelpCircle
+  HelpCircle,
+  Compass
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/translations';
@@ -261,7 +262,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center Quick Navigation (Desktop) with Facebook-style Home button */}
+        {/* Center Quick Navigation (Desktop) with Facebook-style Home, Discover & Messages */}
         <nav className="hidden md:flex items-center gap-1 bg-stone-800/60 p-1 rounded-xl border border-stone-700/50">
           <button
             onClick={() => {
@@ -270,7 +271,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               if (onResetHome) onResetHome();
             }}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'home' || activeTab === 'discover'
+              activeTab === 'home'
                 ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
                 : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
             }`}
@@ -278,6 +279,21 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Home className="w-4 h-4" />
             <span>Home</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('discover');
+              setViewMode('grid');
+            }}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'discover'
+                ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow'
+                : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
+            }`}
+            title="Discover Worldwide"
+          >
+            <Compass className="w-4 h-4" />
+            <span>Discover</span>
           </button>
           <button
             onClick={() => setActiveTab('messages')}

@@ -7,6 +7,7 @@ export interface BackButtonHandlers {
   closeActiveModal: () => void;
   canGoBack: () => boolean;
   goBack: () => void;
+  onUrlOpen?: (url: string) => void;
 }
 
 let isInitialized = false;
@@ -121,6 +122,26 @@ export function initializeCapacitorApp(handlers: BackButtonHandlers) {
     });
   } catch (err) {
     console.debug('Back button listener error:', err);
+  }
+
+  // 3. Android Deep Linking / App URL Open Handling
+  try {
+    App.addListener('appUrlOpen', (event: { url: string }) => {
+      try {
+        if (currentHandlers?.onUrlOpen && event?.url) {
+          currentHandlers.onUrlOpen(event.url);
+        } else if (typeof window !== 'undefined' && event?.url) {
+          const urlObj = new URL(event.url);
+          const path = urlObj.pathname.toLowerCase();
+          window.history.pushState({}, '', path + (urlObj.search || ''));
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }
+      } catch (err) {
+        console.debug('appUrlOpen handler error:', err);
+      }
+    });
+  } catch (err) {
+    console.debug('appUrlOpen listener error:', err);
   }
 }
 

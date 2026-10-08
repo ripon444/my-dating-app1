@@ -186,6 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems = [
     { id: 'home', label: 'Home', icon: Home, badge: undefined },
+    { id: 'discover', label: 'Discover', icon: Compass, badge: undefined },
     { id: 'matches', label: t('matches'), icon: Heart, badge: matchesCount > 0 ? matchesCount : undefined },
     { id: 'messages', label: t('messages'), icon: MessageCircle, badge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined },
     { id: 'profile', label: t('profile'), icon: UserIcon, badge: undefined },
@@ -232,7 +233,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isMobileItemActive = (id: string) => {
     if (id === 'profile') return isProfileMenuOpen || activeTab === 'profile';
-    if (id === 'home' || id === 'discover') return (activeTab === 'home' || activeTab === 'discover') && !isSearchOpen && !isNotificationsOpen;
+    if (id === 'home') return activeTab === 'home' && !isSearchOpen && !isNotificationsOpen;
+    if (id === 'discover') return activeTab === 'discover' && !isSearchOpen && !isNotificationsOpen;
     if (id === 'search') return isSearchOpen;
     if (id === 'notifications') return isNotificationsOpen;
     if (id === 'messages') return activeTab === 'messages' && !isSearchOpen && !isNotificationsOpen;
@@ -244,7 +246,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     variant: 'desktop' | 'mobile'
   ) => {
     const Icon = item.icon;
-    const isActive = variant === 'mobile' ? isMobileItemActive(item.id) : activeTab === item.id || (item.id === 'home' && activeTab === 'discover');
+    const isActive = variant === 'mobile' ? isMobileItemActive(item.id) : activeTab === item.id;
     const isProfile = item.id === 'profile';
     const userAvatar = profile?.photos?.[0];
 
